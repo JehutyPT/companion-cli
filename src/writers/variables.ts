@@ -28,6 +28,12 @@ import type { Writer } from "../core/writer.ts";
  * `{description, defaultValue, persistCurrentValue, sortOrder}`. An existing
  * variable keeps its sortOrder; new ones are appended after the current
  * maximum in file order. Other variables are never touched.
+ *
+ * With `persistCurrentValue: true`, Companion stores the variable's current
+ * value in `defaultValue`. So when an existing row is already persisted and
+ * the file keeps `persist: true`, its stored `defaultValue` is kept; every
+ * other case (new variable, `persist: false`, or switching persist on) takes
+ * `default` from the file.
  */
 
 export type VariableValue = string | number | boolean;
@@ -139,33 +145,43 @@ export function parseVariables(fields: Fields): CustomVariable[] {
   });
 }
 
-/** Parses a stored row's JSON, tolerating Companion's NUMERIC-affinity `value` column. */
-function storedSortOrder(value: unknown): number | undefined {
+/** What the writer needs from an existing `custom_variables` row. */
+interface StoredVariable {
+  sortOrder: number | undefined;
+  /** The stored `defaultValue`, when the row is persisted and has one. */
+  persistedValue: { value: unknown } | undefined;
+}
+
+/** Reads a stored row's JSON, tolerating Companion's NUMERIC-affinity `value` column. */
+function readStored(value: unknown): StoredVariable {
   const parsed = parseStoredJson(value);
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    "sortOrder" in parsed &&
-    typeof parsed.sortOrder === "number"
-  ) {
-    return parsed.sortOrder;
+  if (!parsed || typeof parsed !== "object") {
+    return { sortOrder: undefined, persistedValue: undefined };
   }
-  return undefined;
+  const row = parsed as Record<string, unknown>;
+  const sortOrder = row["sortOrder"];
+  return {
+    sortOrder: typeof sortOrder === "number" ? sortOrder : undefined,
+    persistedValue:
+      row["persistCurrentValue"] === true && Object.hasOwn(row, "defaultValue")
+        ? { value: row["defaultValue"] }
+        : undefined,
+  };
 }
 
 export function writeVariables(
   db: DatabaseSync,
   variables: CustomVariable[],
 ): string {
-  const existing = new Map<string, number | undefined>();
+  const existing = new Map<string, StoredVariable>();
   for (const row of db
     .prepare("SELECT id, value FROM custom_variables")
     .all()) {
-    existing.set(String(row["id"]), storedSortOrder(row["value"]));
+    existing.set(String(row["id"]), readStored(row["value"]));
   }
-  const orders = [...existing.values()].filter(
-    (order): order is number => order !== undefined,
-  );
+  const orders = [...existing.values()]
+    .map((stored) => stored.sortOrder)
+    .filter((order): order is number => order !== undefined);
   let next = Math.max(-1, ...orders) + 1;
 
   const update = db.prepare(
@@ -177,14 +193,18 @@ export function writeVariables(
   let created = 0;
   let replaced = 0;
   for (const variable of variables) {
-    const kept = existing.get(variable.name);
+    const stored = existing.get(variable.name);
+    // Already persisted and staying persisted: keep Companion's current value.
+    const kept = variable.persistCurrentValue
+      ? stored?.persistedValue
+      : undefined;
     const value = JSON.stringify({
       description: variable.description,
-      defaultValue: variable.defaultValue,
+      defaultValue: kept ? kept.value : variable.defaultValue,
       persistCurrentValue: variable.persistCurrentValue,
-      sortOrder: kept ?? next++,
+      sortOrder: stored?.sortOrder ?? next++,
     });
-    if (existing.has(variable.name)) {
+    if (stored) {
       update.run(value, variable.name);
       replaced++;
     } else {

@@ -187,6 +187,81 @@ describe("apply variables: success", () => {
   });
 });
 
+describe("apply variables: persisted values", () => {
+  // Fixture: fx_label is persisted (stored "idle"); fx_counter is not (stored 0).
+  const PERSIST_YAML = `kind: variables
+variables:
+  - name: fx_label
+    default: fresh
+    description: New label description
+    persist: true
+  - name: fx_counter
+    default: 5
+    persist: true
+  - name: brand_new
+    default: start
+    persist: true
+`;
+
+  function applyFile(dbPath: string, file: string, backupRoot: string) {
+    const result = runCli(["apply", file, "--db", dbPath], { backupRoot });
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+  }
+
+  it("keeps a persisted variable's stored value, switches take the file default", () => {
+    const { dir, dbPath, backupRoot } = setup();
+    applyFile(dbPath, writeDescription(dir, PERSIST_YAML), backupRoot);
+
+    const vars = customVariables(dbPath);
+    assert.deepEqual(vars["fx_label"], {
+      description: "New label description",
+      defaultValue: "idle",
+      persistCurrentValue: true,
+      sortOrder: 1,
+    });
+    assert.deepEqual(vars["fx_counter"], {
+      description: "A custom variable",
+      defaultValue: 5,
+      persistCurrentValue: true,
+      sortOrder: 0,
+    });
+    assert.deepEqual(vars["brand_new"], {
+      description: "A custom variable",
+      defaultValue: "start",
+      persistCurrentValue: true,
+      sortOrder: 6,
+    });
+  });
+
+  it("a true-to-false switch takes the file default", () => {
+    const { dir, dbPath, backupRoot } = setup();
+    const yaml =
+      "kind: variables\nvariables:\n  - {name: fx_label, default: plain, persist: false}\n";
+    applyFile(dbPath, writeDescription(dir, yaml), backupRoot);
+    const label = customVariables(dbPath)["fx_label"] as Record<
+      string,
+      unknown
+    >;
+    assert.equal(label["defaultValue"], "plain");
+    assert.equal(label["persistCurrentValue"], false);
+  });
+
+  it("re-applying is idempotent", () => {
+    const { dir, dbPath, backupRoot } = setup();
+    const file = writeDescription(dir, PERSIST_YAML);
+    applyFile(dbPath, file, backupRoot);
+    const first = dumpDatabase(dbPath);
+    applyFile(dbPath, file, backupRoot);
+    assert.deepEqual(dumpDatabase(dbPath), first);
+    assert.equal(
+      (customVariables(dbPath)["fx_counter"] as Record<string, unknown>)[
+        "defaultValue"
+      ],
+      5,
+    );
+  });
+});
+
 describe("apply variables: invalid description files leave the database byte-identical", () => {
   const cases: Array<[string, string, RegExp]> = [
     ["missing kind", "variables: []\n", /kind: is required/],

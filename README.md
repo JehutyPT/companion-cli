@@ -53,7 +53,7 @@ variables:
 
 `apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Until live-install mode exists, `--db` is required and the install's default database is refused.
 
-Applying a variable replaces its whole definition. For a variable with `persist: true`, Companion keeps the last value in `defaultValue`, so re-applying the file resets that stored value to the file's `default`.
+Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
 
 ## Development
 
