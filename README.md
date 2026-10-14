@@ -186,6 +186,74 @@ They read `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` in the worki
 
 Press, rotate and variable commands use Companion's HTTP API (setting `http_api_enabled`, on by default). The surface commands use REST API v2, which must be enabled in Companion's settings and needs a key with the `read` scope. A press at an empty location, an unknown variable, a disabled API, a rejected key or an unreachable Companion exits 1 with one line on stderr. Callers pace presses: overlapping presses can lose increments. See [docs/companion-internals.md](docs/companion-internals.md#rest-api).
 
+### Example: the SKAARHOJ test page
+
+[`examples/skaarhoj-test-page/`](examples/skaarhoj-test-page/) holds the SKAARHOJ PTZ Extreme test page that the Python prototype wrote to page 20, as two description files: `variables.yaml` (12 `sk_*` custom variables) and `page.yaml` (47 buttons on page 99). `test/skaarhoj-test-page.test.ts` proves that applying them reproduces the prototype's output exactly, apart from generated ids and the page number.
+
+- **Order:** apply `variables.yaml` first; the page apply refuses buttons that name a custom variable that does not exist yet.
+- **Grid:** the install's grid must allow rows 0–3 and columns 0–16. On a smaller grid the page apply is refused before anything is written.
+- **Page 99 and its gap pages:** if the install has N < 98 pages, the page apply also creates pages N + 1 … 98, empty and named `PAGE` ([ADR 0004](docs/adr/0004-page-apply-creates-gap-pages.md)). They show up in every surface's page up/down cycle, and the tool does not remove them. If page 99 exists, its name and every control on it are replaced.
+
+To try it on a copy first, apply both files with `--db /path/to/copy/db.sqlite`.
+
+Applying to the local install (live-install mode) quits and restarts Companion once per file. Run these steps yourself from the repository root, after `npm install` and `npm run build`, invoking the CLI as in [Usage](#usage): `node dist/bin/companion-cli.js …`.
+
+1. **Pre-flight, in Companion's web UI** (do not open the database): check the grid size; note the current page count N and whether page 99 exists. Decide whether the 98 − N gap pages, or replacing an existing page 99, are acceptable. Check that `.env.local` in the directory you run the commands from holds `COMPANION_URL` and `COMPANION_API_KEY`.
+2. **Dry-run the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml --dry-run`. It writes nothing and does not touch Companion. Expect only the 12 `sk_*` rows in `custom_variables` to be added or replaced.
+3. **Apply the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml`. Blast radius: the 12 `sk_*` custom-variable definitions, which the prototype's existing page 20 also uses, and one Companion restart. Note the `backup:` path and the summary line.
+4. **Wait for Companion:** the tool does not wait for Companion to be ready after starting it. Repeat `node dist/bin/companion-cli.js variable get sk_presses` until it answers before going on.
+5. **Dry-run the page:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/page.yaml --dry-run`. Run it only now: before the variables are applied, it is refused for unknown custom variables. This is the go/no-go check, before anything is written: when page 99 does not exist, its last line must read `apply would report: page 99 "SKAARHOJ TEST": created; deleted 0 controls, wrote 47 controls; created <98 − N> empty pages: <N + 1>, …, 98`, with the count matching the 98 − N expected from step 1. A different count, or a refusal naming a stray `pages` row, means stop and investigate.
+6. **Apply the page:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/page.yaml`. Blast radius: page 99 (its name and every control on it, 47 new controls), the gap pages N + 1 … 98, and one Companion restart; no other page or control changes. Check the summary line matches the dry run, note the `backup:` path, then wait for Companion again as in step 4.
+7. **Smoke-test over REST.** Paste this block; it waits a second between commands and reads the variables before and after each press and rotation:
+
+   ```sh
+   cli="node dist/bin/companion-cli.js"
+   $cli variable get sk_presses
+   $cli variable get sk_last
+   $cli press 99 1 5          # S1: sk_presses + 1, sk_last = S1
+   sleep 1
+   $cli variable get sk_presses
+   $cli variable get sk_last
+   $cli variable get sk_enc1
+   $cli rotate-right 99 0 3   # E1: sk_enc1 + 1
+   sleep 1
+   $cli variable get sk_enc1
+   $cli rotate-left 99 0 3    # E1: sk_enc1 - 1
+   sleep 1
+   $cli variable get sk_enc1
+   $cli press 99 0 3          # E1 push: sk_enc1 = 0, sk_last = E1 push
+   sleep 1
+   $cli variable get sk_enc1
+   $cli variable get sk_last
+   ```
+
+   Then press S9 twice, one press at a time, checking page 99 in the web UI after each:
+
+   ```sh
+   cli="node dist/bin/companion-cli.js"
+   $cli press 99 1 13         # S9 press 1: sk_presses + 1, sk_last = S9; the button shows green ON
+   sleep 1
+   $cli variable get sk_presses
+   $cli variable get sk_last
+   ```
+
+   ```sh
+   cli="node dist/bin/companion-cli.js"
+   $cli press 99 1 13         # S9 press 2: sk_presses + 1, sk_last = S9; the button shows red OFF
+   sleep 1
+   $cli variable get sk_presses
+   $cli variable get sk_last
+   ```
+
+8. **Check page 99 by eye in the web UI:** the 47 buttons show their texts, and the (0,0) button tracks `sk_last` and `sk_presses`.
+
+**Undo.** Each apply prints its own backup. Restoring the first apply's backup (the variables apply) undoes both applies; restoring the page apply's backup undoes only the page.
+
+1. Quit Companion and confirm it has fully stopped: `pgrep -fl "Companion.app/Contents/Resources/main.js"` prints nothing (or Activity Monitor shows no Companion process).
+2. Copy the backup's `db.sqlite` over `~/Library/Application Support/companion/v5.1/db.sqlite`.
+3. If the backup has `db.sqlite-wal` and `db.sqlite-shm`, copy them over the install's too. If it does not, delete the install's own `db.sqlite-wal` and `db.sqlite-shm`: a newer WAL would otherwise replay onto the restored database.
+4. Start Companion.
+
 ## Development
 
 `npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.

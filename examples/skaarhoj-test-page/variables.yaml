@@ -1,0 +1,67 @@
+# SKAARHOJ PTZ Extreme test page: the 12 custom variables its buttons count into.
+#
+# Provenance: reference/python-prototype/fill_page20.py (VARIABLES), which
+# wrote the same variables together with the same page content to page 20.
+#
+# Apply order: this file FIRST, then page.yaml. The page apply refuses any
+# button whose actions or text name a custom variable that does not exist yet.
+#
+#   companion-cli apply examples/skaarhoj-test-page/variables.yaml
+#   companion-cli apply examples/skaarhoj-test-page/page.yaml
+#
+# The page needs a grid allowing rows 0-3 and columns 0-16, and targets page 99,
+# which creates empty gap pages when the install has fewer than 98 pages
+# (ADR 0004); see page.yaml.
+#
+# Applying replaces these 12 definitions only. With persist: false, every value
+# starts from its default when Companion starts.
+kind: variables
+variables:
+  - name: sk_presses
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_last
+    default: ""
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc1
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc2
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc3
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc4
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc5
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc6
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc7
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_enc8
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_iris
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
+  - name: sk_focus
+    default: 0
+    description: SKAARHOJ test page
+    persist: false
