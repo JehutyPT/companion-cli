@@ -189,8 +189,8 @@ function button(text: string, color: number, down: unknown[] = []) {
   };
 }
 
-const CONTROL_A = "bank:FixtureCtrlAAAAAAAAAAA";
-const CONTROL_B = "bank:FixtureCtrlBBBBBBBBBBB";
+export const FIXTURE_CONTROL_A = "bank:FixtureCtrlAAAAAAAAAAA";
+export const FIXTURE_CONTROL_B = "bank:FixtureCtrlBBBBBBBBBBB";
 
 function seedRows(version: number | null): Array<[string, string, unknown]> {
   const rows: Array<[string, string, unknown]> = [];
@@ -202,13 +202,13 @@ function seedRows(version: number | null): Array<[string, string, unknown]> {
       "1",
       {
         name: "FIXTURE",
-        controls: { "0": { "0": CONTROL_A, "1": CONTROL_B } },
+        controls: { "0": { "0": FIXTURE_CONTROL_A, "1": FIXTURE_CONTROL_B } },
         id: "FixturePageIdAAAAAAAA",
       },
     ],
     [
       "controls",
-      CONTROL_A,
+      FIXTURE_CONTROL_A,
       button("Count\\n$(custom:fx_counter)", 0x000080, [
         {
           type: "action",
@@ -222,7 +222,7 @@ function seedRows(version: number | null): Array<[string, string, unknown]> {
         },
       ]),
     ],
-    ["controls", CONTROL_B, button("$(custom:fx_label)", 0x202020)],
+    ["controls", FIXTURE_CONTROL_B, button("$(custom:fx_label)", 0x202020)],
     [
       "surfaces",
       "fixture-surface",

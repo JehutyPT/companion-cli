@@ -83,3 +83,35 @@ export function expectBoolean(value: unknown, field: string): boolean {
   }
   return value;
 }
+
+export function expectNonEmptyString(value: unknown, field: string): string {
+  const text = expectString(value, field);
+  if (text === "") throw new ValidationError(field, "must not be empty");
+  return text;
+}
+
+function describeNumber(value: unknown): string {
+  return typeof value === "number" ? String(value) : describeType(value);
+}
+
+/** A safe integer, which may be negative. */
+export function expectInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw new ValidationError(
+      field,
+      `must be an integer, got ${describeNumber(value)}`,
+    );
+  }
+  return value;
+}
+
+/** A safe integer of at least 1. */
+export function expectPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new ValidationError(
+      field,
+      `must be a positive integer, got ${describeNumber(value)}`,
+    );
+  }
+  return value;
+}

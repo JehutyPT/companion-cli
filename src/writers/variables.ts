@@ -13,6 +13,7 @@ import {
   requireField,
 } from "../core/validate.ts";
 import type { Writer } from "../core/writer.ts";
+import { parseVariableName } from "./shared.ts";
 
 /**
  * Variable writer: creates or replaces custom variables.
@@ -48,55 +49,8 @@ export interface CustomVariable {
 /** What Companion 5.1 itself writes as the description of a new variable. */
 export const DEFAULT_DESCRIPTION = "A custom variable";
 
-/**
- * Companion 5.1's own name rule, from `createVariable` in its bundled main.js:
- * a name is valid when replacing `[^\w]` with `_` leaves it unchanged (that is,
- * non-empty and only ASCII letters, digits and `_`), and it is not one of these
- * reserved object keys.
- */
-const VALID_NAME = /^\w+$/;
-const RESERVED_NAMES = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-  "__defineGetter__",
-  "__defineSetter__",
-  "__lookupGetter__",
-  "__lookupSetter__",
-]);
-
-/**
- * Stricter than Companion: the `id` column is declared `STRING`, which SQLite
- * gives NUMERIC affinity, so a name such as `007` or `1e5` is stored as the
- * number 7 or 100000. Those names pass Companion's rule but cannot round-trip.
- */
-const NUMERIC_NAME = /^\d+(?:[eE]\d+)?$/;
-
 const TOP_LEVEL_FIELDS = ["variables"] as const;
 const VARIABLE_FIELDS = ["name", "default", "description", "persist"] as const;
-
-function parseName(value: unknown, field: string): string {
-  const name = expectString(value, field);
-  if (!VALID_NAME.test(name)) {
-    throw new ValidationError(
-      field,
-      `invalid variable name "${name}": use only letters A-Z/a-z, digits and _ (Companion's rule for $(custom:<name>))`,
-    );
-  }
-  if (RESERVED_NAMES.has(name)) {
-    throw new ValidationError(
-      field,
-      `variable name "${name}" is reserved by Companion`,
-    );
-  }
-  if (NUMERIC_NAME.test(name)) {
-    throw new ValidationError(
-      field,
-      `variable name "${name}" looks like a number; Companion's database would store it as ${Number(name)} and lose the name`,
-    );
-  }
-  return name;
-}
 
 function parseDefault(value: unknown, field: string): VariableValue {
   if (typeof value === "string" || typeof value === "boolean") return value;
@@ -118,7 +72,7 @@ export function parseVariables(fields: Fields): CustomVariable[] {
     const path = fieldPath("variables", index);
     const entry = expectMapping(item, path);
     rejectUnknownFields(entry, VARIABLE_FIELDS, path);
-    const name = parseName(
+    const name = parseVariableName(
       requireField(entry, "name", path),
       fieldPath(path, "name"),
     );

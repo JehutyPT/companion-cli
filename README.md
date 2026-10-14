@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command and the variable writer work against a database copy; the button, page and trigger writers, stopping and restarting Companion, and the REST helper are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer and the single-button writer work against a database copy; multi-step buttons, feedbacks, the page and trigger writers, stopping and restarting Companion, and the REST helper are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -52,6 +52,28 @@ variables:
 ```
 
 `apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Until live-install mode exists, `--db` is required and the install's default database is refused.
+
+`button.yaml` replaces the button at one location:
+
+```yaml
+kind: button
+location: { page: 1, row: 0, column: 2 }   # page >= 1; row and column within the grid size (may be negative)
+text: "Count\n$(custom:fx_counter)"        # required, may be empty; line breaks become Companion's literal \n
+background: "#000080"                      # required; quote it, an unquoted # starts a YAML comment
+textColor: "#FFFFFF"                       # optional; black or white depending on the background's brightness
+down:                                      # optional action list, run on press
+  - { action: set, variable: fx_label, value: pressed }
+  - { action: expression, variable: fx_label, expression: "$(custom:fx_counter) * 2" }
+  - { action: increment, variable: fx_counter, by: 1 }   # by: optional positive integer, default 1
+  - { action: decrement, variable: fx_counter }
+  - action: passthrough                    # any connection's action, written as given
+    connection: FixtureConnectionAAAA
+    definition: some_definition_id
+    options: { mode: 1, label: "x" }       # optional
+up: []                                     # optional action list, run on release
+```
+
+The page must already exist, and every custom variable an action targets or a `$(custom:<name>)` reference names (in `text`, `set` values and expressions) must already exist; apply a `kind: variables` file first. The control previously at that location is deleted and a new `button-layered` control with fresh ids takes its place; the page's other cells are untouched. Rotary actions, steps, feedbacks and other style fields are not supported yet and are rejected as unknown fields. A `|` block scalar works for multi-line text; its trailing newline is dropped.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
 
