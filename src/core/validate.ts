@@ -20,8 +20,13 @@ export function describeType(value: unknown): string {
   return `a ${typeof value}`;
 }
 
+/** A JSON object: not null, not a list. */
+export function isJsonObject(value: unknown): value is Fields {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function expectMapping(value: unknown, field: string): Fields {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  if (!isJsonObject(value)) {
     throw new ValidationError(
       field,
       `must be a mapping, got ${describeType(value)}`,

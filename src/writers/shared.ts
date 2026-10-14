@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { parseStoredJson } from "../core/database.ts";
 import { CliError, ValidationError } from "../core/errors.ts";
 import {
   expectJsonValue,
@@ -7,13 +8,16 @@ import {
   expectString,
   fieldPath,
   type Fields,
+  isJsonObject,
   rejectUnknownFields,
   requireField,
 } from "../core/validate.ts";
 
 /**
- * Companion shapes and rules shared by several writers. Writers import from
- * here, never from a sibling writer.
+ * Companion shapes and rules shared by several writers. Writers (button.ts,
+ * page.ts, variables.ts) never import from a sibling writer; they share code
+ * through this module and the other non-writer modules: ids.ts, actions.ts,
+ * feedbacks.ts and button-control.ts.
  */
 
 /** A wrapped option value, as Companion stores options in layers, actions and feedbacks. */
@@ -274,4 +278,31 @@ export function taggedKinds<C = undefined, B = EntityBody>(tag: string) {
       build: (spec) => kindOf(spec).build(spec.payload),
     };
   };
+}
+
+/**
+ * Every page-numbered `pages` row, parsed, by page number. Rows with other
+ * keys are ignored. The `id` column has NUMERIC affinity, so keys come back
+ * as numbers and are read as text first.
+ */
+export function readPageRows(db: DatabaseSync): Map<number, unknown> {
+  const pages = new Map<number, unknown>();
+  for (const row of db.prepare("SELECT id, value FROM pages").all()) {
+    const key = String(row["id"]);
+    if (/^[1-9]\d*$/.test(key))
+      pages.set(Number(key), parseStoredJson(row["value"]));
+  }
+  return pages;
+}
+
+/**
+ * How many pages Companion 5.1 loads: its page store reads rows "1", "2", …
+ * and stops at the first missing or falsy one. Counting only JSON objects is
+ * stricter: a row holding a list or a number also ends the run, so a writer
+ * never relies on one.
+ */
+export function loadedPageCount(pages: ReadonlyMap<number, unknown>): number {
+  let count = 0;
+  while (isJsonObject(pages.get(count + 1))) count += 1;
+  return count;
 }

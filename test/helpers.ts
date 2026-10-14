@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -12,6 +13,10 @@ import { join } from "node:path";
 import { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { run } from "../src/cli.ts";
+import {
+  buildFixtureDb,
+  type FixtureOptions,
+} from "./fixtures/companion-db.ts";
 import type { CliOptions } from "../src/cli.ts";
 import type { ProcessControl } from "../src/core/process.ts";
 
@@ -213,4 +218,136 @@ export function customVariables(dbPath: string): Record<string, unknown> {
 export function printedBackupDir(result: CliRun): string | undefined {
   const line = result.stdout.find((l) => l.startsWith("backup: "));
   return line?.slice("backup: ".length);
+}
+
+/** A generated nanoid-style id, and a button control id. */
+export const ID = /^[A-Za-z0-9_-]{21}$/;
+export const CONTROL_ID = /^bank:[A-Za-z0-9_-]{21}$/;
+
+export type Json = Record<string, unknown>;
+
+export function rows(dump: TableDump, table: string): Map<string, Json> {
+  return new Map(
+    (dump[table] ?? []).map((row) => [row.id, JSON.parse(row.value) as Json]),
+  );
+}
+
+export function page(dump: TableDump, id = "1"): Json {
+  const value = rows(dump, "pages").get(id);
+  assert.ok(value, `pages row ${id}`);
+  return value;
+}
+
+export function withoutTables(dump: TableDump, ...tables: string[]): TableDump {
+  return Object.fromEntries(
+    Object.entries(dump).filter(([table]) => !tables.includes(table)),
+  );
+}
+
+/**
+ * Replaces generated control, action, feedback and override ids everywhere in
+ * a dump (including page cells), so two applies can be compared.
+ */
+export function normaliseIds(dump: TableDump): TableDump {
+  const generated = new Set<string>();
+  for (const row of dump["controls"] ?? []) {
+    if (row.id.startsWith("bank:Fixture")) continue;
+    generated.add(row.id);
+    for (const id of generatedIds(JSON.parse(row.value))) generated.add(id);
+  }
+  const replace = (text: string) => {
+    let out = text;
+    for (const id of generated) out = out.split(id).join("<id>");
+    return out;
+  };
+  return Object.fromEntries(
+    Object.entries(dump).map(([table, tableRows]) => [
+      table,
+      tableRows
+        .map((row) => ({ id: replace(row.id), value: replace(row.value) }))
+        .sort((a, b) => (a.id + a.value).localeCompare(b.id + b.value, "en")),
+    ]),
+  );
+}
+
+/** Replaces every `id` and `overrideId` with "<id>" after checking its format. */
+export function stripIds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripIds);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => {
+        if (
+          (key === "id" || key === "overrideId") &&
+          typeof child === "string" &&
+          ID.test(child)
+        )
+          return [key, "<id>"];
+        return [key, stripIds(child)];
+      }),
+    );
+  }
+  return value;
+}
+
+/** Every generated `id` and `overrideId` in a control. */
+export function generatedIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(generatedIds);
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, child]) =>
+      (key === "id" || key === "overrideId") &&
+      typeof child === "string" &&
+      ID.test(child)
+        ? [child]
+        : generatedIds(child),
+    );
+  }
+  return [];
+}
+
+export interface FixtureEnv {
+  dir: string;
+  dbPath: string;
+  backupRoot: string;
+}
+
+/**
+ * A fixture database in a temp directory, with a backup root next to it.
+ * `change` edits the fixture before the test runs.
+ */
+export function setup(
+  options: FixtureOptions = {},
+  change?: (db: DatabaseSync) => void,
+): FixtureEnv {
+  const dir = tempDir();
+  const dbPath = buildFixtureDb(join(dir, "install"), options);
+  if (change) {
+    const db = new DatabaseSync(dbPath);
+    change(db);
+    db.close();
+  }
+  return { dir, dbPath, backupRoot: join(dir, "backups") };
+}
+
+/** Applies `yaml` to the fixture with `apply --db`. */
+export function applyTo(
+  env: FixtureEnv,
+  yaml: string,
+  options: CliOptions = {},
+): Promise<CliRun> {
+  return runCli(
+    ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath],
+    { backupRoot: env.backupRoot, ...options },
+  );
+}
+
+/** A fresh fixture, its dump before the apply, and the apply's result. */
+export async function applyYaml(
+  yaml: string,
+  options: FixtureOptions = {},
+  change?: (db: DatabaseSync) => void,
+) {
+  const env = setup(options, change);
+  const before = dumpDatabase(env.dbPath);
+  const result = await applyTo(env, yaml);
+  return { ...env, before, result };
 }

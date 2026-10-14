@@ -4,7 +4,7 @@ import { ValidationError } from "../src/core/errors.ts";
 import {
   buttonVariableReferences,
   parseButton,
-} from "../src/writers/button.ts";
+} from "../src/writers/button-control.ts";
 
 /**
  * The page writer embeds button descriptions (`buttons[3]`), so the button

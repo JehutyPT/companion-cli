@@ -1,57 +1,31 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import {
-  buildFixtureDb,
   FIXTURE_CONTROL_A,
   FIXTURE_CONTROL_B,
-  type FixtureOptions,
 } from "./fixtures/companion-db.ts";
 import {
+  applyTo,
+  applyYaml,
+  CONTROL_ID,
   dumpDatabase,
   fileState,
+  generatedIds,
+  ID,
+  type Json,
+  normaliseIds,
+  page,
   printedBackupDir,
+  rows,
   runCli,
+  setup,
+  stripIds,
   type TableDump,
-  tempDir,
+  withoutTables,
   writeDescription,
 } from "./helpers.ts";
-
-const ID = /^[A-Za-z0-9_-]{21}$/;
-const CONTROL_ID = /^bank:[A-Za-z0-9_-]{21}$/;
-
-function setup(options: FixtureOptions = {}) {
-  const dir = tempDir();
-  const dbPath = buildFixtureDb(join(dir, "install"), options);
-  const backupRoot = join(dir, "backups");
-  return { dir, dbPath, backupRoot };
-}
-
-async function applyYaml(yaml: string, options: FixtureOptions = {}) {
-  const env = setup(options);
-  const before = dumpDatabase(env.dbPath);
-  const result = await runCli(
-    ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath],
-    { backupRoot: env.backupRoot },
-  );
-  return { ...env, before, result };
-}
-
-type Json = Record<string, unknown>;
-
-function rows(dump: TableDump, table: string): Map<string, Json> {
-  return new Map(
-    (dump[table] ?? []).map((row) => [row.id, JSON.parse(row.value) as Json]),
-  );
-}
-
-function page(dump: TableDump, id = "1"): Json {
-  const value = rows(dump, "pages").get(id);
-  assert.ok(value, `pages row ${id}`);
-  return value;
-}
 
 /** The control referenced at a location, with its id. */
 function controlAt(
@@ -93,38 +67,6 @@ function keyPaths(value: unknown, prefix = ""): string[] {
   return [];
 }
 
-function withoutTables(dump: TableDump, ...tables: string[]): TableDump {
-  return Object.fromEntries(
-    Object.entries(dump).filter(([table]) => !tables.includes(table)),
-  );
-}
-
-/**
- * Replaces generated control, action, feedback and override ids everywhere in
- * a dump (including page cells), so two applies can be compared.
- */
-function normaliseIds(dump: TableDump): TableDump {
-  const generated = new Set<string>();
-  for (const row of dump["controls"] ?? []) {
-    if (row.id.startsWith("bank:Fixture")) continue;
-    generated.add(row.id);
-    for (const id of generatedIds(JSON.parse(row.value))) generated.add(id);
-  }
-  const replace = (text: string) => {
-    let out = text;
-    for (const id of generated) out = out.split(id).join("<id>");
-    return out;
-  };
-  return Object.fromEntries(
-    Object.entries(dump).map(([table, tableRows]) => [
-      table,
-      tableRows
-        .map((row) => ({ id: replace(row.id), value: replace(row.value) }))
-        .sort((a, b) => (a.id + a.value).localeCompare(b.id + b.value, "en")),
-    ]),
-  );
-}
-
 const prop = (value: unknown) => ({ value, isExpression: false });
 const geometry = {
   enabled: prop(true),
@@ -135,40 +77,6 @@ const geometry = {
   height: prop(100),
   rotation: prop(0),
 };
-
-/** Replaces every `id` and `overrideId` with "<id>" after checking its format. */
-function stripIds(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripIds);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, child]) => {
-        if (
-          (key === "id" || key === "overrideId") &&
-          typeof child === "string" &&
-          ID.test(child)
-        )
-          return [key, "<id>"];
-        return [key, stripIds(child)];
-      }),
-    );
-  }
-  return value;
-}
-
-/** Every generated `id` and `overrideId` in a control. */
-function generatedIds(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap(generatedIds);
-  if (value !== null && typeof value === "object") {
-    return Object.entries(value).flatMap(([key, child]) =>
-      (key === "id" || key === "overrideId") &&
-      typeof child === "string" &&
-      ID.test(child)
-        ? [child]
-        : generatedIds(child),
-    );
-  }
-  return [];
-}
 
 /** The prototype's `layers(text, bg, fg)`, written out. */
 function prototypeLayers(text: string, bg: number, fg: number): Json[] {
@@ -924,6 +832,51 @@ describe("apply button: refusals leave the database byte-identical", () => {
     );
     const after = dumpDatabase(dbPath);
     assert.equal(rows(after, "controls").size, 2);
+  });
+});
+
+describe("apply button: pages Companion does not load", () => {
+  const yaml = (pageNumber: number) =>
+    `kind: button\nlocation: { page: ${pageNumber}, row: 0, column: 0 }\ntext: x\nbackground: "#000000"\n`;
+  const setPage = (db: DatabaseSync, id: string, value: unknown) =>
+    db
+      .prepare("INSERT OR REPLACE INTO pages (id, value) VALUES (?, ?)")
+      .run(id, JSON.stringify(value));
+
+  async function refuse(
+    pageNumber: number,
+    change: (db: DatabaseSync) => void,
+    expected: RegExp,
+  ) {
+    const env = setup({}, change);
+    const before = fileState(env.dbPath);
+    const result = await applyTo(env, yaml(pageNumber));
+    assert.equal(result.code, 1, result.stdout.join("\n"));
+    assert.equal(result.stderr.length, 1);
+    assert.match(result.stderr[0] ?? "", expected);
+    assert.deepEqual(fileState(env.dbPath), before);
+    assert.equal(existsSync(env.backupRoot), false);
+  }
+
+  it("refuses a page row after a missing page", async () => {
+    await refuse(
+      3,
+      (db) =>
+        setPage(db, "3", {
+          id: "StrayPageIdAAAAAAAAAA",
+          name: "S",
+          controls: {},
+        }),
+      /^error: location\.page: page 3 is not loaded by Companion \(pages 1 to 1 load\); this writer does not create pages/,
+    );
+  });
+
+  it("refuses a page row holding null", async () => {
+    await refuse(
+      2,
+      (db) => setPage(db, "2", null),
+      /^error: location\.page: page 2 is not loaded by Companion \(pages 1 to 1 load\)/,
+    );
   });
 });
 

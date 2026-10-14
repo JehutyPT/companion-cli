@@ -20,11 +20,15 @@ The value of `page_config_version` in the database's `main` table. Companion 5.1
 _Avoid_: Schema version, Companion version (several Companion releases can share one DB version)
 
 **Page**:
-A numbered grid of locations with a name. Page numbers start at 1.
+A numbered grid of locations with a name. Page numbers start at 1 and are contiguous: Companion loads pages 1, 2, 3, … up to the first missing or empty row. A page Companion creates is named `PAGE`.
 
 **Location**:
 A page, row and column triple identifying one grid cell. Rows and columns are bounded by the install's grid size and may be negative.
 _Avoid_: Bank, slot, key (Companion's older names)
+
+**Cell**:
+A row and column pair on one page, without the page number. A page description places each of its buttons at a cell; with the page number it becomes a location.
+_Avoid_: Bank, slot, key
 
 **Grid size**:
 The row and column bounds of every page, from `userconfig.gridSize` in the database.

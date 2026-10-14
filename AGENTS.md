@@ -1,6 +1,6 @@
 # AGENTS.md
 
-A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command and the variable writer exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
+A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command with the variable, button and page writers, and the REST helper's runtime commands, exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
 
 ## Reference
 
@@ -11,7 +11,7 @@ A CLI that configures a local Bitfocus Companion 5.1 install from description fi
 ## Rules
 
 - **Database writes only with Companion stopped.** The core quits Companion, waits for its server process to exit, backs up the database and its WAL files, writes in one transaction, runs `pragma integrity_check`, then restarts Companion. Never write while Companion runs.
-- **Replace one thing per write.** Each writer replaces exactly one page, button, trigger or variable, idempotently. Never touch rows the description does not name.
+- **Replace one thing per write.** Each writer replaces exactly one page, button, trigger or variable, idempotently. Never touch rows the description does not name. One exception: a page apply beyond the last page plus one also creates the empty pages in between, because Companion loads pages contiguously ([ADR 0004](docs/adr/0004-page-apply-creates-gap-pages.md)).
 - **Validate before writing.** Parse and validate the whole description file, including locations against the grid size, before opening the database for writing.
 - **Refuse unknown database versions.** Only `page_config_version` 17 (Companion 5.1) is supported. Anything else is an error, not a best-effort write.
 - **Local development installs only.** Never target a production or remote Companion.
