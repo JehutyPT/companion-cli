@@ -8,6 +8,7 @@ Verification sources:
 - **main.js**: Companion's bundled server code, `/Applications/Companion.app/Contents/Resources/main.js` (minified; read-only greps).
 - **Prototype**: `reference/python-prototype/fill_page20.py`, applied to a real 5.1.0 install, then exercised over REST.
 - **OpenAPI**: `GET /api/v2/openapi.json` on the running install.
+- **Live run**: the CLI's own `apply` in live-install mode against a local 5.1.0 install on macOS (a copy of a production configuration), then a REST smoke test, on 2026-10-14 (#10). See [Live acceptance run](#live-acceptance-run-2026-10-14).
 
 ## Install and process (macOS)
 
@@ -15,9 +16,9 @@ Verification sources:
 | --- | --- |
 | Database: `~/Library/Application Support/companion/v5.1/db.sqlite`, SQLite in WAL mode. After a quit, `db.sqlite-wal` and `db.sqlite-shm` may still exist; a backup must copy all three or checkpoint first. | DB |
 | Processes: the launcher is `Companion.app/Contents/MacOS/Companion` (with Electron helper processes). The server is its child, `node … Companion.app/Contents/Resources/main.js --config-dir=<…>/companion/ --admin-port=…`, run by a bundled runtime under `Companion.app/Contents/Resources/node-runtimes/`. Connection modules are children of the server and also run a `main.js`, from the configuration directory's `modules/<module>/` (`node … <…>/companion/modules/canon-ptz-2.5.0/main.js`); some carry `--allow-fs-read=…/Companion.app/Contents/Resources` but never `Resources/main.js`. Surface threads run `Companion.app/Contents/Resources/SurfaceThread.js`. "Running" therefore means a process whose command line contains `Companion.app/Contents/Resources/main.js`; a launcher without that process is not running. | `ps -axo pid,ppid,command` on a running 5.1 install (2026-10-14) |
-| Quit: `osascript -e 'quit app "Companion"'`. Wait until the server process (the PIDs seen before the quit) has exited before opening the database. | Prototype run |
-| In-use check: `lsof -t -- <db> <db>-wal <db>-shm` prints the PIDs that have any of the files open. It exits 1 when none is open and also when a listed file does not exist (a missing `-wal` or `-shm`); PIDs it prints still count. The tool refuses to write when any PID other than its own is listed, or when `lsof` exits with any other status. Matching by open files does not depend on the bundle name, so it also catches a renamed or development Companion. | lsof(8); not yet run against a live install |
-| Restart: `open -a Companion`. The launcher starts the server on its own. | Prototype run |
+| Quit: `osascript -e 'quit app "Companion"'`. Wait until the server process (the PIDs seen before the quit) has exited before opening the database. | Prototype run; live run (the tool's quit and server wait) |
+| In-use check: `lsof -t -- <db> <db>-wal <db>-shm` prints the PIDs that have any of the files open. It exits 1 when none is open and also when a listed file does not exist (a missing `-wal` or `-shm`); PIDs it prints still count. The tool refuses to write when any PID other than its own is listed, or when `lsof` exits with any other status. Matching by open files does not depend on the bundle name, so it also catches a renamed or development Companion. | lsof(8); live run (the guard passed after the quit, with no spurious holder) |
+| Restart: `open -a Companion`. The launcher starts the server on its own. | Prototype run; live run |
 | Companion holds pages, controls and custom variables in memory and writes them back; edits made while it runs are ignored or overwritten. | Observed behaviour; basis of ADR 0001 |
 
 Only macOS has been checked. Windows and Linux paths and process handling are unverified.
@@ -44,7 +45,7 @@ Notes:
 
 - `pages.value.id` is an internal page id distinct from the page-number key. Writers keep it. At load, a missing or duplicate `id` is replaced with a fresh one. Verified by main.js.
 - Pages load contiguously: the page store loads rows `"1"`, `"2"`, … and stops at the first missing or falsy row (`if(!o)break`; a row holding `null` ends the run too), so a row `"20"` without rows `"2"`…`"19"` is never loaded. Companion's own `insertPages` refuses a page number above count + 1, and its full import fills missing pages first. The page writer therefore creates the missing pages in between and refuses a stray or non-object row in that range ([ADR 0004](adr/0004-page-apply-creates-gap-pages.md)); the button writer refuses a page that is not loaded. The tool counts only JSON-object rows as loaded, which is stricter than Companion. Verified by main.js.
-- A new page row is `{id: <nanoid>, name, controls: {}}` (`_addPages`). The default name is `"PAGE"`: `_addPages` falls back to it, the page store creates its first page with it, and `resetPage` renames a cleared page to it. The page writer creates gap pages in this shape. Verified by main.js; Companion loading a page the tool created is not yet observed.
+- A new page row is `{id: <nanoid>, name, controls: {}}` (`_addPages`). The default name is `"PAGE"`: `_addPages` falls back to it, the page store creates its first page with it, and `resetPage` renames a cleared page to it. The page writer creates gap pages in this shape. Verified by main.js. The live run replaced an existing page 99, so Companion loading a page row the tool rewrote is observed, but loading gap pages the tool created is not yet observed.
 - Each page has a `page:<page id>` control, created at startup by `ensurePageControlsExist` for every loaded page. The tool never writes it, and keeping the page `id` keeps an existing page's control. Verified by main.js.
 - The navigation buttons Companion adds to new pages (`pageup`, `pagenum`, `pagedown`) are ordinary `bank:` controls on the page; a page apply deletes them with the rest. Verified by main.js.
 - Companion's location cache maps each control id to one location, so a control id in two cells is already inconsistent; the page writer refuses to delete a control another page also references. Verified by main.js.
@@ -123,7 +124,7 @@ Feedbacks live at control level (`feedbacks`, a list), not per step. Every feedb
 ```
 
 - **Style overrides** name a layer and one of its properties: background color is `box0` / `color`, text color `text0` / `color`, text `text0` / `text`. Values are wrapped like layer properties (colors as integers, text with literal backslash-n line breaks). Only the listed properties change while the feedback holds. Verified by DB (shape copied from an existing control) and prototype; main.js converts old-style button styles into overrides with the same `{overrideId, elementId, elementProperty, override}` entries, using `elementProperty` `"color"` for colors and `"text"` for text, and wraps them in a `check_expression` feedback with `options: {expression: qs("true")}`.
-- **`bank_current_step`** (connection `internal`): holds while the button is on step `step`. `step` is **1-based**: step key `"0"` is step 1. Verified by main.js: the feedback is evaluated as `actionSets.getActiveStepIndex() + 1 === Number(step)`, and its definition ("Button: Check step", `feedbackType: "boolean"`, `showInvert: true`) declares `step` as a `number` option with `default: 1, min: 1`. Consistent with the prototype latch, which showed ON on its second step with `step: 2`.
+- **`bank_current_step`** (connection `internal`): holds while the button is on step `step`. `step` is **1-based**: step key `"0"` is step 1. Verified by main.js: the feedback is evaluated as `actionSets.getActiveStepIndex() + 1 === Number(step)`, and its definition ("Button: Check step", `feedbackType: "boolean"`, `showInvert: true`) declares `step` as a `number` option with `default: 1, min: 1`. Consistent with the prototype latch, which showed ON on its second step with `step: 2`. Observed live: the CLI-written S9 latch on page 99 showed green `ON` after one press and red `OFF` after the second (live run).
 - **`check_expression`** (connection `internal`): holds while a boolean expression is true.
 
   ```json
@@ -135,11 +136,11 @@ Feedbacks live at control level (`feedbacks`, a list), not per step. Every feedb
 - **Pass-through** (any connection): `definitionId` is the module's feedback id, `connectionId` the connection id, and each option is wrapped as `{"value": <v>, "isExpression": false}`, the same as pass-through actions. Observed in main.js: module feedbacks carry the same `type`, `definitionId`, `connectionId`, `options`, `isInverted` and `styleOverrides` fields as internal ones. Valid definition ids and options are the module's own and are not checked.
 - **`isInverted`** is a wrapped boolean (`{"value": true, "isExpression": false}` inverts the condition); the boolean feedbacks above declare `showInvert: true` in main.js.
 
-Companion loading and rendering the `check_expression` and pass-through rows the CLI writes is still to be observed in the end-to-end check; `bank_current_step` rows of this shape loaded and rendered in the prototype.
+`bank_current_step` rows written by the CLI loaded and rendered in the live run. Companion loading and rendering the `check_expression` and pass-through rows the CLI writes is not yet observed: the SKAARHOJ test page has neither.
 
 ## Triggers
 
-Stored in `controls` with id `trigger:<controlId>` (21-character nanoid, like button ids). Every fact below is verified by main.js (5.1.0); Companion loading a trigger the tool wrote is still to be observed in the end-to-end check.
+Stored in `controls` with id `trigger:<controlId>` (21-character nanoid, like button ids). Every fact below is verified by main.js (5.1.0); Companion loading a trigger the tool wrote is not yet observed: the live run (#10) applied no trigger.
 
 Stored control, from the trigger class's `toJSON` (the class with `type="trigger"` and `static DefaultOptions`), which its constructor reads back (`this.options=n.options||this.options`, `this.entities.loadStorage(n,…)`, `this.events=n.events||this.events`):
 
@@ -217,3 +218,25 @@ Export lives under `/export/page/:page`, `/export/full` and others (prototype ru
 Not possible over REST: creating or editing buttons, pages or triggers; moving a surface to a page.
 
 Known quirk: rapid back-to-back presses can lose an increment, because the actions of overlapping presses race. Fine at human speed; a test harness should pace presses.
+
+## Live acceptance run (2026-10-14)
+
+The SKAARHOJ test page (`examples/skaarhoj-test-page/`, #10) was applied to a local Companion 5.1.0 install on macOS, a copy of a production configuration, in live-install mode (no `--db`).
+
+- **Variables.** The dry run printed `no changes` and `custom variables: 0 created, 12 replaced`: the 12 `sk_*` variables already existed from the prototype and were identical, so the variables apply was skipped.
+- **Page.** The dry run reported 47 controls added and page 99 replaced. Page 99 already existed as an empty page named "Blank page" (the install had 99 or more pages), so no gap pages were created. The real apply printed `quitting Companion`, a `backup:` path under `<db dir>/companion-cli-backups/<timestamp>`, `starting Companion`, then `page 99 "SKAARHOJ TEST": replaced; deleted 0 controls, wrote 47 controls`.
+- **Live-install mode.** This was the first real run of the `osascript` quit, the server-process wait, the `lsof` in-use guard, the backup and `open -a Companion`. All worked, with no quit prompt or spurious holder reported. After the restart, `variable get sk_presses` answered `0`.
+- **REST smoke test** (paced, values read before and after):
+  - press S1 (99/1/5): `sk_presses` 0 to 1, `sk_last` "" to `S1`;
+  - rotate-right then rotate-left E1 (99/0/3): `sk_enc1` 0 to 1 to 0;
+  - press E1: `sk_enc1` `0`, `sk_last` `E1 push`.
+- **Visual check.** S9 (99/1/13), the two-step latch with a `bank_current_step` feedback, pressed twice: green `ON`, then red `OFF`.
+
+So Companion 5.1.0 loads and runs what the CLI writes for page rows, button controls with actions, rotary actions, steps, and the `bank_current_step` feedback with style overrides.
+
+Not yet verified live:
+
+- `check_expression` and pass-through feedbacks;
+- triggers (#9);
+- creating gap pages;
+- a dry run against a database whose variables differ from the description.

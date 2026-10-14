@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -199,50 +199,50 @@ To try it on a copy first, apply both files with `--db /path/to/copy/db.sqlite`.
 Applying to the local install (live-install mode) quits and restarts Companion once per file. Run these steps yourself from the repository root, after `npm install` and `npm run build`, invoking the CLI as in [Usage](#usage): `node dist/bin/companion-cli.js …`.
 
 1. **Pre-flight, in Companion's web UI** (do not open the database): check the grid size; note the current page count N and whether page 99 exists. Decide whether the 98 − N gap pages, or replacing an existing page 99, are acceptable. Check that `.env.local` in the directory you run the commands from holds `COMPANION_URL` and `COMPANION_API_KEY`.
-2. **Dry-run the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml --dry-run`. It writes nothing and does not touch Companion. Expect only the 12 `sk_*` rows in `custom_variables` to be added or replaced.
+2. **Dry-run the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml --dry-run`. It writes nothing and does not touch Companion. Expect only the 12 `sk_*` rows in `custom_variables` to be added or replaced. If it prints `no changes` (the variables already exist and are identical, for example from the prototype), skip step 3: applying would only restart Companion.
 3. **Apply the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml`. Blast radius: the 12 `sk_*` custom-variable definitions, which the prototype's existing page 20 also uses, and one Companion restart. Note the `backup:` path and the summary line.
 4. **Wait for Companion:** the tool does not wait for Companion to be ready after starting it. Repeat `node dist/bin/companion-cli.js variable get sk_presses` until it answers before going on.
 5. **Dry-run the page:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/page.yaml --dry-run`. Run it only now: before the variables are applied, it is refused for unknown custom variables. This is the go/no-go check, before anything is written: when page 99 does not exist, its last line must read `apply would report: page 99 "SKAARHOJ TEST": created; deleted 0 controls, wrote 47 controls; created <98 − N> empty pages: <N + 1>, …, 98`, with the count matching the 98 − N expected from step 1. A different count, or a refusal naming a stray `pages` row, means stop and investigate.
 6. **Apply the page:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/page.yaml`. Blast radius: page 99 (its name and every control on it, 47 new controls), the gap pages N + 1 … 98, and one Companion restart; no other page or control changes. Check the summary line matches the dry run, note the `backup:` path, then wait for Companion again as in step 4.
-7. **Smoke-test over REST.** Paste this block; it waits a second between commands and reads the variables before and after each press and rotation:
+7. **Smoke-test over REST.** Paste this block (it defines `cli` as a shell function, which works in zsh and bash); it waits a second between commands and reads the variables before and after each press and rotation:
 
    ```sh
-   cli="node dist/bin/companion-cli.js"
-   $cli variable get sk_presses
-   $cli variable get sk_last
-   $cli press 99 1 5          # S1: sk_presses + 1, sk_last = S1
+   cli() { node dist/bin/companion-cli.js "$@"; }
+   cli variable get sk_presses
+   cli variable get sk_last
+   cli press 99 1 5          # S1: sk_presses + 1, sk_last = S1
    sleep 1
-   $cli variable get sk_presses
-   $cli variable get sk_last
-   $cli variable get sk_enc1
-   $cli rotate-right 99 0 3   # E1: sk_enc1 + 1
+   cli variable get sk_presses
+   cli variable get sk_last
+   cli variable get sk_enc1
+   cli rotate-right 99 0 3   # E1: sk_enc1 + 1
    sleep 1
-   $cli variable get sk_enc1
-   $cli rotate-left 99 0 3    # E1: sk_enc1 - 1
+   cli variable get sk_enc1
+   cli rotate-left 99 0 3    # E1: sk_enc1 - 1
    sleep 1
-   $cli variable get sk_enc1
-   $cli press 99 0 3          # E1 push: sk_enc1 = 0, sk_last = E1 push
+   cli variable get sk_enc1
+   cli press 99 0 3          # E1 push: sk_enc1 = 0, sk_last = E1 push
    sleep 1
-   $cli variable get sk_enc1
-   $cli variable get sk_last
+   cli variable get sk_enc1
+   cli variable get sk_last
    ```
 
    Then press S9 twice, one press at a time, checking page 99 in the web UI after each:
 
    ```sh
-   cli="node dist/bin/companion-cli.js"
-   $cli press 99 1 13         # S9 press 1: sk_presses + 1, sk_last = S9; the button shows green ON
+   cli() { node dist/bin/companion-cli.js "$@"; }
+   cli press 99 1 13         # S9 press 1: sk_presses + 1, sk_last = S9; the button shows green ON
    sleep 1
-   $cli variable get sk_presses
-   $cli variable get sk_last
+   cli variable get sk_presses
+   cli variable get sk_last
    ```
 
    ```sh
-   cli="node dist/bin/companion-cli.js"
-   $cli press 99 1 13         # S9 press 2: sk_presses + 1, sk_last = S9; the button shows red OFF
+   cli() { node dist/bin/companion-cli.js "$@"; }
+   cli press 99 1 13         # S9 press 2: sk_presses + 1, sk_last = S9; the button shows red OFF
    sleep 1
-   $cli variable get sk_presses
-   $cli variable get sk_last
+   cli variable get sk_presses
+   cli variable get sk_last
    ```
 
 8. **Check page 99 by eye in the web UI:** the 47 buttons show their texts, and the (0,0) button tracks `sk_last` and `sk_presses`.
