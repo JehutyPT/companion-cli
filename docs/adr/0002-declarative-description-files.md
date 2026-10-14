@@ -16,4 +16,4 @@ The whole file is validated, including locations against the install's grid size
 
 - Only the tool's mapping has to change when Companion's shapes change.
 - The description format covers what tests and presets need, not every Companion feature. Unsupported features are rejected, not passed through.
-- The file format itself (YAML, JSON or TypeScript) is not yet decided and is bound to the implementation language decision.
+- The file format itself (YAML, JSON or TypeScript) was left open here and is decided in [ADR 0003](0003-typescript-node-sqlite-and-yaml-descriptions.md): YAML with a top-level `kind`.

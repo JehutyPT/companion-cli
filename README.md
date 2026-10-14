@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** pre-implementation. This repository holds the design docs and a working Python prototype (`reference/python-prototype/`). No CLI code yet.
+**Status:** early. The `apply` command and the variable writer work against a database copy; the button, page and trigger writers, stopping and restarting Companion, and the REST helper are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -30,7 +30,34 @@ Every write is an idempotent "replace this one thing" operation, and every write
 
 ## Open decisions
 
-- **Implementation language.** Not decided. Recommendation: TypeScript on Node 22+, using `node:sqlite` or `better-sqlite3`. It matches the author's Companion plugin work and Companion's own stack. The Python prototype stays as reference only.
+- **Implementation language, SQLite binding and description format:** decided in [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md): TypeScript on Node 22.18+, the built-in `node:sqlite`, and YAML description files with a top-level `kind`.
+
+## Usage
+
+```sh
+npm install
+npm run build
+node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
+```
+
+`variables.yaml`:
+
+```yaml
+kind: variables
+variables:
+  - name: sk_presses   # letters, digits and _ only (Companion's rule)
+    default: 0         # string, number or boolean
+    description: Button presses   # optional, default "A custom variable"
+    persist: false     # optional persist-on-restart flag, default false
+```
+
+`apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Until live-install mode exists, `--db` is required and the install's default database is refused.
+
+Applying a variable replaces its whole definition. For a variable with `persist: true`, Companion keeps the last value in `defaultValue`, so re-applying the file resets that stored value to the file's `default`.
+
+## Development
+
+`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
 
 ## Consumers
 

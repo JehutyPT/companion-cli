@@ -1,0 +1,36 @@
+{
+  "name": "companion-cli",
+  "version": "0.1.0",
+  "description": "Configure a local Bitfocus Companion 5.1 install from description files.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "companion-cli": "dist/bin/companion-cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test --no-warnings \"test/**/*.test.ts\"",
+    "lint": "eslint . && tsc -p tsconfig.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.20.5",
+    "eslint": "^10.12.0",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2"
+  }
+}

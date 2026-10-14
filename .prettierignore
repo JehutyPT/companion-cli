@@ -1,0 +1,6 @@
+dist/
+node_modules/
+reference/
+package-lock.json
+# Prose and tables are wrapped by hand.
+*.md

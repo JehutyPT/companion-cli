@@ -56,6 +56,9 @@ A user-defined variable with a name, default value, description and a persist-on
 A short declarative file describing one page, button, trigger or set of variables in the tool's own format, not Companion's JSON.
 _Avoid_: Config, preset (Companion uses "preset" for module-provided buttons)
 
+**Kind**:
+The top-level `kind` field of a description file (`variables`, `button`, `page`, `trigger`) that selects which writer applies it.
+
 **Apply**:
 Validate a description file, stop Companion, back up the database, replace the described thing, check integrity and restart Companion.
 _Avoid_: Import (Companion's own import is a different feature), sync

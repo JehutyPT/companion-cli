@@ -43,6 +43,8 @@ Notes:
 - `pages.value.id` is an internal page id distinct from the page-number key. Writers keep it. The prototype requires the `pages` row to exist; creating a missing page row is unverified.
 - `pages.value.controls` keys rows and columns as strings. Locations must lie within `userconfig.gridSize`; the prototype's rows 0–3, columns 0–16 fit only because that install's grid had been widened.
 - Custom variable `sortOrder` is an integer; the prototype appends new variables after the current maximum and keeps an existing variable's order.
+- Custom variable names: Companion's `createVariable` accepts a name only when `name.replace(/[^\w]/gi, "_") === name` (non-empty, ASCII letters, digits and `_`) and it is not one of `__proto__`, `constructor`, `prototype`, `__defineGetter__`, `__defineSetter__`, `__lookupGetter__`, `__lookupSetter__`. A new variable gets `description: "A custom variable"`, `persistCurrentValue: false` and `sortOrder` = max existing + 1 (or 0). Verified by main.js.
+- Every table is `CREATE TABLE IF NOT EXISTS <name> (id STRING UNIQUE, value STRING)`. `STRING` is not a SQLite type name, so both columns get NUMERIC affinity: `"17"` is stored as the integer 17, and a numeric-looking id such as `007` or `1e5` becomes a number (7, 100000). Read values as text before `JSON.parse`. Verified by main.js and SQLite behaviour.
 
 ## Ids
 
