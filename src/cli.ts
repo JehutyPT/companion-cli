@@ -2,7 +2,14 @@ import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import { apply, type ApplyOptions } from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
-import { CliError, errorMessage } from "./core/errors.ts";
+import {
+  CliError,
+  errorJson,
+  errorMessage,
+  failureMessage,
+} from "./core/errors.ts";
+import { listCommands } from "./readers/index.ts";
+import type { ListCommand } from "./readers/list.ts";
 import {
   getSurface,
   getVariable,
@@ -109,7 +116,9 @@ function synopsis(spec: RestCommandSpec): string {
 
 const APPLY_SYNOPSIS =
   "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run [--json]]";
-const SYNOPSES = [APPLY_SYNOPSIS, ...REST_TABLE.map(synopsis)];
+const LIST_KINDS = Object.keys(listCommands);
+const LIST_SYNOPSIS = `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`;
+const SYNOPSES = [APPLY_SYNOPSIS, LIST_SYNOPSIS, ...REST_TABLE.map(synopsis)];
 
 /** One line: every exit-2 message ends with it. */
 export const USAGE = `usage: companion-cli ${SYNOPSES.join(" | ")}`;
@@ -127,6 +136,12 @@ export const HELP = [
   "reports the rows an apply would add, replace and remove. It writes nothing,",
   "takes no backup and never stops or starts Companion. --json prints that",
   "report as one JSON document.",
+  "list prints the custom variables or triggers stored in the database, one",
+  "line each. A pattern is a case-sensitive glob over the whole name (* any",
+  "run of characters, ? one character); several patterns list their union.",
+  "Read commands read a temporary copy of the database: they write nothing,",
+  "never stop or start Companion and work while it runs. --json prints one",
+  "JSON document, and any failure as one JSON error document on stdout.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory or, if there is none, from ~/.config/companion-cli/.env.local",
@@ -172,7 +187,103 @@ export async function run(
   if (command !== undefined && isRestCommand(command)) {
     return runRest(command, argv.slice(1), io, options);
   }
+  if (READ_COMMANDS.has(commandWord(argv) ?? "")) {
+    return runRead(argv, io, options);
+  }
   return runApply(argv, io, options);
+}
+
+/** Commands that only read the database, with JSON errors under `--json`. */
+const READ_COMMANDS: ReadonlySet<string> = new Set(["list"]);
+
+/** The first word that is neither an option nor the value of `--db`. */
+function commandWord(argv: readonly string[]): string | undefined {
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index] as string;
+    if (arg === "--") return argv[index + 1];
+    if (arg === "--db") index++;
+    else if (!arg.startsWith("-")) return arg;
+  }
+  return undefined;
+}
+
+/**
+ * A read command. With `--json` anywhere in argv, every failure, usage errors
+ * included, is one JSON error document on stdout and nothing on stderr.
+ */
+async function runRead(
+  argv: readonly string[],
+  io: CliIo,
+  options: CliOptions,
+): Promise<number> {
+  const end = argv.indexOf("--");
+  const json = (end === -1 ? argv : argv.slice(0, end)).includes("--json");
+  try {
+    const parsed = parseRead(argv);
+    if (parsed === "help") {
+      io.stdout(HELP);
+      return EXIT_OK;
+    }
+    const { command, patterns, db } = parsed;
+    const result = command.run(db, patterns, options);
+    if (json) io.stdout(result.json());
+    else for (const line of result.text()) io.stdout(line);
+    return EXIT_OK;
+  } catch (error) {
+    if (json) io.stdout(errorJson(error));
+    else io.stderr(`error: ${failureMessage(error)}`);
+    return error instanceof CliError && error.code === "usage"
+      ? EXIT_USAGE
+      : EXIT_FAILURE;
+  }
+}
+
+interface ReadCommandLine {
+  command: ListCommand;
+  patterns: string[];
+  db: string | undefined;
+}
+
+/** Parses a `list` command line. Throws a `usage` CliError on a bad one. */
+function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        db: { type: "string" },
+        json: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return "help";
+  const [, kind, ...patterns] = positionals;
+  const expected = LIST_KINDS.join(" or ");
+  if (kind === undefined) {
+    throw usageFailure(`list needs a kind (${expected})`);
+  }
+  const command = Object.hasOwn(listCommands, kind)
+    ? listCommands[kind]
+    : undefined;
+  if (command === undefined) {
+    throw usageFailure(`unknown list kind "${kind}" (expected ${expected})`);
+  }
+  if (patterns.includes("")) {
+    throw usageFailure("a name pattern must not be empty");
+  }
+  if (values.db === "") throw usageFailure("--db needs a path");
+  return { command, patterns, db: values.db };
+}
+
+/** A usage error as a CliError, for commands that may print it as JSON. */
+function usageFailure(reason: string): CliError {
+  return new CliError(`${reason}. ${USAGE}`, { code: "usage", hint: USAGE });
 }
 
 async function runApply(

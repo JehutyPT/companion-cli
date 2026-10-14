@@ -38,12 +38,15 @@ export function readDescriptionFile(filePath: string): unknown {
   } catch (error) {
     throw new CliError(
       `cannot read description file ${filePath}: ${errorCode(error)}`,
+      { code: "invalid_description" },
     );
   }
   const doc = parseDocument(text, { uniqueKeys: true });
   const [first] = doc.errors;
   if (first) {
-    throw new CliError(`invalid YAML in ${filePath}: ${errorMessage(first)}`);
+    throw new CliError(`invalid YAML in ${filePath}: ${errorMessage(first)}`, {
+      code: "invalid_description",
+    });
   }
   return doc.toJS();
 }
@@ -89,6 +92,8 @@ export function loadDescription(
     if (error instanceof ValidationError) {
       throw new CliError(`invalid description ${filePath}: ${error.message}`, {
         cause: error,
+        code: "invalid_description",
+        ...(error.path === undefined ? {} : { path: error.path }),
       });
     }
     throw error;

@@ -187,7 +187,11 @@ export function checkVariablesExist(
   );
   for (const { field, name } of references) {
     if (!known.has(name))
-      throw new CliError(`${field}: unknown custom variable "${name}"`);
+      throw new CliError(`${field}: unknown custom variable "${name}"`, {
+        code: "check_failed",
+        path: field,
+        hint: "run companion-cli list variables",
+      });
   }
 }
 

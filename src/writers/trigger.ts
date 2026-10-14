@@ -136,9 +136,12 @@ function parseTrigger(fields: Fields): TriggerPlan {
 }
 
 /** A `controls` row Companion loads as a trigger: a JSON object of type "trigger". */
-interface StoredTrigger {
+export interface StoredTrigger {
   id: string;
+  /** The stored options, or Companion's defaults when there are none. */
   options: Fields;
+  /** The whole stored control. */
+  control: Fields;
 }
 
 /** Companion's options for a trigger stored without any (`DefaultOptions`). */
@@ -154,7 +157,7 @@ const DEFAULT_OPTIONS: Fields = { name: "New Trigger", sortOrder: 0 };
  * options, so it is named "New Trigger". Rows whose options are not an object
  * are ignored.
  */
-function readTriggers(db: DatabaseSync): StoredTrigger[] {
+export function readTriggers(db: DatabaseSync): StoredTrigger[] {
   const triggers: StoredTrigger[] = [];
   for (const row of db
     .prepare("SELECT id, value FROM controls WHERE id LIKE 'trigger:%'")
@@ -164,7 +167,7 @@ function readTriggers(db: DatabaseSync): StoredTrigger[] {
     const value = parseStoredJson(row["value"]);
     if (!isJsonObject(value) || value["type"] !== "trigger") continue;
     const options = value["options"] || DEFAULT_OPTIONS;
-    if (isJsonObject(options)) triggers.push({ id, options });
+    if (isJsonObject(options)) triggers.push({ id, options, control: value });
   }
   return triggers;
 }

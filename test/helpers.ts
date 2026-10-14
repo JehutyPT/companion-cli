@@ -397,3 +397,14 @@ export async function applyYaml(
   const result = await applyTo(env, yaml);
   return { ...env, before, result };
 }
+
+/**
+ * Orphans an index's pages: `pragma integrity_check` then reports pages that
+ * are never used, while every table still reads normally.
+ */
+export function corruptIndex(db: DatabaseSync): void {
+  db.exec("CREATE INDEX fixture_orphan ON custom_variables (value)");
+  db.exec("PRAGMA writable_schema = ON");
+  db.exec("DELETE FROM sqlite_master WHERE name = 'fixture_orphan'");
+  db.exec("PRAGMA writable_schema = OFF");
+}

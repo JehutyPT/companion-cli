@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `list variables` and `list triggers` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -17,6 +17,7 @@ Companion has no supported API to create buttons, pages or triggers. Its REST AP
 | Page writer | Takes a page name and a grid of button descriptions; replaces only that page's buttons. |
 | Trigger writer | Creates or replaces one trigger by name (same `controls` table, `trigger:` prefix): startup, interval and variable-change events and the button writer's actions. |
 | Variable writer | Creates or updates custom variables: default value, persist on restart, description. |
+| Read path | Reads a snapshot copy of the database (integrity check, version guard) for the read commands; never writes and never stops Companion. |
 | REST helper | Presses or rotates a button at a location, reads or sets a custom variable, reads surface status. Reads `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` or the user config file. |
 
 Every write is an idempotent "replace this one thing" operation, and every writer validates its description file before touching the database ([ADR 0002](docs/adr/0002-declarative-description-files.md)). What the description format covers of Companion's stored content, item by item, is in [docs/support-matrix.md](docs/support-matrix.md); export and apply cover the same surface ([ADR 0006](docs/adr/0006-export-apply-symmetry.md)).
@@ -166,6 +167,55 @@ actions:                                   # optional, default []; the same acti
 A trigger with the same name (compared exactly) is replaced under its control id, keeping its position in the trigger list and its collection (if that collection is disabled in Companion, the trigger does not run even with `enabled: true`; a collection that no longer exists is dropped by Companion at startup); everything else in it is replaced, including its notes and any condition. Otherwise a new trigger is added after the others. Two existing triggers with the name refuse the apply. Every variable an event watches or an action uses must already exist. Conditions, other event types and local variables are not supported; `condition` and any other unknown field are refused.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
+
+### Read commands
+
+These read the database and print what is stored, one line per item:
+
+```sh
+companion-cli list variables                      # the local install (macOS)
+companion-cli list variables 'fx_*' --db /path/to/copy/db.sqlite
+companion-cli list triggers 'Reset*' 'Tick' --json
+```
+
+```
+$ companion-cli list variables --db fixture.sqlite
+NAME        DEFAULT  PERSIST  DESCRIPTION
+fx_counter  0        no       Counter
+fx_label    "idle"   yes      Label
+fx_gap      ""       no       A custom variable
+```
+
+A read command copies the database and its WAL files to a temporary directory, checks the copy (`pragma integrity_check`, then the version guard), reads it and deletes it. It writes nothing, never stops or starts Companion and works while Companion runs, including on the install's database. Without `--db` it reads the install's database (macOS only).
+
+- `list variables`: ordered by sort order, then name. `DEFAULT` is the stored value as JSON, so `"0"` and `0` differ; for a persisted variable it is Companion's current value.
+- `list triggers`: ordered by sort order, then id. `EVENTS` summarises each event (`startup 0ms`, `interval 5s`, `var fx_counter`, or the bare type for other events), with ` (off)` after a disabled one. `ACTIONS` is the action count, with ` +cond` when the trigger has a condition. The id is shown because trigger names are not unique.
+- Text cells longer than 40 characters are cut to 39 and end with `…`; line breaks show as `\n`. `--json` prints one document with full values: `{"database": ..., "variables": [...]}` or `{"database": ..., "triggers": [...]}`.
+
+**Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
+
+**Errors.** Without `--json` a failure is one `error: <message>` line on stderr, exit 1 (exit 2 for a bad command line). With `--json` anywhere on a read command's line, every failure, a bad command line included, is instead one document on stdout and nothing on stderr, with the same exit code:
+
+```json
+{"error": {"code": "database_not_found", "message": "database not found: /path/db.sqlite", "hint": "pass --db <path>, or check that Companion 5.1 has been run once"}}
+```
+
+`message` is the stderr line without `error: `. `path` (a description field path) and `hint` (the next step) appear when they apply. `items` (one entry per refused item, when a command refuses several) and `committed` and `backup` (a write committed and then failed) are reserved for later commands. Codes are stable: new ones may be added, none is renamed or removed.
+
+| Code | When |
+| --- | --- |
+| `usage` | bad command line (exit 2); `hint` is the usage line |
+| `invalid_description` | a description file cannot be read or fails validation |
+| `database_not_found` | the database does not exist |
+| `unsupported_platform` | live-install mode (no `--db`) off macOS |
+| `unsupported_version` | the database is not version 17 (Companion 5.1) |
+| `snapshot_inconsistent` | the copy failed its integrity check, perhaps copied while Companion was writing; retry, or quit Companion and retry |
+| `database_unreadable` | the database cannot be copied, opened or read |
+| `check_failed` | a check against the database refused the description |
+| `not_found` | a named item does not exist |
+| `unexpected` | anything else: a bug in the tool |
+
+`apply` and the REST commands keep their plain stderr errors for now.
 
 ### Runtime commands (REST helper)
 

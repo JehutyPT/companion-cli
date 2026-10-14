@@ -1,6 +1,4 @@
-import { existsSync, statSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
-import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { backupDatabase, defaultBackupRoot } from "./backup.ts";
 import {
@@ -15,9 +13,9 @@ import { loadDescription, type WriterRegistry } from "./description.ts";
 import type { Writer } from "./writer.ts";
 import { CliError, errorMessage, UnsupportedVersionError } from "./errors.ts";
 import {
-  defaultDatabasePath,
-  expandHome,
+  assertDatabaseExists,
   isDefaultInstallDatabase,
+  resolveDatabaseTarget,
 } from "./paths.ts";
 import {
   DEFAULT_QUIT_TIMEOUT_MS,
@@ -128,25 +126,18 @@ export function prepareApply(
 ): PreparedApply {
   const home = options.homedir ?? osHomedir();
   const platform = options.platform ?? process.platform;
-  const requested = request.dbPath;
-  const live = requested === undefined;
-  if (live && platform !== "darwin") {
-    throw new CliError(
-      `unsupported platform "${platform}": live-install mode only supports macOS; pass --db with a database path`,
-    );
-  }
-  const dbPath = live
-    ? defaultDatabasePath(home)
-    : resolve(expandHome(requested, home));
+  const { dbPath, live } = resolveDatabaseTarget(
+    request.dbPath,
+    home,
+    platform,
+  );
 
   const { writer, plan } = loadDescription(
     request.descriptionPath,
     request.writers,
   );
 
-  if (!existsSync(dbPath) || !statSync(dbPath).isFile()) {
-    throw new CliError(`database not found: ${dbPath}`);
-  }
+  assertDatabaseExists(dbPath);
 
   withReadOnlySnapshot(
     dbPath,

@@ -2,7 +2,12 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { CliError, errorMessage, UnsupportedVersionError } from "./errors.ts";
+import {
+  CliError,
+  type CliErrorOptions,
+  errorMessage,
+  UnsupportedVersionError,
+} from "./errors.ts";
 import type { Writer } from "./writer.ts";
 
 /** `page_config_version` of Companion 5.1. The only DB version the tool supports. */
@@ -72,6 +77,8 @@ export function assertSupportedVersion(db: DatabaseSync): void {
   );
 }
 
+const UNREADABLE: CliErrorOptions = { code: "database_unreadable" };
+
 export interface DatabaseCopyOptions {
   /** Open the copy read-only. */
   readOnly: boolean;
@@ -103,6 +110,7 @@ export function withDatabaseCopy<T>(
     } catch (error) {
       throw new CliError(
         `cannot open database ${dbPath}: ${errorMessage(error)}`,
+        UNREADABLE,
       );
     }
     try {
@@ -111,6 +119,7 @@ export function withDatabaseCopy<T>(
       if (error instanceof CliError) throw error;
       throw new CliError(
         `cannot read database ${dbPath}: ${errorMessage(error)}`,
+        UNREADABLE,
       );
     } finally {
       db.close();
@@ -145,6 +154,24 @@ export function isIntegrityOk(rows: string[]): boolean {
 export function integrityText(rows: string[]): string {
   return (
     rows.map((row) => row.replace(/\s*\n\s*/g, " ")).join("; ") || "no result"
+  );
+}
+
+export const SNAPSHOT_INCONSISTENT_HINT = "retry, or quit Companion and retry";
+
+/**
+ * Refuses a snapshot copy whose `pragma integrity_check` fails. `label` names
+ * the command in the message, such as "dry run" or "read".
+ */
+export function assertSnapshotConsistent(
+  db: DatabaseSync,
+  label: string,
+): void {
+  const rows = runIntegrityCheck(db);
+  if (isIntegrityOk(rows)) return;
+  throw new CliError(
+    `${label}: the database snapshot is inconsistent (integrity check: ${integrityText(rows)}), perhaps copied while Companion was writing; nothing written. Retry, or quit Companion and retry`,
+    { code: "snapshot_inconsistent", hint: SNAPSHOT_INCONSISTENT_HINT },
   );
 }
 

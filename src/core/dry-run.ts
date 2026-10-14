@@ -1,9 +1,7 @@
 import { type ApplyOptions, type ApplyRequest, prepareApply } from "./apply.ts";
 import {
+  assertSnapshotConsistent,
   checkWriteVerify,
-  integrityText,
-  isIntegrityOk,
-  runIntegrityCheck,
   withDatabaseCopy,
   WriteFailure,
 } from "./database.ts";
@@ -51,12 +49,7 @@ export function dryRun(
   const { dbPath, writer, plan } = prepareApply(request, options);
   const copy = { readOnly: false, tmpdir: options.tmpdir };
   return withDatabaseCopy(dbPath, copy, (db) => {
-    const snapshot = runIntegrityCheck(db);
-    if (!isIntegrityOk(snapshot)) {
-      throw new CliError(
-        `dry run: the database snapshot is inconsistent (integrity check: ${integrityText(snapshot)}), perhaps copied while Companion was writing; nothing written. Retry, or quit Companion and retry`,
-      );
-    }
+    assertSnapshotConsistent(db, "dry run");
     db.exec("BEGIN IMMEDIATE");
     try {
       let before: DatabaseRows | undefined;
