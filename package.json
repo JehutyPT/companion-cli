@@ -17,7 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test --no-warnings \"test/**/*.test.ts\"",
+    "test": "node --import ./test/setup.ts --test --no-warnings \"test/**/*.test.ts\"",
     "lint": "eslint . && tsc -p tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
