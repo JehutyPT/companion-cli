@@ -25,8 +25,8 @@ import {
 } from "./shared.ts";
 
 /**
- * Action lists in description files, shared by the button writer and (later)
- * the trigger writer. Each entry is tagged with `action`:
+ * Action lists in description files, shared by the button, page and trigger
+ * writers. Each entry is tagged with `action`:
  *
  *   - { action: set, variable: fx_label, value: pressed }
  *   - { action: expression, variable: fx_label, expression: "$(custom:fx_counter) * 2" }

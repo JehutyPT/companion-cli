@@ -55,7 +55,11 @@ One operation run by a button or trigger, identified by a connection id and a de
 A condition evaluated by Companion that overrides parts of a button's style while it holds (for example `bank_current_step`).
 
 **Trigger**:
-A control with no location that runs actions when an event occurs (startup, variable change, interval and others).
+A control with no location that runs actions when one of its events occurs (startup, variable change, interval and others) and its condition holds. The tool identifies a trigger by its name.
+
+**Event**:
+One occurrence a trigger listens for, such as startup (after a delay), a fixed interval, or a change of a custom variable. A trigger has one or more events.
+_Avoid_: Hook, schedule
 
 **Custom variable**:
 A user-defined variable with a name, default value, description and a persist-on-restart flag. Referenced in text and expressions as `$(custom:<name>)`.

@@ -272,7 +272,6 @@ describe("apply variables: invalid description files leave the database byte-ide
       "kind: banana\nvariables: []\n",
       /kind: unknown kind "banana"/,
     ],
-    ["reserved kind", "kind: trigger\n", /kind: kind "trigger" is reserved/],
     [
       "unknown top-level field",
       "kind: variables\nextra: 1\nvariables:\n  - {name: a, default: 1}\n",

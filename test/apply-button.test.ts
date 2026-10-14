@@ -9,6 +9,7 @@ import {
 import {
   applyTo,
   applyYaml,
+  assertTablesUnchangedExcept,
   CONTROL_ID,
   dumpDatabase,
   fileState,
@@ -18,12 +19,12 @@ import {
   normaliseIds,
   page,
   printedBackupDir,
+  prop,
   rows,
   runCli,
   setup,
   stripIds,
   type TableDump,
-  withoutTables,
   writeDescription,
 } from "./helpers.ts";
 
@@ -67,7 +68,6 @@ function keyPaths(value: unknown, prefix = ""): string[] {
   return [];
 }
 
-const prop = (value: unknown) => ({ value, isExpression: false });
 const geometry = {
   enabled: prop(true),
   opacity: prop(100),
@@ -270,10 +270,7 @@ describe("apply button: success", () => {
     );
     for (const [cid, value] of controlsBefore)
       assert.deepEqual(controlsAfter.get(cid), value);
-    assert.deepEqual(
-      withoutTables(after, "pages", "controls"),
-      withoutTables(before, "pages", "controls"),
-    );
+    assertTablesUnchangedExcept(before, after, "pages", "controls");
   });
 
   it("matches the key paths of the fixture's documented controls", async () => {
@@ -334,10 +331,7 @@ background: "#000000"
     assert.deepEqual(page(after), expectedPage);
     for (const [cid, value] of rows(before, "controls"))
       assert.deepEqual(rows(after, "controls").get(cid), value);
-    assert.deepEqual(
-      withoutTables(after, "pages", "controls"),
-      withoutTables(before, "pages", "controls"),
-    );
+    assertTablesUnchangedExcept(before, after, "pages", "controls");
   });
 
   it("accepts negative rows and columns within the grid", async () => {

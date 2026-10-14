@@ -8,6 +8,7 @@ import {
 } from "./fixtures/companion-db.ts";
 import {
   applyTo,
+  assertTablesUnchangedExcept,
   applyYaml,
   CONTROL_ID,
   dumpDatabase,
@@ -21,7 +22,6 @@ import {
   setup,
   stripIds,
   type TableDump,
-  withoutTables,
 } from "./helpers.ts";
 
 type Cells = Record<string, Record<string, string>>;
@@ -91,14 +91,6 @@ buttons:
     background: "#FFFFFF"
 `;
 
-/** Every table except `controls` and `pages` is unchanged. */
-function assertOtherTablesUnchanged(before: TableDump, after: TableDump) {
-  assert.deepEqual(
-    withoutTables(after, "controls", "pages"),
-    withoutTables(before, "controls", "pages"),
-  );
-}
-
 describe("apply page: replacing an existing page", () => {
   it("deletes the page's controls, writes the described ones and keeps the page id", async () => {
     const { dbPath, before, result } = await applyYaml(PAGE_1_YAML);
@@ -136,7 +128,7 @@ describe("apply page: replacing an existing page", () => {
     assert.equal(textOf(controlAt(after, "1", 1, 2).control), "S2");
 
     assert.deepEqual([...rows(after, "pages").keys()], ["1"]);
-    assertOtherTablesUnchanged(before, after);
+    assertTablesUnchangedExcept(before, after, "controls", "pages");
   });
 
   it("keeps other keys of an existing page row", async () => {
@@ -222,7 +214,7 @@ ${indented}
       id: "FixturePageIdAAAAAAAA",
     });
     assert.equal(rows(after, "controls").size, 0);
-    assertOtherTablesUnchanged(before, after);
+    assertTablesUnchangedExcept(before, after, "controls", "pages");
   });
 
   it("is idempotent: two applies are equal modulo ids, and the first apply's controls are gone", async () => {
@@ -284,7 +276,7 @@ describe("apply page: creating pages", () => {
       [...controls.keys()].every((id) => id.startsWith("bank:")),
       "no page: control written",
     );
-    assertOtherTablesUnchanged(before, after);
+    assertTablesUnchangedExcept(before, after, "controls", "pages");
   });
 
   it("creates the missing pages in between as empty PAGE pages", async () => {
@@ -312,7 +304,7 @@ describe("apply page: creating pages", () => {
     assert.equal(ids.size, 4, "page ids are distinct");
     assert.equal(rows(after, "controls").size, 4);
     assert.deepEqual(page(after, "1"), page(before, "1"));
-    assertOtherTablesUnchanged(before, after);
+    assertTablesUnchangedExcept(before, after, "controls", "pages");
   });
 
   it("leaves a stray row above the described page alone", async () => {

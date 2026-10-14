@@ -139,7 +139,32 @@ Companion loading and rendering the `check_expression` and pass-through rows the
 
 ## Triggers
 
-Stored in `controls` with id `trigger:<controlId>`. Action shapes are the same as for buttons. The trigger body, event types (startup, variable change, interval, …) and conditions are **unverified** and need research before the trigger writer.
+Stored in `controls` with id `trigger:<controlId>` (21-character nanoid, like button ids). Every fact below is verified by main.js (5.1.0); Companion loading a trigger the tool wrote is still to be observed in the end-to-end check.
+
+Stored control, from the trigger class's `toJSON` (the class with `type="trigger"` and `static DefaultOptions`), which its constructor reads back (`this.options=n.options||this.options`, `this.entities.loadStorage(n,…)`, `this.events=n.events||this.events`):
+
+```json
+{
+  "type": "trigger",
+  "options": { "name": "New Trigger", "enabled": false, "sortOrder": 0, "notes": "" },
+  "actions": [ /* action entities, as on buttons */ ],
+  "condition": [ /* feedback entities: the condition, checked before the actions run */ ],
+  "events": [ { "id": "<nanoid>", "type": "interval", "enabled": true, "options": { "seconds": 10 } } ],
+  "localVariables": []
+}
+```
+
+- Default options are `DefaultOptions={name:"New Trigger",enabled:!1,sortOrder:0,notes:""}`. `options.collectionId` is optional: it is set when the trigger is in a trigger collection. The stored `options` replace the defaults wholesale (no merge), so the tool writes all four keys. The tool's own default for `enabled` is `true`, unlike Companion's.
+- The legacy shape with `action_sets: {0: [...]}` and `options.relativeDelay` belongs only to the import and old-version upgrade code (`bBt`, `hee`); 5.1 stores `actions`.
+- Actions are the same entities as button actions (`{type: "action", id, definitionId, connectionId, options}` with wrapped options). `custom_variable_set_value` builds its parser with `createChildParser({"this:current": <the target variable's value>})`, independent of the control, so `increment` and `decrement` work in triggers.
+- Events are created by `createEventItem(e)`: `{id: xe(), type: e, enabled: !0, options: {}}`, then each option of the event definition (table `VK`) is copied with `structuredClone(o.default)`. Option values are **plain**, not wrapped: `eventSetOptions` assigns the raw value (`o.options[r]=n`), and the runtime (`#g`) reads `Number(e.options.seconds)`, `Number(e.options.delay)` and `Re(e.options.variableId)`.
+  - `startup`: `options: {delay: <ms>}`, `min:0`, default `1e4` (10000). Runs the actions `delay` ms after startup.
+  - `interval`: `options: {seconds: <n>}`, `min:1`, default `10` ("Time Interval: Fixed").
+  - `variable_changed`: `options: {variableId: "custom:<name>"}` (an `internal:variable` option). The description renders `$(` + variableId + `)`, and the change listener matches the id against the changed variable ids, which `setVariableValues` emits as `${e}:${a.id}` (label and name, so `custom:<name>` for a custom variable).
+  - Also defined, not written by the tool: `intervalRandom`, `timeofday`, `specificDate`, `sun_event`, `client_connect`, `button_press`, `button_release`, `condition_true`, `condition_false`, and on macOS and Windows `computer_locked`, `computer_unlocked`.
+- Loading: at startup the controls store's `init()` reads every `controls` row and calls `createClassForControl(id, "all", value, …)`, which builds a trigger for `value.type === "trigger"` (the stored type decides, not the id prefix). It then calls `setCollectionEnabled(isCollectionEnabled(options.collectionId))`, and `isCollectionEnabled` returns `true` for a missing `collectionId`, so a trigger outside any collection runs whenever `options.enabled` is true. A kept `collectionId` has two cases. If it names an existing collection that is disabled, `isCollectionEnabled` returns false and the replaced trigger never runs, however `enabled` is set. If it names a collection that no longer exists, `isCollectionEnabled` also returns false at first, but `init()` then calls `checkCollectionIdIsValid` with `collectAllCollectionIds()` on every trigger. That clears the unknown `collectionId`, calls `setCollectionEnabled(!0)` and saves, so the trigger moves out of any collection and runs.
+- Sort order: the UI's create adds the new trigger, then sets `sortOrder` to `Math.max(0, ...all triggers' sortOrder)`. The tool appends instead: 1 + the highest existing trigger `sortOrder`, or 0 for the first trigger. A replace keeps the `sortOrder` and `collectionId` of the trigger it replaces.
+- Identity: Companion has no unique trigger name; the tool identifies a trigger by `options.name` and refuses when several share it.
 
 ## REST API
 

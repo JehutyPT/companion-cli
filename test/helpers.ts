@@ -244,6 +244,24 @@ export function withoutTables(dump: TableDump, ...tables: string[]): TableDump {
   );
 }
 
+/** Every table except `tables` is unchanged between two dumps. */
+export function assertTablesUnchangedExcept(
+  before: TableDump,
+  after: TableDump,
+  ...tables: string[]
+): void {
+  assert.deepEqual(
+    withoutTables(after, ...tables),
+    withoutTables(before, ...tables),
+  );
+}
+
+/** A wrapped option value, as Companion stores options in actions and feedbacks. */
+export const prop = (value: unknown, isExpression = false) => ({
+  value,
+  isExpression,
+});
+
 /**
  * Replaces generated control, action, feedback and override ids everywhere in
  * a dump (including page cells), so two applies can be compared.

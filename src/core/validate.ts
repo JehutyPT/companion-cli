@@ -121,6 +121,20 @@ export function expectPositiveInteger(value: unknown, field: string): number {
   return value;
 }
 
+/** A safe integer of at least 0. */
+export function expectNonNegativeInteger(
+  value: unknown,
+  field: string,
+): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new ValidationError(
+      field,
+      `must be an integer of at least 0, got ${describeNumber(value)}`,
+    );
+  }
+  return value;
+}
+
 /** Rejects values that JSON cannot carry unchanged. */
 export function expectJsonValue(value: unknown, field: string): void {
   if (value === null || typeof value === "string" || typeof value === "boolean")

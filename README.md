@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks) and the page writer (a page's name and all of its buttons) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion; the trigger writer is not built yet. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -15,7 +15,7 @@ Companion has no supported API to create buttons, pages or triggers. Its REST AP
 | Shared core | Quits Companion, backs up the database, opens it, writes, runs `pragma integrity_check`, restarts Companion. Owns Companion's id format and JSON shapes. Refuses unknown database versions. |
 | Button writer | Turns a short button description (text, colors, down/up/rotate actions, feedbacks, steps) into Companion's control JSON at a page/row/column. |
 | Page writer | Takes a page name and a grid of button descriptions; replaces only that page's buttons. |
-| Trigger writer | Writes triggers (same `controls` table, `trigger:` prefix), reusing the button writer's action and feedback building. Trigger events still need research. |
+| Trigger writer | Creates or replaces one trigger by name (same `controls` table, `trigger:` prefix): startup, interval and variable-change events and the button writer's actions. |
 | Variable writer | Creates or updates custom variables: default value, persist on restart, description. |
 | REST helper | Presses or rotates a button at a location, reads or sets a custom variable, reads surface status. Reads `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local`. |
 
@@ -129,6 +129,23 @@ buttons:                                   # required list; [] clears the page
 Every control the page held is deleted, including the page up / page number / page down buttons Companion puts on new pages, and one new `button-layered` control per entry takes its place; two entries at the same row and column are refused. The page keeps its internal id. Errors name the entry, for example `buttons[3].down[0].variable`. Custom variables must already exist, as for a button. The apply is refused if a cell on the page holds anything but a button control id, or if one of its controls is also placed on another page.
 
 When the page does not exist it is created. Companion loads pages 1, 2, 3, … up to the first missing number, so a page beyond the last page plus one needs the pages in between: they are created empty and named `PAGE`, as Companion names a new page. A `pages` row in that range that Companion does not load (a stray row after a gap, or a row holding something other than a page, such as `null`) refuses the apply ([ADR 0004](docs/adr/0004-page-apply-creates-gap-pages.md)). Only the page writer creates pages; `kind: button` refuses a page that does not exist or that Companion does not load.
+
+`trigger.yaml` creates or replaces one trigger:
+
+```yaml
+kind: trigger
+name: Reset counter                        # required, non-empty; identifies the trigger
+enabled: true                              # optional, default true (Companion's own default is false)
+events:                                    # required, at least one
+  - { event: startup, delay: 0 }           # milliseconds after startup; optional, default 10000
+  - { event: interval, seconds: 5 }        # positive integer
+  - { event: variable_changed, variable: sk_presses }   # an existing custom variable
+actions:                                   # optional, default []; the same actions as a button
+  - { action: set, variable: sk_last, value: reset }
+  - { action: increment, variable: sk_presses }
+```
+
+A trigger with the same name (compared exactly) is replaced under its control id, keeping its position in the trigger list and its collection (if that collection is disabled in Companion, the trigger does not run even with `enabled: true`; a collection that no longer exists is dropped by Companion at startup); everything else in it is replaced, including its notes and any condition. Otherwise a new trigger is added after the others. Two existing triggers with the name refuse the apply. Every variable an event watches or an action uses must already exist. Conditions, other event types and local variables are not supported; `condition` and any other unknown field are refused.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
 

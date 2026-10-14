@@ -15,7 +15,7 @@ import {
 
 /**
  * Companion shapes and rules shared by several writers. Writers (button.ts,
- * page.ts, variables.ts) never import from a sibling writer; they share code
+ * page.ts, trigger.ts, variables.ts) never import from a sibling writer; they share code
  * through this module and the other non-writer modules: ids.ts, actions.ts,
  * feedbacks.ts and button-control.ts.
  */
@@ -278,6 +278,14 @@ export function taggedKinds<C = undefined, B = EntityBody>(tag: string) {
       build: (spec) => kindOf(spec).build(spec.payload),
     };
   };
+}
+
+/**
+ * The sort order after the highest of `orders`: one more than the maximum,
+ * or 0 when there are none. When every order is negative it is 0 too.
+ */
+export function nextSortOrder(orders: Iterable<number>): number {
+  return Math.max(-1, ...orders) + 1;
 }
 
 /**

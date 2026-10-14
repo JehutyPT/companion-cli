@@ -13,7 +13,7 @@ import {
   requireField,
 } from "../core/validate.ts";
 import type { Writer } from "../core/writer.ts";
-import { parseVariableName } from "./shared.ts";
+import { nextSortOrder, parseVariableName } from "./shared.ts";
 
 /**
  * Variable writer: creates or replaces custom variables.
@@ -136,7 +136,7 @@ export function writeVariables(
   const orders = [...existing.values()]
     .map((stored) => stored.sortOrder)
     .filter((order): order is number => order !== undefined);
-  let next = Math.max(-1, ...orders) + 1;
+  let next = nextSortOrder(orders);
 
   const update = db.prepare(
     "UPDATE custom_variables SET value = ? WHERE id = ?",
