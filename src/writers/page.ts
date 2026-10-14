@@ -59,7 +59,7 @@ export interface PagePlan {
   buttons: Array<ButtonDescription<Cell>>;
 }
 
-const FIELDS = ["page", "name", "buttons"];
+export const FIELDS = ["page", "name", "buttons"];
 
 /** Companion's name for a page it creates without one. */
 const DEFAULT_PAGE_NAME = "PAGE";

@@ -75,7 +75,7 @@ function parseStepNumber(
   return value;
 }
 
-const FEEDBACK_KINDS = {
+export const FEEDBACK_KINDS = {
   /**
    * Internal `bank_current_step`: holds while the button is on step `step`
    * (1-based). Companion fills in `$(this:location)` as the button itself.
@@ -124,11 +124,14 @@ const FEEDBACK_KINDS = {
 
 const FEEDBACKS = taggedKinds<FeedbackContext>("feedback")(FEEDBACK_KINDS);
 
+/** Fields every feedback entry accepts besides its kind's own. */
+export const FEEDBACK_FIELDS = ["style", "invert"] as const;
+
 /**
  * The style fields a feedback may override, in stored order: the layer and
  * property each overrides, and how its value is parsed.
  */
-const STYLE_FIELDS = {
+export const STYLE_FIELDS = {
   background: ["box0", "color", parseColor],
   textColor: ["text0", "color", parseColor],
   text: ["text0", "text", parseText],
@@ -169,7 +172,7 @@ function parseFeedback(
   context: FeedbackContext,
 ): FeedbackSpec {
   const fields = expectMapping(item, path);
-  const spec = FEEDBACKS.parse(fields, path, context, ["style", "invert"]);
+  const spec = FEEDBACKS.parse(fields, path, context, FEEDBACK_FIELDS);
   const style = parseStyle(
     requireField(fields, "style", path),
     fieldPath(path, "style"),

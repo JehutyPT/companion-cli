@@ -20,7 +20,8 @@
     "test": "node --import ./test/setup.ts --test --no-warnings \"test/**/*.test.ts\"",
     "lint": "eslint . && tsc -p tsconfig.json",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "gen:support-matrix": "node --no-warnings scripts/gen-support-matrix.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1"

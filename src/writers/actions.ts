@@ -96,7 +96,7 @@ function parseBy(fields: Fields, path: string): { by: number } {
   };
 }
 
-const ACTION_KINDS = {
+export const ACTION_KINDS = {
   set: variableAction({
     fields: ["value"],
     parse: (fields, path) => ({

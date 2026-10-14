@@ -66,7 +66,7 @@ const defineKind = <P>(kind: EventKind<P>): EventKind<P> => kind;
 /** Companion's own default for a new startup event (`VK.startup`). */
 const DEFAULT_STARTUP_DELAY_MS = 10000;
 
-const EVENT_KINDS = {
+export const EVENT_KINDS = {
   startup: defineKind({
     fields: ["delay"],
     parse: (fields, path) => ({
@@ -117,7 +117,7 @@ export interface TriggerPlan {
   actions: ActionSpec[];
 }
 
-const FIELDS = ["name", "enabled", "events", "actions"];
+export const FIELDS = ["name", "enabled", "events", "actions"];
 
 function parseTrigger(fields: Fields): TriggerPlan {
   rejectUnknownFields(fields, FIELDS, "");

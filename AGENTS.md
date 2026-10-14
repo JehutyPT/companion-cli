@@ -5,6 +5,7 @@ A CLI that configures a local Bitfocus Companion 5.1 install from description fi
 ## Reference
 
 - [docs/companion-internals.md](docs/companion-internals.md): database tables, control JSON shapes, action and feedback ids, REST endpoints, and how each fact was verified.
+- [docs/support-matrix.md](docs/support-matrix.md): what the description format supports, plans or leaves out, per Companion item. Generated from `src/support-matrix.ts` by `npm run gen:support-matrix` and checked by `test/support-matrix.test.ts`; a writer change that adds a field or kind updates the table in the same change ([ADR 0006](docs/adr/0006-export-apply-symmetry.md)).
 - [CONTEXT.md](CONTEXT.md): domain language. [docs/adr/](docs/adr/): decisions.
 - [reference/python-prototype/](reference/python-prototype/): a working prototype that wrote a 47-button page into a real 5.1 database. Source of truth for shapes until the CLI exists. Reference only; do not extend it.
 

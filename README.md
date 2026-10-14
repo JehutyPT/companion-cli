@@ -19,7 +19,7 @@ Companion has no supported API to create buttons, pages or triggers. Its REST AP
 | Variable writer | Creates or updates custom variables: default value, persist on restart, description. |
 | REST helper | Presses or rotates a button at a location, reads or sets a custom variable, reads surface status. Reads `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` or the user config file. |
 
-Every write is an idempotent "replace this one thing" operation, and every writer validates its description file before touching the database ([ADR 0002](docs/adr/0002-declarative-description-files.md)).
+Every write is an idempotent "replace this one thing" operation, and every writer validates its description file before touching the database ([ADR 0002](docs/adr/0002-declarative-description-files.md)). What the description format covers of Companion's stored content, item by item, is in [docs/support-matrix.md](docs/support-matrix.md); export and apply cover the same surface ([ADR 0006](docs/adr/0006-export-apply-symmetry.md)).
 
 ## Safety model
 
@@ -258,7 +258,7 @@ Applying to the local install (live-install mode) quits and restarts Companion o
 
 ## Development
 
-`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
+`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
 
 ## Consumers
 

@@ -82,11 +82,16 @@ export type ButtonDescription<L> = ButtonContent & { location: L };
 
 export type ButtonPlan = ButtonDescription<Location>;
 
-const ACTION_SETS = ["down", "up", "rotate_left", "rotate_right"] as const;
+export const ACTION_SETS = [
+  "down",
+  "up",
+  "rotate_left",
+  "rotate_right",
+] as const;
 type ActionSetName = (typeof ACTION_SETS)[number];
 const ROTATE_SETS: readonly ActionSetName[] = ["rotate_left", "rotate_right"];
 
-const TOP_LEVEL_FIELDS = [
+export const TOP_LEVEL_FIELDS = [
   "location",
   "text",
   "background",

@@ -49,8 +49,13 @@ export interface CustomVariable {
 /** What Companion 5.1 itself writes as the description of a new variable. */
 export const DEFAULT_DESCRIPTION = "A custom variable";
 
-const TOP_LEVEL_FIELDS = ["variables"] as const;
-const VARIABLE_FIELDS = ["name", "default", "description", "persist"] as const;
+export const TOP_LEVEL_FIELDS = ["variables"] as const;
+export const VARIABLE_FIELDS = [
+  "name",
+  "default",
+  "description",
+  "persist",
+] as const;
 
 function parseDefault(value: unknown, field: string): VariableValue {
   if (typeof value === "string" || typeof value === "boolean") return value;
