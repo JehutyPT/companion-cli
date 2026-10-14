@@ -29,10 +29,10 @@ function setup(options: FixtureOptions = {}) {
   return { dir, dbPath, backupRoot };
 }
 
-function applyYaml(yaml: string, options: FixtureOptions = {}) {
+async function applyYaml(yaml: string, options: FixtureOptions = {}) {
   const env = setup(options);
   const before = dumpDatabase(env.dbPath);
-  const result = runCli(
+  const result = await runCli(
     ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath],
     { backupRoot: env.backupRoot },
   );
@@ -141,8 +141,8 @@ background: "#000080"
 `;
 
 describe("apply button: success", () => {
-  it("writes a button-layered control at an empty cell of an existing row", () => {
-    const { dbPath, before, result } = applyYaml(SIMPLE_YAML);
+  it("writes a button-layered control at an empty cell of an existing row", async () => {
+    const { dbPath, before, result } = await applyYaml(SIMPLE_YAML);
 
     assert.equal(result.code, 0, result.stderr.join("\n"));
     assert.deepEqual(result.stderr, []);
@@ -252,8 +252,8 @@ describe("apply button: success", () => {
     );
   });
 
-  it("matches the key paths of the fixture's documented controls", () => {
-    const { dbPath, before, result } = applyYaml(`kind: button
+  it("matches the key paths of the fixture's documented controls", async () => {
+    const { dbPath, before, result } = await applyYaml(`kind: button
 location: { page: 1, row: 1, column: 1 }
 text: ""
 background: "#FFFFFF"
@@ -267,8 +267,8 @@ down:
     assert.deepEqual(keyPaths(control), keyPaths(fixture));
   });
 
-  it("replaces the control at an occupied cell and deletes the old one", () => {
-    const { dbPath, before, result } = applyYaml(`kind: button
+  it("replaces the control at an occupied cell and deletes the old one", async () => {
+    const { dbPath, before, result } = await applyYaml(`kind: button
 location: { page: 1, row: 0, column: 0 }
 text: Replaced
 background: "#202020"
@@ -294,8 +294,8 @@ background: "#202020"
     assert.deepEqual(page(after), expectedPage);
   });
 
-  it("creates the row key for an empty cell in a missing row and deletes nothing", () => {
-    const { dbPath, before, result } = applyYaml(`kind: button
+  it("creates the row key for an empty cell in a missing row and deletes nothing", async () => {
+    const { dbPath, before, result } = await applyYaml(`kind: button
 location: { page: 1, row: 2, column: 3 }
 text: New row
 background: "#000000"
@@ -316,7 +316,7 @@ background: "#000000"
     );
   });
 
-  it("accepts negative rows and columns within the grid", () => {
+  it("accepts negative rows and columns within the grid", async () => {
     const env = setup();
     const db = new DatabaseSync(env.dbPath);
     db.prepare("UPDATE main SET value = ? WHERE id = 'userconfig'").run(
@@ -326,7 +326,7 @@ background: "#000000"
       }),
     );
     db.close();
-    const result = runCli(
+    const result = await runCli(
       [
         "apply",
         writeDescription(
@@ -346,7 +346,7 @@ background: "#000000"
     assert.match(controlAt(dumpDatabase(env.dbPath), -1, -2).id, CONTROL_ID);
   });
 
-  it("stores colors as integers and picks the text color by background brightness", () => {
+  it("stores colors as integers and picks the text color by background brightness", async () => {
     const cases: Array<[string, string, number, number]> = [
       ['background: "#FFFFFF"', "", 0xffffff, 0x000000],
       ['background: "#000080"', "", 0x000080, 0xffffff],
@@ -356,7 +356,7 @@ background: "#000000"
       ['background: "#ffff00"', 'textColor: "#Ff0000"', 0xffff00, 0xff0000],
     ];
     for (const [bg, fg, expectedBg, expectedFg] of cases) {
-      const { dbPath, result } = applyYaml(`kind: button
+      const { dbPath, result } = await applyYaml(`kind: button
 location: { page: 1, row: 0, column: 3 }
 text: c
 ${bg}
@@ -373,7 +373,7 @@ ${fg}
     }
   });
 
-  it("is idempotent apart from ids, and the first control is gone after the second apply", () => {
+  it("is idempotent apart from ids, and the first control is gone after the second apply", async () => {
     const yaml = `kind: button
 location: { page: 1, row: 0, column: 0 }
 text: Twice
@@ -388,12 +388,15 @@ up:
     const now = () => new Date("2026-10-14T00:00:00.000Z");
 
     assert.equal(
-      runCli(["apply", file, "--db", dbPath], { backupRoot, now }).code,
+      (await runCli(["apply", file, "--db", dbPath], { backupRoot, now })).code,
       0,
     );
     const first = dumpDatabase(dbPath);
     const firstId = controlAt(first, 0, 0).id;
-    const second = runCli(["apply", file, "--db", dbPath], { backupRoot, now });
+    const second = await runCli(["apply", file, "--db", dbPath], {
+      backupRoot,
+      now,
+    });
     assert.equal(second.code, 0, second.stderr.join("\n"));
     assert.match(second.stdout.at(-1) ?? "", /replaced/);
     const secondDump = dumpDatabase(dbPath);
@@ -438,8 +441,8 @@ up:
     });
   }
 
-  it("writes internal and pass-through actions in file order", () => {
-    const { dbPath, result } = applyYaml(ACTIONS_YAML);
+  it("writes internal and pass-through actions in file order", async () => {
+    const { dbPath, result } = await applyYaml(ACTIONS_YAML);
     assert.equal(result.code, 0, result.stderr.join("\n"));
     const { control } = controlAt(dumpDatabase(dbPath), 3, 7);
 
@@ -476,8 +479,8 @@ up:
     assert.deepEqual(downActions(control, "rotate_right"), []);
   });
 
-  it("generates distinct action ids", () => {
-    const { dbPath, result } = applyYaml(ACTIONS_YAML);
+  it("generates distinct action ids", async () => {
+    const { dbPath, result } = await applyYaml(ACTIONS_YAML);
     assert.equal(result.code, 0, result.stderr.join("\n"));
     const { control } = controlAt(dumpDatabase(dbPath), 3, 7);
     const ids = [
@@ -491,8 +494,8 @@ up:
 });
 
 describe("apply button: text", () => {
-  const textOf = (yamlText: string) => {
-    const { dbPath, result } = applyYaml(`kind: button
+  const textOf = async (yamlText: string) => {
+    const { dbPath, result } = await applyYaml(`kind: button
 location: { page: 1, row: 0, column: 4 }
 background: "#000000"
 ${yamlText}`);
@@ -505,23 +508,23 @@ ${yamlText}`);
     return (layers[3]?.["text"] as { value: string }).value;
   };
 
-  it("stores a block scalar's lines with literal backslash-n and no trailing newline", () => {
+  it("stores a block scalar's lines with literal backslash-n and no trailing newline", async () => {
     assert.equal(
-      textOf("text: |\n  Line one\n  Line two\n"),
+      await textOf("text: |\n  Line one\n  Line two\n"),
       "Line one\\nLine two",
     );
   });
 
-  it("removes exactly one trailing newline", () => {
-    assert.equal(textOf('text: "a\\n\\n"\n'), "a\\n");
+  it("removes exactly one trailing newline", async () => {
+    assert.equal(await textOf('text: "a\\n\\n"\n'), "a\\n");
   });
 
-  it("keeps a literal backslash-n unchanged", () => {
-    assert.equal(textOf("text: Line\\nTwo\n"), "Line\\nTwo");
+  it("keeps a literal backslash-n unchanged", async () => {
+    assert.equal(await textOf("text: Line\\nTwo\n"), "Line\\nTwo");
   });
 
-  it("allows empty text", () => {
-    assert.equal(textOf('text: ""\n'), "");
+  it("allows empty text", async () => {
+    assert.equal(await textOf('text: ""\n'), "");
   });
 });
 
@@ -768,10 +771,10 @@ describe("apply button: refusals leave the database byte-identical", () => {
   ];
 
   for (const [name, yaml, expected] of cases) {
-    it(name, () => {
+    it(name, async () => {
       const { dir, dbPath, backupRoot } = setup({ wal: true });
       const before = fileState(dbPath);
-      const result = runCli(
+      const result = await runCli(
         ["apply", writeDescription(dir, yaml), "--db", dbPath],
         { backupRoot },
       );
@@ -784,8 +787,8 @@ describe("apply button: refusals leave the database byte-identical", () => {
     });
   }
 
-  it("does not check pass-through connections or options against the database", () => {
-    const { result } = applyYaml(
+  it("does not check pass-through connections or options against the database", async () => {
+    const { result } = await applyYaml(
       down(
         '{ action: passthrough, connection: NoSuchConnection, definition: d, options: { x: "$(custom:not_checked)" } }',
       ),
@@ -793,9 +796,9 @@ describe("apply button: refusals leave the database byte-identical", () => {
     assert.equal(result.code, 0, result.stderr.join("\n"));
   });
 
-  it("re-checks under the write lock: a variable removed after the snapshot is refused", () => {
+  it("re-checks under the write lock: a variable removed after the snapshot is refused", async () => {
     const { dir, dbPath, backupRoot } = setup();
-    const result = runCli(
+    const result = await runCli(
       [
         "apply",
         writeDescription(dir, down("{ action: increment, variable: fx_gap }")),
@@ -859,9 +862,9 @@ background: "#000000"
     db.close();
   }
 
-  function refuse(env: ReturnType<typeof setup>, expected: RegExp) {
+  async function refuse(env: ReturnType<typeof setup>, expected: RegExp) {
     const before = fileState(env.dbPath);
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(env.dir, CELL_YAML), "--db", env.dbPath],
       { backupRoot: env.backupRoot },
     );
@@ -872,11 +875,11 @@ background: "#000000"
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
   }
 
-  it("reports a cell pointing at a missing control row as replaced", () => {
+  it("reports a cell pointing at a missing control row as replaced", async () => {
     const missing = "bank:MissingCtrlXXXXXXXXXX";
     const env = setupWithCell(missing);
     const before = dumpDatabase(env.dbPath);
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(env.dir, CELL_YAML), "--db", env.dbPath],
       { backupRoot: env.backupRoot },
     );
@@ -893,20 +896,20 @@ background: "#000000"
     assert.notEqual(controlAt(after, 0, 2).id, missing);
   });
 
-  it("refuses a target cell holding a non-button control id and keeps that row", () => {
+  it("refuses a target cell holding a non-button control id and keeps that row", async () => {
     const triggerId = "trigger:FixtureTrigAAAAAAAAAAA";
     const env = setupWithCell(triggerId, (db) =>
       db
         .prepare("INSERT INTO controls (id, value) VALUES (?, ?)")
         .run(triggerId, JSON.stringify({ type: "trigger" })),
     );
-    refuse(
+    await refuse(
       env,
       /^error: location: page 1, row 0, column 2 holds "trigger:FixtureTrigAAAAAAAAAAA", which is not a button control/,
     );
   });
 
-  it("refuses a grid size with non-integer bounds", () => {
+  it("refuses a grid size with non-integer bounds", async () => {
     const env = setup();
     setGrid(env.dbPath, {
       minColumn: 0,
@@ -914,12 +917,12 @@ background: "#000000"
       minRow: 0,
       maxRow: 3,
     });
-    refuse(env, /^error: cannot read the grid size/);
+    await refuse(env, /^error: cannot read the grid size/);
   });
 
-  it("refuses a grid size whose minimum exceeds its maximum", () => {
+  it("refuses a grid size whose minimum exceeds its maximum", async () => {
     const env = setup();
     setGrid(env.dbPath, { minColumn: 8, maxColumn: 7, minRow: 0, maxRow: 3 });
-    refuse(env, /^error: cannot read the grid size/);
+    await refuse(env, /^error: cannot read the grid size/);
   });
 });

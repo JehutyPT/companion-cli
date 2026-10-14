@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { run } from "../src/cli.ts";
-import type { ApplyOptions } from "../src/core/apply.ts";
+import type { CliOptions } from "../src/cli.ts";
 
 const tempDirs: string[] = [];
 after(() => {
@@ -41,17 +41,25 @@ export interface CliRun {
   stderr: string[];
 }
 
-/** Runs the CLI in-process, with a temp home directory unless one is given. */
-export function runCli(argv: string[], options: ApplyOptions = {}): CliRun {
+/**
+ * Runs the CLI in-process, with a temp home directory unless one is given.
+ * The environment defaults to empty and the working directory to a temp
+ * directory, so a test never reads the developer's `COMPANION_*` variables or
+ * the repository's `.env.local`.
+ */
+export async function runCli(
+  argv: string[],
+  options: CliOptions = {},
+): Promise<CliRun> {
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const code = run(
+  const code = await run(
     argv,
     {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
     },
-    { homedir: tempDir(), ...options },
+    { homedir: tempDir(), env: {}, cwd: tempDir(), ...options },
   );
   return { code, stdout, stderr };
 }

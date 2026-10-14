@@ -55,12 +55,14 @@ function withoutTable(dump: TableDump, table: string): TableDump {
 }
 
 describe("apply variables: success", () => {
-  it("writes the named variables, keeps existing sortOrder and appends new ones in file order", () => {
+  it("writes the named variables, keeps existing sortOrder and appends new ones in file order", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const before = dumpDatabase(dbPath);
     const file = writeDescription(dir, VARIABLES_YAML);
 
-    const result = runCli(["apply", file, "--db", dbPath], { backupRoot });
+    const result = await runCli(["apply", file, "--db", dbPath], {
+      backupRoot,
+    });
 
     assert.equal(result.code, 0, result.stderr.join("\n"));
     assert.deepEqual(result.stderr, []);
@@ -101,12 +103,12 @@ describe("apply variables: success", () => {
     assert.match(result.stdout.at(-1) ?? "", /2 created, 1 replaced/);
   });
 
-  it("backs up the database and prints the backup path before writing", () => {
+  it("backs up the database and prints the backup path before writing", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const original = readFileSync(dbPath);
     const logged: string[] = [];
     let loggedAtWrite: string[] = [];
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       {
         backupRoot,
@@ -128,9 +130,9 @@ describe("apply variables: success", () => {
     assert.deepEqual(readFileSync(join(backupDir, "db.sqlite")), original);
   });
 
-  it("defaults the backup location to companion-cli-backups next to the database", () => {
+  it("defaults the backup location to companion-cli-backups next to the database", async () => {
     const { dir, dbPath } = setup();
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       {
         now: () => new Date("2026-10-14T12:34:56.789Z"),
@@ -143,17 +145,20 @@ describe("apply variables: success", () => {
     );
   });
 
-  it("is idempotent: applying the same file twice yields identical custom_variables", () => {
+  it("is idempotent: applying the same file twice yields identical custom_variables", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const file = writeDescription(dir, VARIABLES_YAML);
     const now = () => new Date("2026-10-14T00:00:00.000Z"); // same timestamp: backup names must not collide
 
     assert.equal(
-      runCli(["apply", file, "--db", dbPath], { backupRoot, now }).code,
+      (await runCli(["apply", file, "--db", dbPath], { backupRoot, now })).code,
       0,
     );
     const first = dumpDatabase(dbPath);
-    const second = runCli(["apply", file, "--db", dbPath], { backupRoot, now });
+    const second = await runCli(["apply", file, "--db", dbPath], {
+      backupRoot,
+      now,
+    });
 
     assert.equal(second.code, 0, second.stderr.join("\n"));
     assert.deepEqual(dumpDatabase(dbPath), first);
@@ -161,10 +166,10 @@ describe("apply variables: success", () => {
     assert.equal(readdirSync(backupRoot).length, 2);
   });
 
-  it("reads committed changes still in the WAL and backs up all three files", () => {
+  it("reads committed changes still in the WAL and backs up all three files", async () => {
     const { dir, dbPath, backupRoot } = setup({ wal: true });
     const before = fileState(dbPath);
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       { backupRoot },
     );
@@ -203,14 +208,16 @@ variables:
     persist: true
 `;
 
-  function applyFile(dbPath: string, file: string, backupRoot: string) {
-    const result = runCli(["apply", file, "--db", dbPath], { backupRoot });
+  async function applyFile(dbPath: string, file: string, backupRoot: string) {
+    const result = await runCli(["apply", file, "--db", dbPath], {
+      backupRoot,
+    });
     assert.equal(result.code, 0, result.stderr.join("\n"));
   }
 
-  it("keeps a persisted variable's stored value, switches take the file default", () => {
+  it("keeps a persisted variable's stored value, switches take the file default", async () => {
     const { dir, dbPath, backupRoot } = setup();
-    applyFile(dbPath, writeDescription(dir, PERSIST_YAML), backupRoot);
+    await applyFile(dbPath, writeDescription(dir, PERSIST_YAML), backupRoot);
 
     const vars = customVariables(dbPath);
     assert.deepEqual(vars["fx_label"], {
@@ -233,11 +240,11 @@ variables:
     });
   });
 
-  it("a true-to-false switch takes the file default", () => {
+  it("a true-to-false switch takes the file default", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const yaml =
       "kind: variables\nvariables:\n  - {name: fx_label, default: plain, persist: false}\n";
-    applyFile(dbPath, writeDescription(dir, yaml), backupRoot);
+    await applyFile(dbPath, writeDescription(dir, yaml), backupRoot);
     const label = customVariables(dbPath)["fx_label"] as Record<
       string,
       unknown
@@ -246,12 +253,12 @@ variables:
     assert.equal(label["persistCurrentValue"], false);
   });
 
-  it("re-applying is idempotent", () => {
+  it("re-applying is idempotent", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const file = writeDescription(dir, PERSIST_YAML);
-    applyFile(dbPath, file, backupRoot);
+    await applyFile(dbPath, file, backupRoot);
     const first = dumpDatabase(dbPath);
-    applyFile(dbPath, file, backupRoot);
+    await applyFile(dbPath, file, backupRoot);
     assert.deepEqual(dumpDatabase(dbPath), first);
     assert.equal(
       (customVariables(dbPath)["fx_counter"] as Record<string, unknown>)[
@@ -362,10 +369,10 @@ describe("apply variables: invalid description files leave the database byte-ide
   ];
 
   for (const [name, yaml, expected] of cases) {
-    it(name, () => {
+    it(name, async () => {
       const { dir, dbPath, backupRoot } = setup({ wal: true });
       const before = fileState(dbPath);
-      const result = runCli(
+      const result = await runCli(
         ["apply", writeDescription(dir, yaml), "--db", dbPath],
         { backupRoot },
       );
@@ -389,10 +396,10 @@ describe("apply variables: version guard", () => {
     ["18", 18, "18"],
     ["missing", null, "missing"],
   ] as const) {
-    it(`refuses page_config_version ${label} and leaves all files byte-identical`, () => {
+    it(`refuses page_config_version ${label} and leaves all files byte-identical`, async () => {
       const { dir, dbPath, backupRoot } = setup({ wal: true, version });
       const before = fileState(dbPath);
-      const result = runCli(
+      const result = await runCli(
         ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
         { backupRoot },
       );
@@ -406,9 +413,9 @@ describe("apply variables: version guard", () => {
     });
   }
 
-  it("checks the version as committed in the WAL, not only in the main file", () => {
+  it("checks the version as committed in the WAL, not only in the main file", async () => {
     const upgraded = setup({ wal: true, version: 16, walVersion: 17 });
-    const ok = runCli(
+    const ok = await runCli(
       [
         "apply",
         writeDescription(upgraded.dir, VARIABLES_YAML),
@@ -423,7 +430,7 @@ describe("apply variables: version guard", () => {
 
     const tooNew = setup({ wal: true, version: 17, walVersion: 18 });
     const before = fileState(tooNew.dbPath);
-    const refused = runCli(
+    const refused = await runCli(
       [
         "apply",
         writeDescription(tooNew.dir, VARIABLES_YAML),
@@ -439,10 +446,10 @@ describe("apply variables: version guard", () => {
     assert.deepEqual(fileState(tooNew.dbPath), before);
   });
 
-  it("refuses a file that is not a database", () => {
+  it("refuses a file that is not a database", async () => {
     const { dir, backupRoot } = setup();
     const notDb = writeDescription(dir, "not a database", "fake.sqlite");
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", notDb],
       { backupRoot },
     );
@@ -451,9 +458,9 @@ describe("apply variables: version guard", () => {
     assert.equal(existsSync(backupRoot), false);
   });
 
-  it("refuses a missing database", () => {
+  it("refuses a missing database", async () => {
     const { dir, backupRoot } = setup();
-    const result = runCli(
+    const result = await runCli(
       [
         "apply",
         writeDescription(dir, VARIABLES_YAML),
@@ -470,12 +477,12 @@ describe("apply variables: version guard", () => {
 });
 
 describe("apply variables: failures inside the transaction roll back", () => {
-  it("an injected write failure leaves content unchanged and keeps the backup with WAL files", () => {
+  it("an injected write failure leaves content unchanged and keeps the backup with WAL files", async () => {
     const { dir, dbPath, backupRoot } = setup({ wal: true });
     const before = dumpDatabase(dbPath);
     const beforeFiles = fileState(dbPath);
     let wroteBeforeFailing = false;
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       {
         backupRoot,
@@ -505,11 +512,11 @@ describe("apply variables: failures inside the transaction roll back", () => {
     assert.deepEqual(fileState(join(backupDir, "db.sqlite")), beforeFiles);
   });
 
-  it("a non-ok integrity check leaves content unchanged and keeps the backup", () => {
+  it("a non-ok integrity check leaves content unchanged and keeps the backup", async () => {
     const { dir, dbPath, backupRoot } = setup({ wal: true });
     const before = dumpDatabase(dbPath);
     const beforeFiles = fileState(dbPath);
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       {
         backupRoot,
@@ -534,10 +541,10 @@ describe("apply variables: failures inside the transaction roll back", () => {
     assert.deepEqual(fileState(join(backupDir, "db.sqlite")), beforeFiles);
   });
 
-  it("refuses with a version error when the version changes before the write lock", () => {
+  it("refuses with a version error when the version changes before the write lock", async () => {
     const { dir, dbPath, backupRoot } = setup({ wal: true });
     const beforeVariables = customVariables(dbPath);
-    const result = runCli(
+    const result = await runCli(
       ["apply", writeDescription(dir, VARIABLES_YAML), "--db", dbPath],
       {
         backupRoot,
@@ -562,7 +569,7 @@ describe("apply variables: failures inside the transaction roll back", () => {
     assert.deepEqual(customVariables(dbPath), beforeVariables);
   });
 
-  it("runs the writer's database check on the snapshot and again under the write lock", () => {
+  it("runs the writer's database check on the snapshot and again under the write lock", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const seen: boolean[] = [];
     apply(
@@ -596,10 +603,12 @@ describe("apply: default install database and command line", () => {
     return { home, dbPath, file: writeDescription(home, VARIABLES_YAML) };
   }
 
-  it("refuses the default install database", () => {
+  it("refuses the default install database", async () => {
     const { home, dbPath, file } = fakeInstall();
     const before = fileState(dbPath);
-    const result = runCli(["apply", file, "--db", dbPath], { homedir: home });
+    const result = await runCli(["apply", file, "--db", dbPath], {
+      homedir: home,
+    });
     assert.equal(result.code, 1);
     assert.match(
       result.stderr[0] ?? "",
@@ -608,11 +617,13 @@ describe("apply: default install database and command line", () => {
     assert.deepEqual(fileState(dbPath), before);
   });
 
-  it("refuses a symlink that resolves to the default install database", () => {
+  it("refuses a symlink that resolves to the default install database", async () => {
     const { home, dbPath, file } = fakeInstall();
     const link = join(tempDir(), "link.sqlite");
     symlinkSync(dbPath, link);
-    const result = runCli(["apply", file, "--db", link], { homedir: home });
+    const result = await runCli(["apply", file, "--db", link], {
+      homedir: home,
+    });
     assert.equal(result.code, 1);
     assert.match(
       result.stderr[0] ?? "",
@@ -620,7 +631,7 @@ describe("apply: default install database and command line", () => {
     );
   });
 
-  it("refuses a path through a symlinked directory and a ~ path", () => {
+  it("refuses a path through a symlinked directory and a ~ path", async () => {
     const { home, file } = fakeInstall();
     const linkDir = join(tempDir(), "linked");
     symlinkSync(
@@ -631,7 +642,9 @@ describe("apply: default install database and command line", () => {
       join(linkDir, "v5.1", "db.sqlite"),
       "~/Library/Application Support/companion/v5.1/db.sqlite",
     ]) {
-      const result = runCli(["apply", file, "--db", db], { homedir: home });
+      const result = await runCli(["apply", file, "--db", db], {
+        homedir: home,
+      });
       assert.equal(result.code, 1, db);
       assert.match(
         result.stderr[0] ?? "",
@@ -640,17 +653,19 @@ describe("apply: default install database and command line", () => {
     }
   });
 
-  it("allows a copy elsewhere in the same home", () => {
+  it("allows a copy elsewhere in the same home", async () => {
     const { home, file } = fakeInstall();
     const copyDir = join(home, "copies");
     mkdirSync(copyDir);
     const copy = buildFixtureDb(copyDir);
-    const result = runCli(["apply", file, "--db", copy], { homedir: home });
+    const result = await runCli(["apply", file, "--db", copy], {
+      homedir: home,
+    });
     assert.equal(result.code, 0, result.stderr.join("\n"));
   });
 
-  it("requires --db", () => {
-    const result = runCli([
+  it("requires --db", async () => {
+    const result = await runCli([
       "apply",
       writeDescription(tempDir(), VARIABLES_YAML),
     ]);
@@ -659,7 +674,7 @@ describe("apply: default install database and command line", () => {
     assert.match(result.stderr[0] ?? "", /--db is required/);
   });
 
-  it("rejects unknown commands, options and missing files", () => {
+  it("rejects unknown commands, options and missing files", async () => {
     for (const argv of [
       [],
       ["frobnicate"],
@@ -667,11 +682,11 @@ describe("apply: default install database and command line", () => {
       ["apply", "a.yaml", "b.yaml", "--db", "x"],
       ["apply", "a.yaml", "--nope"],
     ]) {
-      const result = runCli(argv);
+      const result = await runCli(argv);
       assert.equal(result.code, 2, argv.join(" "));
       assert.equal(result.stderr.length, 1);
     }
-    const missing = runCli([
+    const missing = await runCli([
       "apply",
       join(tempDir(), "missing.yaml"),
       "--db",

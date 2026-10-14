@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer and the single-button writer work against a database copy; multi-step buttons, feedbacks, the page and trigger writers, stopping and restarting Companion, and the REST helper are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer and the single-button writer work against a database copy, and the REST helper's runtime commands work against a running local Companion; multi-step buttons, feedbacks, the page and trigger writers, and stopping and restarting Companion are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -76,6 +76,27 @@ up: []                                     # optional action list, run on releas
 The page must already exist, and every custom variable an action targets or a `$(custom:<name>)` reference names (in `text`, `set` values and expressions) must already exist; apply a `kind: variables` file first. The control previously at that location is deleted and a new `button-layered` control with fresh ids takes its place; the page's other cells are untouched. Rotary actions, steps, feedbacks and other style fields are not supported yet and are rejected as unknown fields. A `|` block scalar works for multi-line text; its trailing newline is dropped.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
+
+### Runtime commands (REST helper)
+
+These talk to a running local Companion and never touch the database:
+
+```sh
+companion-cli press 1 0 2            # also down, up, rotate-left, rotate-right: <page> <row> <column>
+companion-cli press 1 -1 0           # rows and columns may be negative
+companion-cli variable get fx_counter
+companion-cli variable set fx_counter 0          # sends the JSON number 0
+companion-cli variable set fx_label hello        # sends the JSON string "hello"
+companion-cli variable set --string fx_label 0   # sends the JSON string "0"
+companion-cli surface list
+companion-cli surface get streamdeck:AB12
+```
+
+They read `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` in the working directory; environment variables take precedence. Both are required for every command. `COMPANION_URL` must be an `http:` or `https:` URL on `localhost`, `127.0.0.1` or `[::1]`; any other host is refused before a request is sent. A path prefix in the URL is kept. Every request sends `Authorization: Bearer <key>`, and the key is never printed.
+
+`variable set` sends the value as a bare JSON body with `Content-Type: application/json`: a finite number, `true` or `false` as that JSON value, anything else as a JSON string; `--string` always sends a string. `variable get` prints Companion's plain-text value. A surface prints as one line: `<id> connected|disconnected <rows>x<columns> page <number> "<name>"`, with `-` for a null size, page, page number or page name (a surface showing no page ends in `-`).
+
+Press, rotate and variable commands use Companion's HTTP API (setting `http_api_enabled`, on by default). The surface commands use REST API v2, which must be enabled in Companion's settings and needs a key with the `read` scope. A press at an empty location, an unknown variable, a disabled API, a rejected key or an unreachable Companion exits 1 with one line on stderr. Callers pace presses: overlapping presses can lose increments. See [docs/companion-internals.md](docs/companion-internals.md#rest-api).
 
 ## Development
 

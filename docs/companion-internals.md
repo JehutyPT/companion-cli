@@ -123,16 +123,51 @@ Stored in `controls` with id `trigger:<controlId>`. Action shapes are the same a
 
 ## REST API
 
-Bearer API key; key scopes `read`, `write`, `execute`, `connections`, `admin`. Verified by OpenAPI and live calls during the prototype run.
+Companion serves two separate runtime APIs on its web port. They are enabled by different settings, authenticate differently and answer in different formats. Verified by main.js (5.1.0) and OpenAPI, plus a live read-only `GET /api/v2/openapi.json` on 2026-10-14.
 
-| Purpose | Endpoint |
-| --- | --- |
-| Button runtime | `POST /api/location/:page/:row/:column/press`, `/down`, `/up`, `/rotate-left`, `/rotate-right`, `/step`, `/style` |
-| Custom variable | `GET /api/custom-variable/:name/value`, `POST /api/custom-variable/:name/value` |
-| Export | `/export/page/:page`, `/export/full`, and others |
-| Connections | CRUD under `/api/v2/connections/v1` |
-| Surfaces | list and get under `/api/v2/surfaces/v1`; `PATCH` changes brightness only |
-| Spec | `GET /api/v2/openapi.json` |
+| | HTTP API | REST API v2 |
+| --- | --- | --- |
+| Paths | `/api/location/...`, `/api/custom-variable/...`, others | `/api/v2/...` |
+| Enabled by | `http_api_enabled` (default on). Disabled: every route answers `403` with an empty body. (main.js) | `rest_api_enabled` (default off). Disabled: `403 {"error": {"code": "API_DISABLED", "message": "REST API is disabled"}}`. (main.js) |
+| Auth | None: the Bearer token is not checked. (main.js) | `Authorization: Bearer <key>`; key scopes `read`, `write`, `execute`, `connections`, `admin`. Surfaces need `read`. (OpenAPI) |
+| Responses | Plain text (`ok`, `No control`, `Not found`, the value). (main.js) | JSON: `{"data": ...}`; errors `{"error": {"code", "message"}}`. (OpenAPI, main.js) |
+| Described in OpenAPI | No | Yes, `GET /api/v2/openapi.json` (served before auth, still subject to `rest_api_enabled`). |
+
+The deprecated `http_legacy_api_enabled` routes (`/press/bank/...`, `/set/custom-variable/...`) are not used.
+
+### HTTP API
+
+| Purpose | Endpoint | Verified by |
+| --- | --- | --- |
+| Button runtime | `POST /api/location/:page/:row/:column/press`, `/down`, `/up`, `/rotate-left`, `/rotate-right`, `/step`, `/style` | main.js |
+| Custom variable | `GET` and `POST /api/custom-variable/:name/value` | main.js |
+| Module variable | `GET /api/variable/:label/:name/value` (not used) | main.js |
+
+Location commands answer `200 ok` on success and `204 No control` when no control exists at the location (a 204 carries no body to the client). `press` presses and auto-releases about 20 ms later on Companion's side. Verified by main.js.
+
+`GET /api/custom-variable/:name/value` answers `200` with the value as plain text (numbers stringified), or `404 Not found`. Verified by main.js.
+
+`POST /api/custom-variable/:name/value` takes the value from the first of these that applies (main.js, `#h` handler):
+
+1. a `value` query parameter (always a string);
+2. a JSON body, only when `Content-Type` is exactly `application/json` (compared lowercased to that literal, so `application/json; charset=utf-8` does not match). The app-wide parser is `express.json({strict: false})`, so a bare JSON primitive (`0`, `true`, `"abc"`) is accepted and stored with its type. A non-empty object or array is stored as given and an empty object stores `undefined`;
+3. any other truthy, non-object body (for example `text/plain`), stringified and trimmed.
+
+When none applies, it answers `400 No value`. An unknown variable gives `404 Not found`; success gives `200 ok`. Because `express.json` still parses a JSON body sent with a `charset` parameter, such a body skips branch 2 and falls to branch 3: a typed value is stored as a string, and a falsy one (`0`, `false`) is refused with `400 No value`. Verified by main.js.
+
+### REST API v2
+
+| Purpose | Endpoint | Verified by |
+| --- | --- | --- |
+| Surfaces | `GET /api/v2/surfaces/v1` (`{"data": [surface], "meta"}`), `GET /api/v2/surfaces/v1/:surfaceId` (`{"data": surface}`); `PATCH` changes brightness only | OpenAPI |
+| Connections | CRUD under `/api/v2/connections/v1` | OpenAPI |
+| Spec | `GET /api/v2/openapi.json` | OpenAPI, live call |
+
+A surface has `id`, `type`, `integrationType`, `name`, `displayName`, `isConnected`, `size` (`{rows, columns}` or null), `brightness`, `page` (`{id, number, name}` or null; `number` and `name` are each nullable) and `groupId`. Documented error statuses are `400`, `401`, `403` and `404`. Verified by OpenAPI.
+
+### Other
+
+Export lives under `/export/page/:page`, `/export/full` and others (prototype run).
 
 Not possible over REST: creating or editing buttons, pages or triggers; moving a surface to a page.
 
