@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { parseArgs } from "node:util";
 import { apply, type ApplyOptions } from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
@@ -128,7 +129,9 @@ export const HELP = [
   "report as one JSON document.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
-  "directory; environment variables take precedence.",
+  "directory or, if there is none, from ~/.config/companion-cli/.env.local",
+  "($XDG_CONFIG_HOME/companion-cli/.env.local when XDG_CONFIG_HOME is set);",
+  "environment variables take precedence.",
   "variable set sends a number, true or false as that JSON value and anything",
   "else as a string; --string always sends a string.",
 ].join("\n");
@@ -144,6 +147,10 @@ export interface CliIo {
   stderr: (line: string) => void;
 }
 
+/**
+ * `homedir` (from `ApplyOptions`) also locates the REST commands' user config
+ * file, `~/.config/companion-cli/.env.local`.
+ */
 export interface CliOptions extends ApplyOptions {
   /** Environment for the REST commands. Defaults to `process.env`. */
   env?: Env;
@@ -255,22 +262,25 @@ async function runRest(
   options: CliOptions,
 ): Promise<number> {
   const env = options.env ?? process.env;
-  const cwd = options.cwd ?? process.cwd();
+  const dirs = {
+    cwd: options.cwd ?? process.cwd(),
+    homedir: options.homedir ?? homedir(),
+  };
   try {
     const call = parseRest(command, args);
     if (call === "help") {
       io.stdout(HELP);
       return EXIT_OK;
     }
-    await call(loadEndpoint(env, cwd), io);
+    await call(loadEndpoint(env, dirs), io);
     return EXIT_OK;
   } catch (error) {
     if (error instanceof UsageError) {
-      return usageError(io, redact(error.message, configuredApiKey(env, cwd)));
+      return usageError(io, redact(error.message, configuredApiKey(env, dirs)));
     }
     const prefix = error instanceof CliError ? "" : "unexpected error: ";
     const text = error instanceof Error ? error.message : String(error);
-    const line = errorMessage(redact(text, configuredApiKey(env, cwd)));
+    const line = errorMessage(redact(text, configuredApiKey(env, dirs)));
     io.stderr(`error: ${prefix}${line}`);
     return EXIT_FAILURE;
   }

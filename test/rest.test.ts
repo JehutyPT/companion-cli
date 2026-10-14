@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -89,8 +89,16 @@ function rest(
     COMPANION_API_KEY: KEY,
   },
   cwd = tempDir(),
+  homedir = tempDir(),
 ): Promise<CliRun> {
-  return runCli(argv, { env, cwd });
+  return runCli(argv, { env, cwd, homedir });
+}
+
+/** Writes `text` to the user config file under `home` (or `configHome`). */
+function writeUserConfig(text: string, home: string, configHome?: string) {
+  const dir = join(configHome ?? join(home, ".config"), "companion-cli");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, ".env.local"), text);
 }
 
 function assertNoKey(result: CliRun) {
@@ -476,6 +484,126 @@ describe("configuration", () => {
       );
     }
     assert.equal(requests.length, 0);
+  });
+
+  it("falls back to the user config file when the working directory has none", async () => {
+    const home = tempDir();
+    writeUserConfig(
+      `COMPANION_URL=${baseUrl}\nCOMPANION_API_KEY=${KEY}\n`,
+      home,
+    );
+    const result = await rest(["press", "1", "0", "0"], {}, tempDir(), home);
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.equal(only().headers.authorization, `Bearer ${KEY}`);
+  });
+
+  it("prefers .env.local in the working directory over the user config file, whole file", async () => {
+    const home = tempDir();
+    writeUserConfig(
+      `COMPANION_URL=${baseUrl}\nCOMPANION_API_KEY=user-key\n`,
+      home,
+    );
+    const cwd = tempDir();
+    writeFileSync(join(cwd, ".env.local"), `COMPANION_API_KEY=${KEY}\n`);
+    const used = await rest(
+      ["press", "1", "0", "0"],
+      { COMPANION_URL: baseUrl },
+      cwd,
+      home,
+    );
+    assert.equal(used.code, 0, used.stderr.join("\n"));
+    assert.equal(only().headers.authorization, `Bearer ${KEY}`);
+    // The user file's URL is not merged in when the working directory has a file.
+    assertFailure(
+      await rest(["press", "1", "0", "0"], {}, cwd, home),
+      /COMPANION_URL is not set/,
+    );
+  });
+
+  it("uses $XDG_CONFIG_HOME for the user config file when set", async () => {
+    const home = tempDir();
+    const configHome = tempDir();
+    writeUserConfig(`COMPANION_API_KEY=home-key\n`, home);
+    writeUserConfig(`COMPANION_API_KEY=${KEY}\n`, home, configHome);
+    const result = await rest(
+      ["press", "1", "0", "0"],
+      { COMPANION_URL: baseUrl, XDG_CONFIG_HOME: configHome },
+      tempDir(),
+      home,
+    );
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.equal(only().headers.authorization, `Bearer ${KEY}`);
+  });
+
+  it("ignores an empty $XDG_CONFIG_HOME", async () => {
+    const home = tempDir();
+    writeUserConfig(`COMPANION_API_KEY=${KEY}\n`, home);
+    const result = await rest(
+      ["press", "1", "0", "0"],
+      { COMPANION_URL: baseUrl, XDG_CONFIG_HOME: "" },
+      tempDir(),
+      home,
+    );
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.equal(only().headers.authorization, `Bearer ${KEY}`);
+  });
+
+  it("lets the environment override the user config file", async () => {
+    const home = tempDir();
+    writeUserConfig(
+      `COMPANION_URL=http://127.0.0.1:1\nCOMPANION_API_KEY=file-key\n`,
+      home,
+    );
+    const result = await rest(
+      ["press", "1", "0", "0"],
+      { COMPANION_URL: baseUrl, COMPANION_API_KEY: KEY },
+      tempDir(),
+      home,
+    );
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.equal(only().headers.authorization, `Bearer ${KEY}`);
+  });
+
+  it("redacts a key read from the user config file", async () => {
+    const home = tempDir();
+    writeUserConfig(
+      `COMPANION_URL=${baseUrl}\nCOMPANION_API_KEY="${KEY}\\nx"\n`,
+      home,
+    );
+    const result = await rest(["press", "1", "0", "0"], {}, tempDir(), home);
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr.length, 1);
+    assert.doesNotMatch(result.stderr[0] ?? "", /unexpected error/);
+    assertNoKey(result);
+  });
+
+  it("names both files when a value is set in neither", async () => {
+    const home = tempDir();
+    const result = await rest(
+      ["press", "1", "0", "0"],
+      { COMPANION_URL: baseUrl },
+      tempDir(),
+      home,
+    );
+    assertFailure(
+      result,
+      /COMPANION_API_KEY is not set: set it in \.env\.local, .+ or the environment/,
+    );
+    assert.ok(
+      (result.stderr[0] ?? "").includes(
+        join(home, ".config", "companion-cli", ".env.local"),
+      ),
+      result.stderr[0],
+    );
+  });
+
+  it("names the file that cannot be read", async () => {
+    const home = tempDir();
+    mkdirSync(join(home, ".config", "companion-cli", ".env.local"), {
+      recursive: true,
+    });
+    const result = await rest(["press", "1", "0", "0"], {}, tempDir(), home);
+    assertFailure(result, /cannot read .*companion-cli\/\.env\.local/);
   });
 
   it("refuses a non-http URL", async () => {

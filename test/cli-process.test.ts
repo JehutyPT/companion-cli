@@ -13,16 +13,24 @@ const BIN = fileURLToPath(
   new URL("../src/bin/companion-cli.ts", import.meta.url),
 );
 
-/** The parent environment without any `COMPANION_*` variable. */
+/**
+ * The parent environment without any `COMPANION_*` variable or
+ * `XDG_CONFIG_HOME`, so the user config file is looked up under `HOME`.
+ */
 function cleanEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("COMPANION_")) env[name] = value;
+    if (!name.startsWith("COMPANION_") && name !== "XDG_CONFIG_HOME") {
+      env[name] = value;
+    }
   }
   return env;
 }
 
-/** Runs the executable in `home`, so it never sees the repository's `.env.local`. */
+/**
+ * Runs the executable in `home` with `HOME` set to it, so it never sees the
+ * repository's `.env.local` or the user's config file.
+ */
 function cli(args: string[], home: string) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: "utf8",

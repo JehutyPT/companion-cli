@@ -17,7 +17,7 @@ Companion has no supported API to create buttons, pages or triggers. Its REST AP
 | Page writer | Takes a page name and a grid of button descriptions; replaces only that page's buttons. |
 | Trigger writer | Creates or replaces one trigger by name (same `controls` table, `trigger:` prefix): startup, interval and variable-change events and the button writer's actions. |
 | Variable writer | Creates or updates custom variables: default value, persist on restart, description. |
-| REST helper | Presses or rotates a button at a location, reads or sets a custom variable, reads surface status. Reads `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local`. |
+| REST helper | Presses or rotates a button at a location, reads or sets a custom variable, reads surface status. Reads `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` or the user config file. |
 
 Every write is an idempotent "replace this one thing" operation, and every writer validates its description file before touching the database ([ADR 0002](docs/adr/0002-declarative-description-files.md)).
 
@@ -42,6 +42,8 @@ node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
 node dist/bin/companion-cli.js apply variables.yaml --dry-run                 # report only, write nothing
 node dist/bin/companion-cli.js apply variables.yaml --dry-run --json          # the same report as JSON
 ```
+
+`npm link` (after `npm run build`) puts `companion-cli` on your `PATH`, so it runs from any directory. The REST commands then need the user config file; see [Setup](#setup).
 
 `variables.yaml`:
 
@@ -180,7 +182,7 @@ companion-cli surface list
 companion-cli surface get streamdeck:AB12
 ```
 
-They read `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` in the working directory; environment variables take precedence. Both are required for every command. `COMPANION_URL` must be an `http:` or `https:` URL on `localhost`, `127.0.0.1` or `[::1]`; any other host is refused before a request is sent. A path prefix in the URL is kept. Every request sends `Authorization: Bearer <key>`, and the key is never printed.
+They read `COMPANION_URL` and `COMPANION_API_KEY` from `.env.local` in the working directory or, if the working directory has none, from the user config file `~/.config/companion-cli/.env.local` (`$XDG_CONFIG_HOME/companion-cli/.env.local` when `XDG_CONFIG_HOME` is set). Only the first file that exists is read; the two are not merged. Environment variables take precedence over either file. Both are required for every command. `COMPANION_URL` must be an `http:` or `https:` URL on `localhost`, `127.0.0.1` or `[::1]`; any other host is refused before a request is sent. A path prefix in the URL is kept. Every request sends `Authorization: Bearer <key>`, and the key is never printed.
 
 `variable set` sends the value as a bare JSON body with `Content-Type: application/json`: a finite number, `true` or `false` as that JSON value, anything else as a JSON string; `--string` always sends a string. `variable get` prints Companion's plain-text value. A surface prints as one line: `<id> connected|disconnected <rows>x<columns> page <number> "<name>"`, with `-` for a null size, page, page number or page name (a surface showing no page ends in `-`).
 
@@ -198,7 +200,7 @@ To try it on a copy first, apply both files with `--db /path/to/copy/db.sqlite`.
 
 Applying to the local install (live-install mode) quits and restarts Companion once per file. Run these steps yourself from the repository root, after `npm install` and `npm run build`, invoking the CLI as in [Usage](#usage): `node dist/bin/companion-cli.js …`.
 
-1. **Pre-flight, in Companion's web UI** (do not open the database): check the grid size; note the current page count N and whether page 99 exists. Decide whether the 98 − N gap pages, or replacing an existing page 99, are acceptable. Check that `.env.local` in the directory you run the commands from holds `COMPANION_URL` and `COMPANION_API_KEY`.
+1. **Pre-flight, in Companion's web UI** (do not open the database): check the grid size; note the current page count N and whether page 99 exists. Decide whether the 98 − N gap pages, or replacing an existing page 99, are acceptable. Check that `.env.local` in the directory you run the commands from, or the user config file `~/.config/companion-cli/.env.local` if that directory has none, holds `COMPANION_URL` and `COMPANION_API_KEY`.
 2. **Dry-run the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml --dry-run`. It writes nothing and does not touch Companion. Expect only the 12 `sk_*` rows in `custom_variables` to be added or replaced. If it prints `no changes` (the variables already exist and are identical, for example from the prototype), skip step 3: applying would only restart Companion.
 3. **Apply the variables:** `node dist/bin/companion-cli.js apply examples/skaarhoj-test-page/variables.yaml`. Blast radius: the 12 `sk_*` custom-variable definitions, which the prototype's existing page 20 also uses, and one Companion restart. Note the `backup:` path and the summary line.
 4. **Wait for Companion:** the tool does not wait for Companion to be ready after starting it. Repeat `node dist/bin/companion-cli.js variable get sk_presses` until it answers before going on.
@@ -272,7 +274,7 @@ Applying to the local install (live-install mode) quits and restarts Companion o
 
 ## Setup
 
-Copy `.env.example` to `.env.local` and fill in the API key from Companion's settings. `.env.local` is gitignored.
+Copy `.env.example` to `.env.local` and fill in the API key from Companion's settings. `.env.local` is gitignored. To run the REST commands from any directory (for example after `npm link`), put the same file at `~/.config/companion-cli/.env.local` (`$XDG_CONFIG_HOME/companion-cli/.env.local` when `XDG_CONFIG_HOME` is set); a `.env.local` in the working directory still wins.
 
 ## Licence
 
