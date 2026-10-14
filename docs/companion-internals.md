@@ -83,7 +83,7 @@ Verified by DB (shapes copied from existing controls), prototype (`verify.py` co
   - `image0` (type `image`): common geometry, `base64Image: null`, `halign`, `valign`, `fillMode: "fit"`, `pinnedProperties`.
   - `text0` (type `text`): common geometry, `text`, `color`, `halign`, `valign`, `fontsize: 100`, `fontsizeAllowShrink: true`, `font: "companion-sans"`, `outlineColor: 4278190080`, `pinnedProperties`.
   - Every layer has `id`, `name`, `usage: "auto"`, `type`.
-- **Colours** are integers `0xRRGGBB`.
+- **Colors** are integers `0xRRGGBB`.
 - **Text line breaks** are stored as a literal backslash followed by `n` (two characters), not a newline.
 - **Steps** are keyed `"0"`, `"1"`, …. With `stepProgression: "auto"`, each press advances to the next step.
 - **Rotary**: `options.rotaryActions: true` enables `rotate_left` / `rotate_right` sets for encoders.
@@ -103,7 +103,7 @@ Verified by DB, prototype and main.js: in 5.1 the upgrade rewrites `custom_varia
 
 ## Feedbacks
 
-`bank_current_step` (connection `internal`), used for a two-step latch:
+Feedbacks live at control level (`feedbacks`, a list), not per step. Every feedback the CLI writes is a boolean feedback with this shape; the kinds differ only in `definitionId`, `connectionId` and `options`:
 
 ```json
 {"type": "feedback", "id": "<nanoid>", "definitionId": "bank_current_step",
@@ -117,7 +117,20 @@ Verified by DB, prototype and main.js: in 5.1 the upgrade rewrites `custom_varia
  "children": {}}
 ```
 
-`step` is 1-based: step key `"1"` is step 2 (inferred from the prototype latch, which showed ON on its second step). Verified by DB (shape copied from an existing control), main.js (definition id present) and prototype.
+- **Style overrides** name a layer and one of its properties: background color is `box0` / `color`, text color `text0` / `color`, text `text0` / `text`. Values are wrapped like layer properties (colors as integers, text with literal backslash-n line breaks). Only the listed properties change while the feedback holds. Verified by DB (shape copied from an existing control) and prototype; main.js converts old-style button styles into overrides with the same `{overrideId, elementId, elementProperty, override}` entries, using `elementProperty` `"color"` for colors and `"text"` for text, and wraps them in a `check_expression` feedback with `options: {expression: qs("true")}`.
+- **`bank_current_step`** (connection `internal`): holds while the button is on step `step`. `step` is **1-based**: step key `"0"` is step 1. Verified by main.js: the feedback is evaluated as `actionSets.getActiveStepIndex() + 1 === Number(step)`, and its definition ("Button: Check step", `feedbackType: "boolean"`, `showInvert: true`) declares `step` as a `number` option with `default: 1, min: 1`. Consistent with the prototype latch, which showed ON on its second step with `step: 2`.
+- **`check_expression`** (connection `internal`): holds while a boolean expression is true.
+
+  ```json
+  {"definitionId": "check_expression", "connectionId": "internal",
+   "options": {"expression": {"value": "$(custom:fx_label) == 'on'", "isExpression": true}}}
+  ```
+
+  Verified by main.js: the internal feedback definition `check_expression` ("Variable: Check boolean expression", `feedbackType: "boolean"`, `showInvert: true`) has one option, `id: "expression"` of `type: "expression"`; the definition sets `optionsSupportExpressions: true`, and for such definitions the option parser sets `forceExpression` on `type: "expression"` options, so this value is always evaluated as an expression (definitions without `optionsSupportExpressions` do not get that branch). Companion's own upgrade code builds this feedback as `options: {expression: qs(...)}`, where `qs(t)` returns `{value: t, isExpression: true}`.
+- **Pass-through** (any connection): `definitionId` is the module's feedback id, `connectionId` the connection id, and each option is wrapped as `{"value": <v>, "isExpression": false}`, the same as pass-through actions. Observed in main.js: module feedbacks carry the same `type`, `definitionId`, `connectionId`, `options`, `isInverted` and `styleOverrides` fields as internal ones. Valid definition ids and options are the module's own and are not checked.
+- **`isInverted`** is a wrapped boolean (`{"value": true, "isExpression": false}` inverts the condition); the boolean feedbacks above declare `showInvert: true` in main.js.
+
+Companion loading and rendering the `check_expression` and pass-through rows the CLI writes is still to be observed in the end-to-end check; `bank_current_step` rows of this shape loaded and rendered in the prototype.
 
 ## Triggers
 

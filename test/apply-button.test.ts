@@ -99,14 +99,16 @@ function withoutTables(dump: TableDump, ...tables: string[]): TableDump {
   );
 }
 
-/** Replaces generated control and action ids so two applies can be compared. */
+/**
+ * Replaces generated control, action, feedback and override ids everywhere in
+ * a dump (including page cells), so two applies can be compared.
+ */
 function normaliseIds(dump: TableDump): TableDump {
   const generated = new Set<string>();
   for (const row of dump["controls"] ?? []) {
     if (row.id.startsWith("bank:Fixture")) continue;
     generated.add(row.id);
-    for (const match of row.value.matchAll(/"id":"([A-Za-z0-9_-]{21})"/g))
-      generated.add(match[1] ?? "");
+    for (const id of generatedIds(JSON.parse(row.value))) generated.add(id);
   }
   const replace = (text: string) => {
     let out = text;
@@ -133,6 +135,120 @@ const geometry = {
   height: prop(100),
   rotation: prop(0),
 };
+
+/** Replaces every `id` and `overrideId` with "<id>" after checking its format. */
+function stripIds(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripIds);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => {
+        if (
+          (key === "id" || key === "overrideId") &&
+          typeof child === "string" &&
+          ID.test(child)
+        )
+          return [key, "<id>"];
+        return [key, stripIds(child)];
+      }),
+    );
+  }
+  return value;
+}
+
+/** Every generated `id` and `overrideId` in a control. */
+function generatedIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(generatedIds);
+  if (value !== null && typeof value === "object") {
+    return Object.entries(value).flatMap(([key, child]) =>
+      (key === "id" || key === "overrideId") &&
+      typeof child === "string" &&
+      ID.test(child)
+        ? [child]
+        : generatedIds(child),
+    );
+  }
+  return [];
+}
+
+/** The prototype's `layers(text, bg, fg)`, written out. */
+function prototypeLayers(text: string, bg: number, fg: number): Json[] {
+  return [
+    {
+      id: "canvas",
+      name: "Canvas",
+      usage: "auto",
+      type: "canvas",
+      decoration: prop("default"),
+      showStatusIcons: prop("default"),
+    },
+    {
+      id: "box0",
+      name: "Background",
+      usage: "auto",
+      type: "box",
+      ...geometry,
+      color: prop(bg),
+      borderWidth: prop(0),
+      borderColor: prop(0),
+      borderPosition: prop("inside"),
+      pinnedProperties: ["color"],
+    },
+    {
+      id: "image0",
+      name: "Image",
+      usage: "auto",
+      type: "image",
+      ...geometry,
+      base64Image: prop(null),
+      halign: prop("center"),
+      valign: prop("center"),
+      fillMode: prop("fit"),
+      pinnedProperties: ["base64Image", "halign", "valign"],
+    },
+    {
+      id: "text0",
+      name: "Text",
+      usage: "auto",
+      type: "text",
+      ...geometry,
+      text: prop(text),
+      color: prop(fg),
+      halign: prop("center"),
+      valign: prop("center"),
+      fontsize: prop(100),
+      fontsizeAllowShrink: prop(true),
+      font: prop("companion-sans"),
+      outlineColor: prop(4278190080),
+      pinnedProperties: [
+        "text",
+        "fontsize",
+        "fontsizeAllowShrink",
+        "color",
+        "halign",
+        "valign",
+      ],
+    },
+  ];
+}
+
+const setVar = (name: string, value: string, isExpression = false) => ({
+  type: "action",
+  id: "<id>",
+  definitionId: "custom_variable_set_value",
+  connectionId: "internal",
+  options: { name: prop(name), value: { value, isExpression } },
+});
+
+const emptyStep = {
+  action_sets: { down: [], up: [], rotate_left: [], rotate_right: [] },
+  options: { runWhileHeld: [] },
+};
+
+async function appliedControl(yaml: string, row = 0, column = 2) {
+  const { dbPath, result } = await applyYaml(yaml);
+  assert.equal(result.code, 0, result.stderr.join("\n"));
+  return controlAt(dumpDatabase(dbPath), row, column).control;
+}
 
 const SIMPLE_YAML = `kind: button
 location: { page: 1, row: 0, column: 2 }
@@ -427,37 +543,24 @@ up:
   - { action: passthrough, connection: other, definition: bare }
 `;
 
-  const internal = (name: string, value: unknown, isExpression: boolean) => ({
-    type: "action",
-    definitionId: "custom_variable_set_value",
-    connectionId: "internal",
-    options: { name: prop(name), value: { value, isExpression } },
-  });
-
-  function withoutIds(actions: Json[]): Json[] {
-    return actions.map(({ id, ...rest }) => {
-      assert.match(String(id), ID);
-      return rest;
-    });
-  }
-
   it("writes internal and pass-through actions in file order", async () => {
     const { dbPath, result } = await applyYaml(ACTIONS_YAML);
     assert.equal(result.code, 0, result.stderr.join("\n"));
     const { control } = controlAt(dumpDatabase(dbPath), 3, 7);
 
-    assert.deepEqual(withoutIds(downActions(control, "down")), [
-      internal("fx_label", "pressed", false),
-      internal("fx_counter", "42", false),
-      internal("fx_gap", "true", false),
-      internal("fx_label", "$(custom:fx_counter) * 2", true),
-      internal("fx_counter", "$(this:current) + 1", true),
-      internal("fx_counter", "$(this:current) - 3", true),
+    assert.deepEqual(stripIds(downActions(control, "down")), [
+      setVar("fx_label", "pressed"),
+      setVar("fx_counter", "42"),
+      setVar("fx_gap", "true"),
+      setVar("fx_label", "$(custom:fx_counter) * 2", true),
+      setVar("fx_counter", "$(this:current) + 1", true),
+      setVar("fx_counter", "$(this:current) - 3", true),
     ]);
-    assert.deepEqual(withoutIds(downActions(control, "up")), [
-      internal("fx_counter", "$(this:current) + 5", true),
+    assert.deepEqual(stripIds(downActions(control, "up")), [
+      setVar("fx_counter", "$(this:current) + 5", true),
       {
         type: "action",
+        id: "<id>",
         definitionId: "some_definition_id",
         connectionId: "FixtureConnectionAAAA",
         options: {
@@ -470,6 +573,7 @@ up:
       },
       {
         type: "action",
+        id: "<id>",
         definitionId: "bare",
         connectionId: "other",
         options: {},
@@ -549,16 +653,10 @@ describe("apply button: refusals leave the database byte-identical", () => {
 
   const cases: Array<[string, string, RegExp]> = [
     // Unknown fields.
-    ["steps field", base({ steps: "[]" }), /^error: .*: steps: unknown field$/],
     [
-      "feedbacks field",
-      base({ feedbacks: "[]" }),
-      /: feedbacks: unknown field$/,
-    ],
-    [
-      "rotate_left field",
-      base({ rotate_left: "[]" }),
-      /: rotate_left: unknown field$/,
+      "unknown top-level field",
+      base({ rotate: "[]" }),
+      /^error: .*: rotate: unknown field$/,
     ],
     [
       "top-level options field",
@@ -925,4 +1023,706 @@ background: "#000000"
     setGrid(env.dbPath, { minColumn: 8, maxColumn: 7, minRow: 0, maxRow: 3 });
     await refuse(env, /^error: cannot read the grid size/);
   });
+});
+
+describe("apply button: encoders and steps", () => {
+  it("writes the prototype's rotary() encoder", async () => {
+    const control = await appliedControl(
+      `kind: button
+location: { page: 1, row: 0, column: 3 }
+text: "E1 #46\\n$(custom:fx_counter)"
+background: "#400000"
+down:
+  - { action: set, variable: fx_counter, value: "0" }
+  - { action: set, variable: fx_label, value: E1 push }
+rotate_left: [ { action: decrement, variable: fx_counter } ]
+rotate_right: [ { action: increment, variable: fx_counter } ]
+`,
+      0,
+      3,
+    );
+    // rotary("E1", 46, "sk_enc1", rgb("400000"), ...) with fixture variables.
+    assert.deepEqual(stripIds(control), {
+      type: "button-layered",
+      options: {
+        stepProgression: "auto",
+        stepExpression: "",
+        rotaryActions: true,
+        canModifyStyleInApis: true,
+        notes: "",
+      },
+      localVariables: [],
+      steps: {
+        "0": {
+          action_sets: {
+            down: [setVar("fx_counter", "0"), setVar("fx_label", "E1 push")],
+            up: [],
+            rotate_left: [setVar("fx_counter", "$(this:current) - 1", true)],
+            rotate_right: [setVar("fx_counter", "$(this:current) + 1", true)],
+          },
+          options: { runWhileHeld: [] },
+        },
+      },
+      feedbacks: [],
+      style: {
+        layers: prototypeLayers(
+          "E1 #46\\n$(custom:fx_counter)",
+          0x400000,
+          0xffffff,
+        ),
+      },
+    });
+  });
+
+  it("writes the prototype's latch() two-step button with a step feedback", async () => {
+    const control = await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: "OFF"
+background: "#FF0000"
+steps:
+  - down:
+      - { action: increment, variable: fx_counter }
+      - { action: set, variable: fx_label, value: S9 }
+  - down:
+      - { action: increment, variable: fx_counter }
+      - { action: set, variable: fx_label, value: S9 }
+feedbacks:
+  - feedback: step
+    step: 2
+    style: { background: "#00FF00", textColor: "#000000", text: "ON" }
+`);
+    // latch("S9") with fx_counter for sk_presses and fx_label for sk_last.
+    const press = {
+      action_sets: {
+        down: [
+          setVar("fx_counter", "$(this:current) + 1", true),
+          setVar("fx_label", "S9"),
+        ],
+        up: [],
+        rotate_left: [],
+        rotate_right: [],
+      },
+      options: { runWhileHeld: [] },
+    };
+    assert.deepEqual(stripIds(control), {
+      type: "button-layered",
+      options: {
+        stepProgression: "auto",
+        stepExpression: "",
+        rotaryActions: false,
+        canModifyStyleInApis: true,
+        notes: "",
+      },
+      localVariables: [],
+      steps: { "0": press, "1": press },
+      feedbacks: [
+        {
+          type: "feedback",
+          id: "<id>",
+          definitionId: "bank_current_step",
+          connectionId: "internal",
+          options: { step: prop(2), location: prop("$(this:location)") },
+          isInverted: prop(false),
+          styleOverrides: [
+            {
+              overrideId: "<id>",
+              elementId: "box0",
+              elementProperty: "color",
+              override: prop(0x00ff00),
+            },
+            {
+              overrideId: "<id>",
+              elementId: "text0",
+              elementProperty: "color",
+              override: prop(0x000000),
+            },
+            {
+              overrideId: "<id>",
+              elementId: "text0",
+              elementProperty: "text",
+              override: prop("ON"),
+            },
+          ],
+          children: {},
+        },
+      ],
+      style: { layers: prototypeLayers("OFF", 0xff0000, 0xffffff) },
+    });
+    const ids = generatedIds(control);
+    assert.equal(ids.length, 4 + 1 + 3);
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  it("stores steps in list order with every action set, an empty mapping as an empty step", async () => {
+    const control = await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: steps
+background: "#000000"
+steps:
+  - { up: [ { action: set, variable: fx_label, value: a } ] }
+  - {}
+  - { rotate_right: [ { action: increment, variable: fx_gap } ] }
+`);
+    assert.deepEqual(stripIds(control["steps"]), {
+      "0": {
+        action_sets: {
+          down: [],
+          up: [setVar("fx_label", "a")],
+          rotate_left: [],
+          rotate_right: [],
+        },
+        options: { runWhileHeld: [] },
+      },
+      "1": emptyStep,
+      "2": {
+        action_sets: {
+          down: [],
+          up: [],
+          rotate_left: [],
+          rotate_right: [setVar("fx_gap", "$(this:current) + 1", true)],
+        },
+        options: { runWhileHeld: [] },
+      },
+    });
+    assert.equal(
+      (control["options"] as Json)["rotaryActions"],
+      true,
+      "rotate_right in a step",
+    );
+  });
+
+  it("sets rotaryActions for an empty rotate list, inside a step or at top level", async () => {
+    const rotary = async (fields: string) =>
+      (
+        (
+          await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: r
+background: "#000000"
+${fields}`)
+        )["options"] as Json
+      )["rotaryActions"];
+    assert.equal(
+      await rotary("steps:\n  - { rotate_left: [] }\n  - {}\n"),
+      true,
+    );
+    assert.equal(await rotary("rotate_left: []\n"), true);
+    assert.equal(await rotary("rotate_right: []\n"), true);
+    assert.equal(await rotary("steps:\n  - { down: [] }\n"), false);
+    assert.equal(await rotary("down: []\n"), false);
+  });
+
+  it("writes an empty feedbacks list like a description without it", async () => {
+    const control = await appliedControl(SIMPLE_YAML + "feedbacks: []\n");
+    assert.deepEqual(control["feedbacks"], []);
+    assert.deepEqual(control["steps"], { "0": emptyStep });
+  });
+});
+
+describe("apply button: feedbacks", () => {
+  const withFeedbacks = (feedbacks: string, extra = "") => `kind: button
+location: { page: 1, row: 0, column: 2 }
+text: fb
+background: "#000080"
+${extra}feedbacks:
+${feedbacks}`;
+
+  async function feedbacksOf(yaml: string): Promise<Json[]> {
+    const control = await appliedControl(yaml);
+    return control["feedbacks"] as Json[];
+  }
+
+  it("writes an expression feedback as check_expression, inverted when asked", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(`  - feedback: expression
+    expression: "$(custom:fx_label) == 'on'"
+    style: { background: "#FFA500" }
+    invert: true
+  - feedback: expression
+    expression: "$(custom:fx_counter) > 2"
+    style: { text: "HI" }
+    invert: false
+  - feedback: expression
+    expression: "true"
+    style: { textColor: "#010203" }
+`),
+    );
+    const expression = (
+      text: string,
+      inverted: boolean,
+      overrides: Json[],
+    ) => ({
+      type: "feedback",
+      id: "<id>",
+      definitionId: "check_expression",
+      connectionId: "internal",
+      options: { expression: { value: text, isExpression: true } },
+      isInverted: prop(inverted),
+      styleOverrides: overrides,
+      children: {},
+    });
+    assert.deepEqual(stripIds(feedbacks), [
+      expression("$(custom:fx_label) == 'on'", true, [
+        {
+          overrideId: "<id>",
+          elementId: "box0",
+          elementProperty: "color",
+          override: prop(0xffa500),
+        },
+      ]),
+      expression("$(custom:fx_counter) > 2", false, [
+        {
+          overrideId: "<id>",
+          elementId: "text0",
+          elementProperty: "text",
+          override: prop("HI"),
+        },
+      ]),
+      expression("true", false, [
+        {
+          overrideId: "<id>",
+          elementId: "text0",
+          elementProperty: "color",
+          override: prop(0x010203),
+        },
+      ]),
+    ]);
+  });
+
+  it("writes a pass-through feedback with wrapped options", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(`  - feedback: passthrough
+    connection: FixtureConnectionAAAA
+    definition: some_feedback_id
+    options: { input: 1, label: "x", list: [1, "a"], nested: { on: true }, none: null }
+    style: { text: "LIVE" }
+  - { feedback: passthrough, connection: other, definition: bare, style: { text: "" }, invert: true }
+`),
+    );
+    assert.deepEqual(stripIds(feedbacks), [
+      {
+        type: "feedback",
+        id: "<id>",
+        definitionId: "some_feedback_id",
+        connectionId: "FixtureConnectionAAAA",
+        options: {
+          input: prop(1),
+          label: prop("x"),
+          list: prop([1, "a"]),
+          nested: prop({ on: true }),
+          none: prop(null),
+        },
+        isInverted: prop(false),
+        styleOverrides: [
+          {
+            overrideId: "<id>",
+            elementId: "text0",
+            elementProperty: "text",
+            override: prop("LIVE"),
+          },
+        ],
+        children: {},
+      },
+      {
+        type: "feedback",
+        id: "<id>",
+        definitionId: "bare",
+        connectionId: "other",
+        options: {},
+        isInverted: prop(true),
+        styleOverrides: [
+          {
+            overrideId: "<id>",
+            elementId: "text0",
+            elementProperty: "text",
+            override: prop(""),
+          },
+        ],
+        children: {},
+      },
+    ]);
+  });
+
+  it("writes overrides in the order background, text color, text whatever the file order", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(`  - feedback: step
+    step: 1
+    style:
+      text: |
+        Two
+        lines
+      textColor: "#ffffff"
+      background: "#123456"
+`),
+    );
+    assert.deepEqual((stripIds(feedbacks) as Json[])[0]?.["styleOverrides"], [
+      {
+        overrideId: "<id>",
+        elementId: "box0",
+        elementProperty: "color",
+        override: prop(0x123456),
+      },
+      {
+        overrideId: "<id>",
+        elementId: "text0",
+        elementProperty: "color",
+        override: prop(0xffffff),
+      },
+      {
+        overrideId: "<id>",
+        elementId: "text0",
+        elementProperty: "text",
+        override: prop("Two\\nlines"),
+      },
+    ]);
+  });
+
+  it("does not derive a text color from a feedback background", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(`  - { feedback: step, step: 1, style: { background: "#FFFFFF" } }
+`),
+    );
+    const overrides = feedbacks[0]?.["styleOverrides"] as Json[];
+    assert.equal(overrides.length, 1);
+    assert.equal(overrides[0]?.["elementProperty"], "color");
+    assert.equal(overrides[0]?.["elementId"], "box0");
+  });
+
+  it("accepts a step feedback up to the step count, keeps file order and fresh ids", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(
+        `  - { feedback: step, step: 3, style: { text: three } }
+  - { feedback: step, step: 1, style: { text: one } }
+  - { feedback: expression, expression: "1 > 0", style: { text: e } }
+`,
+        "steps: [ {}, {}, {} ]\n",
+      ),
+    );
+    assert.deepEqual(
+      feedbacks.map((fb) => (fb["options"] as Json)["step"]),
+      [prop(3), prop(1), undefined],
+    );
+    const ids = generatedIds(feedbacks);
+    assert.equal(ids.length, 6);
+    assert.equal(new Set(ids).size, 6);
+  });
+
+  it("does not check pass-through feedback connections or options against the database", async () => {
+    const feedbacks = await feedbacksOf(
+      withFeedbacks(`  - feedback: passthrough
+    connection: NoSuchConnection
+    definition: d
+    options: { x: "$(custom:not_checked)" }
+    style: { background: "#000000" }
+`),
+    );
+    assert.equal(feedbacks.length, 1);
+  });
+});
+
+describe("apply button: step and feedback refusals leave the database byte-identical", () => {
+  const button = (fields: string) => `kind: button
+location: { page: 1, row: 0, column: 2 }
+text: ok
+background: "#000080"
+${fields}`;
+  const feedback = (entry: string, extra = "") =>
+    button(`${extra}feedbacks:\n  - ${entry}\n`);
+
+  const cases: Array<[string, string, RegExp]> = [
+    // Steps.
+    [
+      "empty steps",
+      button("steps: []\n"),
+      /^error: .*: steps: must not be empty$/,
+    ],
+    ["steps not a list", button("steps: {}\n"), /: steps: must be a list/],
+    [
+      "step not a mapping",
+      button("steps: [ down ]\n"),
+      /: steps\[0\]: must be a mapping/,
+    ],
+    [
+      "unknown step field",
+      button("steps:\n  - {}\n  - { text: x }\n"),
+      /: steps\[1\]\.text: unknown field$/,
+    ],
+    [
+      "bad action inside a step",
+      button(
+        "steps:\n  - {}\n  - { down: [ { action: increment, variable: a-b } ] }\n",
+      ),
+      /: steps\[1\]\.down\[0\]\.variable: invalid variable name "a-b"/,
+    ],
+    [
+      "steps with top-level down",
+      button("down: []\nsteps: [ {} ]\n"),
+      /: down: cannot be combined with steps$/,
+    ],
+    [
+      "steps with top-level up",
+      button("steps: [ {} ]\nup: []\n"),
+      /: up: cannot be combined with steps$/,
+    ],
+    [
+      "steps with top-level rotate_left",
+      button("rotate_left: []\nsteps: [ {} ]\n"),
+      /: rotate_left: cannot be combined with steps$/,
+    ],
+    [
+      "steps with top-level rotate_right",
+      button("rotate_right: []\nsteps: [ {} ]\n"),
+      /: rotate_right: cannot be combined with steps$/,
+    ],
+    [
+      "rotate_left not a list",
+      button("rotate_left: 1\n"),
+      /: rotate_left: must be a list/,
+    ],
+    [
+      "unknown action in rotate_right",
+      button("rotate_right: [ { action: spin } ]\n"),
+      /: rotate_right\[0\]\.action: unknown action "spin"/,
+    ],
+    // Feedback structure.
+    [
+      "feedbacks not a list",
+      button("feedbacks: {}\n"),
+      /: feedbacks: must be a list/,
+    ],
+    [
+      "feedback not a mapping",
+      button("feedbacks: [ step ]\n"),
+      /: feedbacks\[0\]: must be a mapping/,
+    ],
+    [
+      "non-string feedback tag",
+      feedback("{ feedback: 5, style: { text: a } }"),
+      /: feedbacks\[0\]\.feedback: must be a string, got a number$/,
+    ],
+    [
+      "missing feedback tag",
+      feedback("{ step: 1, style: { text: a } }"),
+      /: feedbacks\[0\]\.feedback: is required$/,
+    ],
+    [
+      "unknown feedback kind",
+      feedback("{ feedback: bank_pushed, style: { text: a } }"),
+      /: feedbacks\[0\]\.feedback: unknown feedback "bank_pushed" \(expected one of: step, expression, passthrough\)$/,
+    ],
+    [
+      "unknown field in a feedback",
+      feedback(
+        "{ feedback: step, step: 1, expression: x, style: { text: a } }",
+      ),
+      /: feedbacks\[0\]\.expression: unknown field$/,
+    ],
+    [
+      "options on an expression feedback",
+      feedback(
+        '{ feedback: expression, expression: "1", options: {}, style: { text: a } }',
+      ),
+      /: feedbacks\[0\]\.options: unknown field$/,
+    ],
+    // Step feedback.
+    [
+      "missing step",
+      feedback("{ feedback: step, style: { text: a } }"),
+      /: feedbacks\[0\]\.step: is required$/,
+    ],
+    [
+      "step 0",
+      feedback("{ feedback: step, step: 0, style: { text: a } }"),
+      /: feedbacks\[0\]\.step: must be an integer between 1 and 1, got 0$/,
+    ],
+    [
+      "step beyond a single-step button",
+      feedback("{ feedback: step, step: 2, style: { text: a } }"),
+      /: feedbacks\[0\]\.step: must be an integer between 1 and 1, got 2$/,
+    ],
+    [
+      "step beyond the step count",
+      feedback(
+        "{ feedback: step, step: 3, style: { text: a } }",
+        "steps: [ {}, {} ]\n",
+      ),
+      /: feedbacks\[0\]\.step: must be an integer between 1 and 2, got 3$/,
+    ],
+    [
+      "fractional step",
+      feedback("{ feedback: step, step: 1.5, style: { text: a } }"),
+      /: feedbacks\[0\]\.step: must be an integer between 1 and 1, got 1\.5$/,
+    ],
+    [
+      "string step",
+      feedback('{ feedback: step, step: "1", style: { text: a } }'),
+      /: feedbacks\[0\]\.step: must be an integer between 1 and 1, got a string$/,
+    ],
+    // Expression feedback.
+    [
+      "empty expression",
+      feedback('{ feedback: expression, expression: "", style: { text: a } }'),
+      /: feedbacks\[0\]\.expression: must not be empty$/,
+    ],
+    [
+      "missing expression",
+      feedback("{ feedback: expression, style: { text: a } }"),
+      /: feedbacks\[0\]\.expression: is required$/,
+    ],
+    // Pass-through feedback.
+    [
+      "pass-through without definition",
+      feedback("{ feedback: passthrough, connection: c, style: { text: a } }"),
+      /: feedbacks\[0\]\.definition: is required$/,
+    ],
+    [
+      "pass-through empty connection",
+      feedback(
+        '{ feedback: passthrough, connection: "", definition: d, style: { text: a } }',
+      ),
+      /: feedbacks\[0\]\.connection: must not be empty$/,
+    ],
+    [
+      "pass-through options not a mapping",
+      feedback(
+        "{ feedback: passthrough, connection: c, definition: d, options: [], style: { text: a } }",
+      ),
+      /: feedbacks\[0\]\.options: must be a mapping/,
+    ],
+    // Style and invert.
+    [
+      "missing style",
+      feedback("{ feedback: step, step: 1 }"),
+      /: feedbacks\[0\]\.style: is required$/,
+    ],
+    [
+      "empty style",
+      feedback("{ feedback: step, step: 1, style: {} }"),
+      /: feedbacks\[0\]\.style: must set at least one of background, textColor, text$/,
+    ],
+    [
+      "style not a mapping",
+      feedback("{ feedback: step, step: 1, style: red }"),
+      /: feedbacks\[0\]\.style: must be a mapping/,
+    ],
+    [
+      "unknown style field",
+      feedback("{ feedback: step, step: 1, style: { fontsize: 10 } }"),
+      /: feedbacks\[0\]\.style\.fontsize: unknown field$/,
+    ],
+    [
+      "unquoted style color",
+      button(
+        "feedbacks:\n  - feedback: step\n    step: 1\n    style:\n      background: #00FF00\n",
+      ),
+      /: feedbacks\[0\]\.style\.background: .*quote/,
+    ],
+    [
+      "bad style text color",
+      feedback('{ feedback: step, step: 1, style: { textColor: "#12345" } }'),
+      /: feedbacks\[0\]\.style\.textColor: must be a color/,
+    ],
+    [
+      "non-string style text",
+      feedback("{ feedback: step, step: 1, style: { text: 5 } }"),
+      /: feedbacks\[0\]\.style\.text: must be a string/,
+    ],
+    [
+      "null style text color",
+      button(
+        "feedbacks:\n  - feedback: step\n    step: 1\n    style:\n      textColor:\n",
+      ),
+      /: feedbacks\[0\]\.style\.textColor: is empty; quote the color/,
+    ],
+    [
+      "non-boolean invert",
+      feedback("{ feedback: step, step: 1, style: { text: a }, invert: yes }"),
+      /: feedbacks\[0\]\.invert: must be true or false/,
+    ],
+    // Database checks.
+    [
+      "unknown variable in a single-entry steps list",
+      button("steps:\n  - { up: [ { action: increment, variable: nope } ] }\n"),
+      /^error: steps\[0\]\.up\[0\]\.variable: unknown custom variable "nope"$/,
+    ],
+    [
+      "unknown variable in a step action",
+      button(
+        "steps:\n  - {}\n  - { down: [ { action: increment, variable: nope } ] }\n",
+      ),
+      /^error: steps\[1\]\.down\[0\]\.variable: unknown custom variable "nope"$/,
+    ],
+    [
+      "unknown variable in a rotate action",
+      button("rotate_left: [ { action: decrement, variable: nope } ]\n"),
+      /^error: rotate_left\[0\]\.variable: unknown custom variable "nope"$/,
+    ],
+    [
+      "unknown variable in an expression feedback",
+      button(
+        'feedbacks:\n  - { feedback: expression, expression: "$(custom:fx_label) == \'a\'", style: { text: a } }\n  - { feedback: expression, expression: "$(custom:nope) > 1", style: { text: a } }\n',
+      ),
+      /^error: feedbacks\[1\]\.expression: unknown custom variable "nope"$/,
+    ],
+    [
+      "unknown variable in a style text",
+      feedback(
+        '{ feedback: step, step: 1, style: { text: "$(custom:ghost)" } }',
+      ),
+      /^error: feedbacks\[0\]\.style\.text: unknown custom variable "ghost"$/,
+    ],
+  ];
+
+  for (const [name, yaml, expected] of cases) {
+    it(name, async () => {
+      const { dir, dbPath, backupRoot } = setup({ wal: true });
+      const before = fileState(dbPath);
+      const result = await runCli(
+        ["apply", writeDescription(dir, yaml), "--db", dbPath],
+        { backupRoot },
+      );
+
+      assert.equal(result.code, 1, result.stdout.join("\n"));
+      assert.equal(result.stderr.length, 1, result.stderr.join("\n"));
+      assert.match(result.stderr[0] ?? "", expected);
+      assert.deepEqual(fileState(dbPath), before);
+      assert.equal(existsSync(backupRoot), false, "no backup for a refusal");
+    });
+  }
+
+  const lockCases: Array<[string, string, RegExp]> = [
+    [
+      "an expression",
+      '{ feedback: expression, expression: "$(custom:fx_gap) > 0", style: { text: a } }',
+      /feedbacks\[0\]\.expression: unknown custom variable "fx_gap" \(nothing written; backup kept/,
+    ],
+    [
+      "a style text",
+      '{ feedback: step, step: 1, style: { text: "$(custom:fx_gap)" } }',
+      /feedbacks\[0\]\.style\.text: unknown custom variable "fx_gap" \(nothing written; backup kept/,
+    ],
+  ];
+  for (const [name, entry, expected] of lockCases) {
+    it(`re-checks references in ${name} under the write lock`, async () => {
+      const { dir, dbPath, backupRoot } = setup();
+      const result = await runCli(
+        ["apply", writeDescription(dir, feedback(entry)), "--db", dbPath],
+        {
+          backupRoot,
+          hooks: {
+            afterBackup: (path) => {
+              const db = new DatabaseSync(path);
+              db.prepare(
+                "DELETE FROM custom_variables WHERE id = 'fx_gap'",
+              ).run();
+              db.close();
+            },
+          },
+        },
+      );
+      assert.equal(result.code, 1);
+      assert.equal(result.stderr.length, 1);
+      assert.match(result.stderr[0] ?? "", expected);
+    });
+  }
 });

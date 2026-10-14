@@ -3,8 +3,8 @@ import { readJsonValue } from "../core/database.ts";
 import { CliError, ValidationError } from "../core/errors.ts";
 import {
   expectInteger,
+  expectList,
   expectMapping,
-  expectString,
   fieldPath,
   type Fields,
   rejectUnknownFields,
@@ -15,11 +15,23 @@ import {
   type ActionSpec,
   actionVariableReferences,
   buildAction,
-  customReferences,
   parseActionList,
 } from "./actions.ts";
+import {
+  buildFeedback,
+  feedbackVariableReferences,
+  type FeedbackSpec,
+  parseFeedbackList,
+} from "./feedbacks.ts";
 import { newId } from "./ids.ts";
-import { prop } from "./shared.ts";
+import {
+  checkVariablesExist,
+  customReferences,
+  parseColor,
+  parseText,
+  prop,
+  type VariableReference,
+} from "./shared.ts";
 
 /**
  * Button writer: replaces the control at one location with a Companion 5.1
@@ -32,6 +44,11 @@ import { prop } from "./shared.ts";
  *   textColor: "#FFFFFF"                       # optional; black or white by background brightness
  *   down: [ ...actions ]                       # optional, see actions.ts
  *   up: [ ...actions ]                         # optional
+ *   rotate_left: [ ...actions ]                # optional; any rotate key turns on rotaryActions
+ *   rotate_right: [ ...actions ]               # optional
+ *   steps:                                     # optional; replaces the four lists above
+ *     - { down: [ ...actions ], up: [], rotate_left: [], rotate_right: [] }
+ *   feedbacks: [ ...feedbacks ]                # optional, see feedbacks.ts
  *
  * The page row must already exist. The control previously at the location, if
  * any, is deleted; the page's `controls` map changes only at that cell.
@@ -44,61 +61,61 @@ export interface Location {
   column: number;
 }
 
+/** One step: its action sets, keyed as Companion stores them. */
+export interface StepPlan {
+  /**
+   * The step's path relative to the button: `""` for a button without
+   * `steps` (its lists are top-level fields), otherwise `steps[i]`.
+   */
+  path: string;
+  sets: Record<ActionSetName, ActionSpec[]>;
+}
+
 export interface ButtonPlan {
   location: Location;
   /** As stored: line breaks already written as a literal backslash-n. */
   text: string;
   background: number;
   textColor: number;
-  down: ActionSpec[];
-  up: ActionSpec[];
+  /** At least one; stored keyed "0", "1", … in this order. */
+  steps: StepPlan[];
+  /** Whether any rotate key was given, at top level or in a step. */
+  rotaryActions: boolean;
+  feedbacks: FeedbackSpec[];
 }
+
+const ACTION_SETS = ["down", "up", "rotate_left", "rotate_right"] as const;
+type ActionSetName = (typeof ACTION_SETS)[number];
+const ROTATE_SETS: readonly ActionSetName[] = ["rotate_left", "rotate_right"];
 
 const TOP_LEVEL_FIELDS = [
   "location",
   "text",
   "background",
   "textColor",
-  "down",
-  "up",
+  ...ACTION_SETS,
+  "steps",
+  "feedbacks",
 ] as const;
 const LOCATION_FIELDS = ["page", "row", "column"] as const;
 
-function parseLocation(value: unknown): Location {
-  const fields = expectMapping(value, "location");
-  rejectUnknownFields(fields, LOCATION_FIELDS, "location");
+/** `relative` (a path inside a button, possibly empty) under `prefix`. */
+function under(prefix: string, relative: string): string {
+  return relative ? fieldPath(prefix, relative) : prefix;
+}
+
+function parseLocation(value: unknown, path: string): Location {
+  const fields = expectMapping(value, path);
+  rejectUnknownFields(fields, LOCATION_FIELDS, path);
   const [page, row, column] = LOCATION_FIELDS.map((key) =>
-    expectInteger(
-      requireField(fields, key, "location"),
-      fieldPath("location", key),
-    ),
+    expectInteger(requireField(fields, key, path), fieldPath(path, key)),
   ) as [number, number, number];
   if (page < 1)
     throw new ValidationError(
-      "location.page",
+      fieldPath(path, "page"),
       `must be at least 1, got ${page}`,
     );
   return { page, row, column };
-}
-
-const COLOR = /^#([0-9a-f]{6})$/i;
-
-function parseColor(value: unknown, field: string): number {
-  if (value === null) {
-    throw new ValidationError(
-      field,
-      'is empty; quote the color, for example "#000080" (an unquoted # starts a YAML comment)',
-    );
-  }
-  const text = expectString(value, field);
-  const match = COLOR.exec(text);
-  if (!match) {
-    throw new ValidationError(
-      field,
-      `must be a color "#RRGGBB", got "${text}"`,
-    );
-  }
-  return parseInt(match[1] ?? "", 16);
 }
 
 /** The prototype's `fg_for`: black text on a bright background, white otherwise. */
@@ -109,37 +126,121 @@ export function defaultTextColor(background: number): number {
   return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? 0x000000 : 0xffffff;
 }
 
-/**
- * Companion stores line breaks in button text as a literal backslash-n. One
- * trailing newline (a `|` block scalar's) is dropped first.
- */
-function parseText(value: unknown): string {
-  const text = expectString(value, "text");
-  return (text.endsWith("\n") ? text.slice(0, -1) : text).replaceAll(
-    "\n",
-    "\\n",
-  );
+/** One step's action sets from `fields` (the description, or one `steps` entry). */
+function parseStep(fields: Fields, path: string, prefix: string): StepPlan {
+  return {
+    path,
+    sets: Object.fromEntries(
+      ACTION_SETS.map((set) => [
+        set,
+        parseActionList(fields, set, under(prefix, path)),
+      ]),
+    ) as StepPlan["sets"],
+  };
 }
 
-export function parseButton(fields: Fields): ButtonPlan {
-  rejectUnknownFields(fields, TOP_LEVEL_FIELDS, "");
-  const location = parseLocation(requireField(fields, "location", ""));
-  const text = parseText(requireField(fields, "text", ""));
+const hasRotateKey = (fields: Fields) =>
+  ROTATE_SETS.some((set) => Object.hasOwn(fields, set));
+
+/**
+ * The button's steps: the `steps` list, or one step from the top-level action
+ * lists. Also whether any rotate key was given (an empty list counts).
+ */
+function parseSteps(
+  fields: Fields,
+  prefix: string,
+): { steps: StepPlan[]; rotaryActions: boolean } {
+  if (!Object.hasOwn(fields, "steps")) {
+    return {
+      steps: [parseStep(fields, "", prefix)],
+      rotaryActions: hasRotateKey(fields),
+    };
+  }
+  for (const set of ACTION_SETS) {
+    if (Object.hasOwn(fields, set))
+      throw new ValidationError(
+        fieldPath(prefix, set),
+        "cannot be combined with steps",
+      );
+  }
+  const stepsPath = fieldPath(prefix, "steps");
+  const list = expectList(fields["steps"], stepsPath);
+  if (list.length === 0)
+    throw new ValidationError(stepsPath, "must not be empty");
+  const entries = list.map((item, index) => {
+    const path = fieldPath(stepsPath, index);
+    const entry = expectMapping(item, path);
+    rejectUnknownFields(entry, ACTION_SETS, path);
+    return entry;
+  });
+  return {
+    steps: entries.map((entry, index) =>
+      parseStep(entry, fieldPath("steps", index), prefix),
+    ),
+    rotaryActions: entries.some(hasRotateKey),
+  };
+}
+
+/**
+ * Parses a button description. `prefix` is the path of `fields` when the
+ * button is embedded in another description (for example `buttons[3]`).
+ */
+export function parseButton(fields: Fields, prefix = ""): ButtonPlan {
+  const path = (key: string) => fieldPath(prefix, key);
+  rejectUnknownFields(fields, TOP_LEVEL_FIELDS, prefix);
+  const location = parseLocation(
+    requireField(fields, "location", prefix),
+    path("location"),
+  );
+  const text = parseText(requireField(fields, "text", prefix), path("text"));
   const background = parseColor(
-    requireField(fields, "background", ""),
-    "background",
+    requireField(fields, "background", prefix),
+    path("background"),
   );
   const textColor = Object.hasOwn(fields, "textColor")
-    ? parseColor(fields["textColor"], "textColor")
+    ? parseColor(fields["textColor"], path("textColor"))
     : defaultTextColor(background);
+  const { steps, rotaryActions } = parseSteps(fields, prefix);
   return {
     location,
     text,
     background,
     textColor,
-    down: parseActionList(fields, "down"),
-    up: parseActionList(fields, "up"),
+    steps,
+    rotaryActions,
+    feedbacks: parseFeedbackList(
+      fields,
+      "feedbacks",
+      { stepCount: steps.length },
+      prefix,
+    ),
   };
+}
+
+/**
+ * Every custom variable the button uses, in file order: references in its
+ * text, its actions' targets and references, and its feedbacks' expressions
+ * and style text. `prefix` is the one given to `parseButton`.
+ */
+export function buttonVariableReferences(
+  plan: ButtonPlan,
+  prefix = "",
+): VariableReference[] {
+  return [
+    ...customReferences(plan.text, fieldPath(prefix, "text")),
+    ...plan.steps.flatMap((step) =>
+      ACTION_SETS.flatMap((set) =>
+        actionVariableReferences(
+          step.sets[set],
+          fieldPath(under(prefix, step.path), set),
+        ),
+      ),
+    ),
+    ...feedbackVariableReferences(
+      plan.feedbacks,
+      fieldPath(prefix, "feedbacks"),
+    ),
+  ];
 }
 
 interface GridSize {
@@ -236,21 +337,7 @@ function checkButton(db: DatabaseSync, plan: ButtonPlan): void {
   );
   readTarget(db, plan.location);
 
-  const known = new Set(
-    db
-      .prepare("SELECT id FROM custom_variables")
-      .all()
-      .map((r) => String(r["id"])),
-  );
-  const references = [
-    ...customReferences(plan.text, "text"),
-    ...actionVariableReferences(plan.down, "down"),
-    ...actionVariableReferences(plan.up, "up"),
-  ];
-  for (const { field, name } of references) {
-    if (!known.has(name))
-      throw new CliError(`${field}: unknown custom variable "${name}"`);
-  }
+  checkVariablesExist(db, buttonVariableReferences(plan));
 }
 
 /** The prototype's `layers()`: canvas, background box, image and text. */
@@ -329,23 +416,23 @@ export function buildButtonControl(plan: ButtonPlan): Record<string, unknown> {
     options: {
       stepProgression: "auto",
       stepExpression: "",
-      rotaryActions: false,
+      rotaryActions: plan.rotaryActions,
       canModifyStyleInApis: true,
       notes: "",
     },
     localVariables: [],
-    steps: {
-      "0": {
-        action_sets: {
-          down: plan.down.map(buildAction),
-          up: plan.up.map(buildAction),
-          rotate_left: [],
-          rotate_right: [],
+    steps: Object.fromEntries(
+      plan.steps.map((step, index) => [
+        String(index),
+        {
+          action_sets: Object.fromEntries(
+            ACTION_SETS.map((set) => [set, step.sets[set].map(buildAction)]),
+          ),
+          options: { runWhileHeld: [] },
         },
-        options: { runWhileHeld: [] },
-      },
-    },
-    feedbacks: [],
+      ]),
+    ),
+    feedbacks: plan.feedbacks.map(buildFeedback),
     style: { layers: layers(plan.text, plan.background, plan.textColor) },
   };
 }
@@ -389,7 +476,7 @@ export function writeButton(db: DatabaseSync, plan: ButtonPlan): string {
 
 export const buttonWriter: Writer<ButtonPlan> = {
   kind: "button",
-  parse: parseButton,
+  parse: (fields) => parseButton(fields),
   check: checkButton,
   write: writeButton,
 };

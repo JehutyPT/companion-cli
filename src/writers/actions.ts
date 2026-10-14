@@ -5,14 +5,24 @@ import {
   expectMapping,
   expectNonEmptyString,
   expectPositiveInteger,
-  expectString,
   fieldPath,
   type Fields,
-  rejectUnknownFields,
   requireField,
 } from "../core/validate.ts";
 import { newId } from "./ids.ts";
-import { parseVariableName, prop } from "./shared.ts";
+import {
+  buildPassthrough,
+  customReferences,
+  type Option,
+  PASSTHROUGH_FIELDS,
+  parsePassthrough,
+  parseVariableName,
+  prop,
+  type TaggedKind,
+  type TaggedSpec,
+  taggedKinds,
+  type VariableReference,
+} from "./shared.ts";
 
 /**
  * Action lists in description files, shared by the button writer and (later)
@@ -31,48 +41,8 @@ import { parseVariableName, prop } from "./shared.ts";
  * `custom_variable_set_value`; see docs/companion-internals.md, "Actions".
  */
 
-/** A `$(custom:<name>)` reference, or an action's target variable, with the field it came from. */
-export interface VariableReference {
-  field: string;
-  name: string;
-}
-
-const CUSTOM_REFERENCE = /\$\(custom:([^)]*)\)/g;
-
-/** Every `$(custom:<name>)` in a text, attributed to `field`. */
-export function customReferences(
-  text: string,
-  field: string,
-): VariableReference[] {
-  return [...text.matchAll(CUSTOM_REFERENCE)].map((match) => ({
-    field,
-    name: match[1] ?? "",
-  }));
-}
-
-type Option = ReturnType<typeof prop>;
-
-/** Companion action JSON other than `type` and `id`. */
-interface ActionBody {
-  definitionId: string;
-  connectionId: string;
-  options: Record<string, Option>;
-}
-
-/**
- * One kind of action in a description file. `P` is its parsed payload (the
- * entry without `action`). Adding an action means adding one entry to
- * ACTION_KINDS.
- */
-interface ActionKind<P> {
-  /** Fields the entry accepts besides `action`. */
-  readonly fields: readonly string[];
-  /** Validates the entry's fields (unknown fields are already rejected). */
-  parse(fields: Fields, path: string): P;
-  /** Custom variables the action uses, in field order; checked against the database. */
-  references(payload: P, path: string): VariableReference[];
-  build(payload: P): ActionBody;
-}
+/** One kind of action. Adding an action means adding one entry to ACTION_KINDS. */
+type ActionKind<P> = TaggedKind<P>;
 
 const defineKind = <P>(kind: ActionKind<P>): ActionKind<P> => kind;
 
@@ -126,34 +96,6 @@ function parseBy(fields: Fields, path: string): { by: number } {
   };
 }
 
-/** Rejects values that JSON cannot carry unchanged. */
-function expectJsonValue(value: unknown, field: string): void {
-  if (value === null || typeof value === "string" || typeof value === "boolean")
-    return;
-  if (typeof value === "number") {
-    if (Number.isFinite(value)) return;
-    throw new ValidationError(field, `must be a finite number, got ${value}`);
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item, index) =>
-      expectJsonValue(item, fieldPath(field, index)),
-    );
-    return;
-  }
-  if (
-    typeof value === "object" &&
-    Object.getPrototypeOf(value) === Object.prototype
-  ) {
-    for (const [key, child] of Object.entries(value))
-      expectJsonValue(child, fieldPath(field, key));
-    return;
-  }
-  throw new ValidationError(
-    field,
-    `must be a JSON value, got ${describeType(value)}`,
-  );
-}
-
 const ACTION_KINDS = {
   set: variableAction({
     fields: ["value"],
@@ -193,93 +135,50 @@ const ACTION_KINDS = {
   }),
   /** Any connection's action, written literally. Not checked against the database. */
   passthrough: defineKind({
-    fields: ["connection", "definition", "options"],
-    parse: (fields, path) => {
-      const optionsPath = fieldPath(path, "options");
-      const options = Object.hasOwn(fields, "options")
-        ? expectMapping(fields["options"], optionsPath)
-        : {};
-      expectJsonValue(options, optionsPath);
-      return {
-        connection: expectNonEmptyString(
-          requireField(fields, "connection", path),
-          fieldPath(path, "connection"),
-        ),
-        definition: expectNonEmptyString(
-          requireField(fields, "definition", path),
-          fieldPath(path, "definition"),
-        ),
-        options,
-      };
-    },
+    fields: PASSTHROUGH_FIELDS,
+    parse: parsePassthrough,
     references: () => [],
-    build: ({ connection, definition, options }) => ({
-      definitionId: definition,
-      connectionId: connection,
-      options: Object.fromEntries(
-        Object.entries(options).map(([key, value]) => [key, prop(value)]),
-      ),
-    }),
+    build: buildPassthrough,
   }),
 };
 
-type ActionName = keyof typeof ACTION_KINDS;
-const ACTION_NAMES = Object.keys(ACTION_KINDS) as ActionName[];
+const ACTIONS = taggedKinds("action")(ACTION_KINDS);
 
-/** A parsed action entry: its `action` name and that kind's payload. */
-export type ActionSpec = {
-  [K in ActionName]: { action: K } & ReturnType<
-    (typeof ACTION_KINDS)[K]["parse"]
-  >;
-}[ActionName];
+/** A parsed action entry: its kind name and that kind's payload. */
+export type ActionSpec = TaggedSpec<typeof ACTION_KINDS>;
 
-function isActionName(name: string): name is ActionName {
-  return Object.hasOwn(ACTION_KINDS, name);
-}
-
-/** The kind of a parsed spec. Its payload type matches by construction. */
-function kindOf(spec: ActionSpec): ActionKind<ActionSpec> {
-  return ACTION_KINDS[spec.action] as unknown as ActionKind<ActionSpec>;
-}
-
-function parseAction(item: unknown, path: string): ActionSpec {
-  const fields = expectMapping(item, path);
-  const actionPath = fieldPath(path, "action");
-  const name = expectString(requireField(fields, "action", path), actionPath);
-  if (!isActionName(name)) {
-    throw new ValidationError(
-      actionPath,
-      `unknown action "${name}" (expected one of: ${ACTION_NAMES.join(", ")})`,
-    );
-  }
-  const kind = ACTION_KINDS[name];
-  rejectUnknownFields(fields, ["action", ...kind.fields], path);
-  return { action: name, ...kind.parse(fields, path) } as ActionSpec;
-}
-
-/** Parses an optional action list such as `down`; a missing field is an empty list. */
-export function parseActionList(fields: Fields, key: string): ActionSpec[] {
+/**
+ * Parses an optional action list such as `down`; a missing field is an empty
+ * list. `parent` is the path of `fields` (for example `steps[1]`).
+ */
+export function parseActionList(
+  fields: Fields,
+  key: string,
+  parent = "",
+): ActionSpec[] {
   if (!Object.hasOwn(fields, key)) return [];
-  return expectList(fields[key], key).map((item, index) =>
-    parseAction(item, fieldPath(key, index)),
-  );
+  const path = fieldPath(parent, key);
+  return expectList(fields[key], path).map((item, index) => {
+    const itemPath = fieldPath(path, index);
+    return ACTIONS.parse(expectMapping(item, itemPath), itemPath, undefined);
+  });
 }
 
 /**
  * The custom variables a list of actions uses, in file order: each internal
  * action's target and the references in set values and expressions.
- * Pass-through actions are not inspected.
+ * Pass-through actions are not inspected. `key` is the list's path.
  */
 export function actionVariableReferences(
   actions: readonly ActionSpec[],
   key: string,
 ): VariableReference[] {
   return actions.flatMap((spec, index) =>
-    kindOf(spec).references(spec, fieldPath(key, index)),
+    ACTIONS.references(spec, fieldPath(key, index)),
   );
 }
 
 /** Companion 5.1 action JSON with a fresh id. */
 export function buildAction(spec: ActionSpec): Record<string, unknown> {
-  return { type: "action", id: newId(), ...kindOf(spec).build(spec) };
+  return { type: "action", id: newId(), ...ACTIONS.build(spec) };
 }

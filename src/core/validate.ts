@@ -115,3 +115,31 @@ export function expectPositiveInteger(value: unknown, field: string): number {
   }
   return value;
 }
+
+/** Rejects values that JSON cannot carry unchanged. */
+export function expectJsonValue(value: unknown, field: string): void {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return;
+  if (typeof value === "number") {
+    if (Number.isFinite(value)) return;
+    throw new ValidationError(field, `must be a finite number, got ${value}`);
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      expectJsonValue(item, fieldPath(field, index)),
+    );
+    return;
+  }
+  if (
+    typeof value === "object" &&
+    Object.getPrototypeOf(value) === Object.prototype
+  ) {
+    for (const [key, child] of Object.entries(value))
+      expectJsonValue(child, fieldPath(field, key));
+    return;
+  }
+  throw new ValidationError(
+    field,
+    `must be a JSON value, got ${describeType(value)}`,
+  );
+}

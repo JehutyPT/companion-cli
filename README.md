@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer and the single-button writer work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion; multi-step buttons, feedbacks, and the page and trigger writers are not built yet. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer and the button writer (single location: encoders, steps and feedbacks) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion; the page and trigger writers are not built yet. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -13,7 +13,7 @@ Companion has no supported API to create buttons, pages or triggers. Its REST AP
 | Component | Does |
 | --- | --- |
 | Shared core | Quits Companion, backs up the database, opens it, writes, runs `pragma integrity_check`, restarts Companion. Owns Companion's id format and JSON shapes. Refuses unknown database versions. |
-| Button writer | Turns a short button description (text, colours, down/up/rotate actions, feedbacks, steps) into Companion's control JSON at a page/row/column. |
+| Button writer | Turns a short button description (text, colors, down/up/rotate actions, feedbacks, steps) into Companion's control JSON at a page/row/column. |
 | Page writer | Takes a page name and a grid of button descriptions; replaces only that page's buttons. |
 | Trigger writer | Writes triggers (same `controls` table, `trigger:` prefix), reusing the button writer's action and feedback building. Trigger events still need research. |
 | Variable writer | Creates or updates custom variables: default value, persist on restart, description. |
@@ -78,9 +78,37 @@ down:                                      # optional action list, run on press
     definition: some_definition_id
     options: { mode: 1, label: "x" }       # optional
 up: []                                     # optional action list, run on release
+rotate_left:  [ { action: decrement, variable: fx_counter } ]   # optional, encoder turned left
+rotate_right: [ { action: increment, variable: fx_counter } ]   # optional, encoder turned right
+feedbacks:                                 # optional list; each overrides parts of the style while it holds
+  - feedback: expression                   # Companion's "Variable: Check boolean expression"
+    expression: "$(custom:fx_label) == 'pressed'"
+    style: { background: "#FFA500" }       # at least one of background, textColor, text
+    invert: false                          # optional, default false
+  - feedback: passthrough                  # any connection's feedback, written as given
+    connection: FixtureConnectionAAAA
+    definition: some_feedback_id
+    options: { input: 1 }                  # optional
+    style: { text: "LIVE" }
 ```
 
-The page must already exist, and every custom variable an action targets or a `$(custom:<name>)` reference names (in `text`, `set` values and expressions) must already exist; apply a `kind: variables` file first. The control previously at that location is deleted and a new `button-layered` control with fresh ids takes its place; the page's other cells are untouched. Rotary actions, steps, feedbacks and other style fields are not supported yet and are rejected as unknown fields. A `|` block scalar works for multi-line text; its trailing newline is dropped.
+A two-step latch uses `steps` in place of the top-level `down`, `up`, `rotate_left` and `rotate_right` lists (combining them is refused). Each press advances to the next step; a `step` feedback (1-based) restyles the button on that step:
+
+```yaml
+kind: button
+location: { page: 1, row: 0, column: 3 }
+text: "OFF"
+background: "#FF0000"
+steps:                                     # non-empty; each step accepts down, up, rotate_left, rotate_right
+  - { down: [ { action: set, variable: fx_label, value: "on" } ] }
+  - { down: [ { action: set, variable: fx_label, value: "off" } ] }
+feedbacks:
+  - feedback: step
+    step: 2                                # between 1 and the number of steps
+    style: { background: "#00FF00", textColor: "#000000", text: "ON" }
+```
+
+The page must already exist, and every custom variable an action targets or a `$(custom:<name>)` reference names (in `text`, `set` values, action and feedback expressions, and feedback style `text`) must already exist; apply a `kind: variables` file first. The control previously at that location is deleted and a new `button-layered` control with fresh ids takes its place; the page's other cells are untouched. Giving `rotate_left` or `rotate_right` (even as an empty list, at top level or in a step) turns on the control's rotary actions. A feedback's `style` overrides only the fields it gives; a feedback `background` does not pick a text color. Pass-through actions and feedbacks are not checked against the database. Other feedback kinds, style fields and unknown fields are refused. A `|` block scalar works for multi-line text; its trailing newline is dropped.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
 
