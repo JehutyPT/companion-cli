@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -39,6 +39,8 @@ npm install
 npm run build
 node dist/bin/companion-cli.js apply variables.yaml                    # the local install (macOS)
 node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
+node dist/bin/companion-cli.js apply variables.yaml --dry-run                 # report only, write nothing
+node dist/bin/companion-cli.js apply variables.yaml --dry-run --json          # the same report as JSON
 ```
 
 `variables.yaml`:
@@ -59,6 +61,20 @@ Without `--db`, `apply` targets the install's database, `~/Library/Application S
 With `--db`, `apply` never quits or starts Companion. It refuses to write the install's database (through `~`, symlinks or hard links too) while Companion is running, or when it cannot tell whether Companion is running.
 
 On macOS, in both modes, `apply` also refuses right before the backup if any other process has the database or its `-wal` / `-shm` file open (checked with `lsof -t`), or if that check fails. This catches a Companion the process match misses, such as a renamed bundle or a development build, and any other SQLite client. In live-install mode Companion is still started again if the tool quit it. If quitting Companion or waiting for it fails with an error, nothing is written and the tool starts Companion again; only a wait timeout leaves it as it is.
+
+`apply --dry-run`, with or without `--db`, reports what an apply would change and writes nothing. It runs the same file and database checks as `apply` (and refuses with the same message), then runs the writer on a temporary copy of the database and its WAL files, compares every table before and after, rolls back and deletes the copy. It never takes a backup and never checks, quits or starts Companion, so it also works while Companion is running; a copy taken while Companion was writing can fail its integrity check, and then the dry run asks you to retry or quit Companion. The report lists each changed table with `+` (added), `~` (replaced) and `-` (removed) rows, page changes as the cells they change, then the summary `apply` would print:
+
+```
+dry run: nothing written to /path/to/db.sqlite
+controls: 1 added, 0 replaced, 1 removed
+  + bank:<new id>
+  - bank:<old id>
+pages: 0 added, 1 replaced, 0 removed
+  ~ 1: cell 0/2 bank:<old id> -> bank:<new id>
+apply would report: button at page 1, row 0, column 2: replaced bank:<old id> with bank:<new id>
+```
+
+When nothing would change it prints `no changes`. Generated ids do not count as changes: re-applying an unchanged button, page or trigger reports `no changes` although a real apply stores fresh ids. Only the ids the writers generate are ignored (action, feedback, style-override and event ids, and a replaced button's control id); a changed option, such as another connection id in a pass-through action, is always a change ([ADR 0005](docs/adr/0005-dry-run-diff-ignores-generated-ids.md)). `--dry-run --json` prints one JSON document instead: `{dryRun, database, changed, tables: {<table>: {added, changed, removed}}, summary}`, where each entry has the row's `key` and its stored `before` and/or `after` value. A dry run exits 0 whether or not anything would change, and 1 when `apply` would refuse or fail. `--json` without `--dry-run` is a usage error (exit 2).
 
 `button.yaml` replaces the button at one location:
 

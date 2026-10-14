@@ -65,6 +65,31 @@ function forbidden(name: string): never {
   throw new Error(`test reached the process control (${name}) without a fake`);
 }
 
+/**
+ * A process control whose every method records its name in `calls` and then
+ * fails the test, for runs that must never touch Companion's process.
+ */
+export function forbiddenProcessControl(): {
+  control: ProcessControl;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  const refuse = (name: string): never => {
+    calls.push(name);
+    return forbidden(name);
+  };
+  return {
+    calls,
+    control: {
+      serverPids: () => refuse("serverPids"),
+      databaseHolders: () => refuse("databaseHolders"),
+      quit: () => refuse("quit"),
+      waitForExit: () => refuse("waitForExit"),
+      start: () => refuse("start"),
+    },
+  };
+}
+
 export interface FakeProcessOptions {
   /** Whether the server is running when the apply begins. */
   running: boolean;
@@ -326,6 +351,8 @@ export interface FixtureEnv {
   dir: string;
   dbPath: string;
   backupRoot: string;
+  /** Root for the pipeline's temporary database copies; empty after every run. */
+  tmpdir: string;
 }
 
 /**
@@ -343,7 +370,7 @@ export function setup(
     change(db);
     db.close();
   }
-  return { dir, dbPath, backupRoot: join(dir, "backups") };
+  return { dir, dbPath, backupRoot: join(dir, "backups"), tmpdir: tempDir() };
 }
 
 /** Applies `yaml` to the fixture with `apply --db`. */
@@ -354,7 +381,7 @@ export function applyTo(
 ): Promise<CliRun> {
   return runCli(
     ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath],
-    { backupRoot: env.backupRoot, ...options },
+    { backupRoot: env.backupRoot, tmpdir: env.tmpdir, ...options },
   );
 }
 

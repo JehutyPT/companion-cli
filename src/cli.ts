@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { apply, type ApplyOptions } from "./core/apply.ts";
+import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
 import { CliError, errorMessage } from "./core/errors.ts";
 import {
   getSurface,
@@ -105,7 +106,8 @@ function synopsis(spec: RestCommandSpec): string {
     .join(" ");
 }
 
-const APPLY_SYNOPSIS = "apply <description-file> [--db <path-to-db.sqlite>]";
+const APPLY_SYNOPSIS =
+  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run [--json]]";
 const SYNOPSES = [APPLY_SYNOPSIS, ...REST_TABLE.map(synopsis)];
 
 /** One line: every exit-2 message ends with it. */
@@ -120,6 +122,10 @@ export const HELP = [
   "backs up and writes the database, then starts Companion again. With --db it",
   "writes that database and never stops or starts Companion; it refuses the",
   "install's database while Companion is running.",
+  "apply --dry-run runs the same checks on a temporary copy of the database and",
+  "reports the rows an apply would add, replace and remove. It writes nothing,",
+  "takes no backup and never stops or starts Companion. --json prints that",
+  "report as one JSON document.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory; environment variables take precedence.",
@@ -175,6 +181,8 @@ async function runApply(
       strict: true,
       options: {
         db: { type: "string" },
+        "dry-run": { type: "boolean" },
+        json: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -202,9 +210,21 @@ async function runApply(
   if (values.db === "") {
     return usageError(io, "--db needs a path");
   }
+  if (values.json && !values["dry-run"]) {
+    return usageError(io, "--json is only valid with --dry-run");
+  }
 
   const { env: _env, cwd: _cwd, ...applyOptions } = options;
   try {
+    if (values["dry-run"]) {
+      const result = dryRun(
+        { descriptionPath: file, dbPath: values.db, writers },
+        applyOptions,
+      );
+      if (values.json) io.stdout(dryRunJson(result));
+      else for (const line of renderDryRun(result)) io.stdout(line);
+      return EXIT_OK;
+    }
     const result = await apply(
       { descriptionPath: file, dbPath: values.db, writers },
       { ...applyOptions, log: applyOptions.log ?? io.stdout },

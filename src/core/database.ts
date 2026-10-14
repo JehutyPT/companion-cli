@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { CliError, errorMessage, UnsupportedVersionError } from "./errors.ts";
+import type { Writer } from "./writer.ts";
 
 /** `page_config_version` of Companion 5.1. The only DB version the tool supports. */
 export const SUPPORTED_DB_VERSION = 17;
@@ -71,22 +72,34 @@ export function assertSupportedVersion(db: DatabaseSync): void {
   );
 }
 
+export interface DatabaseCopyOptions {
+  /** Open the copy read-only. */
+  readOnly: boolean;
+  /** Directory for the temporary copy. Defaults to the OS temp directory. */
+  tmpdir?: string | undefined;
+}
+
 /**
- * Runs `fn` against a read-only copy of the database, including its WAL files.
- * Opening even read-only creates or rewrites `-shm`, so the original files are
- * only copied, never opened: a refused apply leaves them byte-identical.
+ * Runs `fn` against a private copy of the database, including its WAL files,
+ * in a new temporary directory that is deleted on every path. Opening even
+ * read-only creates or rewrites `-shm`, so the original files are only
+ * copied, never opened: they stay byte-identical. Errors from `fn` that are
+ * not CliErrors become "cannot read database".
  */
-export function withReadOnlySnapshot<T>(
+export function withDatabaseCopy<T>(
   dbPath: string,
+  options: DatabaseCopyOptions,
   fn: (db: DatabaseSync) => T,
 ): T {
-  const dir = mkdtempSync(join(tmpdir(), "companion-cli-snapshot-"));
+  const dir = mkdtempSync(
+    join(options.tmpdir ?? tmpdir(), "companion-cli-copy-"),
+  );
   try {
-    const snapshotPath = join(dir, basename(dbPath));
-    copyDatabaseFiles(dbPath, snapshotPath);
+    const copyPath = join(dir, basename(dbPath));
+    copyDatabaseFiles(dbPath, copyPath);
     let db: DatabaseSync;
     try {
-      db = new DatabaseSync(snapshotPath, { readOnly: true });
+      db = new DatabaseSync(copyPath, { readOnly: options.readOnly });
     } catch (error) {
       throw new CliError(
         `cannot open database ${dbPath}: ${errorMessage(error)}`,
@@ -104,5 +117,77 @@ export function withReadOnlySnapshot<T>(
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Runs `fn` against a read-only copy of the database (see `withDatabaseCopy`). */
+export function withReadOnlySnapshot<T>(
+  dbPath: string,
+  fn: (db: DatabaseSync) => T,
+  tmpdir?: string,
+): T {
+  return withDatabaseCopy(dbPath, { readOnly: true, tmpdir }, fn);
+}
+
+export function runIntegrityCheck(db: DatabaseSync): string[] {
+  return db
+    .prepare("PRAGMA integrity_check")
+    .all()
+    .map((row) => String(Object.values(row)[0]));
+}
+
+/** Whether `pragma integrity_check` rows say the database is consistent. */
+export function isIntegrityOk(rows: string[]): boolean {
+  return rows.length === 1 && rows[0] === "ok";
+}
+
+/** The rows of a failed integrity check on one line. */
+export function integrityText(rows: string[]): string {
+  return (
+    rows.map((row) => row.replace(/\s*\n\s*/g, " ")).join("; ") || "no result"
+  );
+}
+
+/**
+ * The checked write shared by `apply` and the dry run, inside the caller's
+ * transaction: the version guard and the writer's checks, then `beforeWrite`,
+ * the write, the `afterWrite` hook and `pragma integrity_check` (or the hook
+ * replacing it). Anything failing from the write on is a `WriteFailure`;
+ * refusals before it are thrown as they are.
+ */
+export function checkWriteVerify<Plan>(
+  db: DatabaseSync,
+  writer: Writer<Plan>,
+  plan: Plan,
+  hooks: WriteHooks = {},
+  beforeWrite?: () => void,
+): string {
+  assertSupportedVersion(db);
+  writer.check?.(db, plan);
+  beforeWrite?.();
+  try {
+    const summary = writer.write(db, plan);
+    hooks.afterWrite?.(db);
+    const integrity = (hooks.integrityCheck ?? runIntegrityCheck)(db);
+    if (!isIntegrityOk(integrity)) {
+      throw new CliError(`integrity check failed: ${integrityText(integrity)}`);
+    }
+    return summary;
+  } catch (error) {
+    throw new WriteFailure(error);
+  }
+}
+
+/** The hooks `checkWriteVerify` honours (see `ApplyHooks`). */
+export interface WriteHooks {
+  afterWrite?: (db: DatabaseSync) => void;
+  integrityCheck?: (db: DatabaseSync) => string[];
+}
+
+/** A failure during or after the write; `cause` is the original error. */
+export class WriteFailure extends Error {
+  constructor(cause: unknown) {
+    super(errorMessage(cause), { cause });
+    this.name = "WriteFailure";
   }
 }

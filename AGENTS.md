@@ -1,6 +1,6 @@
 # AGENTS.md
 
-A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command with the variable, button, page and trigger writers, and the REST helper's runtime commands, exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
+A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command with the variable, button, page and trigger writers, its `--dry-run [--json]` report, and the REST helper's runtime commands, exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
 
 ## Reference
 

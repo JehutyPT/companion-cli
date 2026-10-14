@@ -75,6 +75,10 @@ The top-level `kind` field of a description file (`variables`, `button`, `page`,
 Validate a description file, stop Companion, back up the database, replace the described thing, check integrity and restart Companion.
 _Avoid_: Import (Companion's own import is a different feature), sync
 
+**Dry run**:
+An apply that writes nothing: the same checks, then the writer runs on a temporary copy of the database, and the rows it would add, replace and remove are reported. It never takes a backup and never stops or starts Companion. Generated ids alone are not changes.
+_Avoid_: Preview, simulation ("plan" is the parsed description)
+
 **Backup**:
 A copy of the database and its WAL files taken immediately before an apply.
 

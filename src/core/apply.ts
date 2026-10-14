@@ -3,7 +3,14 @@ import { homedir as osHomedir } from "node:os";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { backupDatabase, defaultBackupRoot } from "./backup.ts";
-import { assertSupportedVersion, withReadOnlySnapshot } from "./database.ts";
+import {
+  assertSupportedVersion,
+  checkWriteVerify,
+  withReadOnlySnapshot,
+  WriteFailure,
+} from "./database.ts";
+
+export { runIntegrityCheck } from "./database.ts";
 import { loadDescription, type WriterRegistry } from "./description.ts";
 import type { Writer } from "./writer.ts";
 import { CliError, errorMessage, UnsupportedVersionError } from "./errors.ts";
@@ -57,10 +64,13 @@ export interface ApplyHooks {
   afterBackup?: (dbPath: string) => void;
   /**
    * Test seam: runs inside the transaction after the writer has written and
-   * before the integrity check. Throwing simulates a write failure.
+   * before the integrity check. Throwing simulates a write failure. A dry run
+   * calls it too, on its private copy.
    */
   afterWrite?: (db: DatabaseSync) => void;
-  /** Test seam: replaces `pragma integrity_check`. Must return its result rows. */
+  /**
+   * Test seam: replaces `pragma integrity_check`. Must return its result rows.
+   */
   integrityCheck?: (db: DatabaseSync) => string[];
 }
 
@@ -80,6 +90,8 @@ export interface ApplyOptions {
   processControl?: ProcessControl;
   /** How long to wait for the server process to exit after a quit. */
   quitTimeoutMs?: number;
+  /** Directory for the temporary database copies (the read-only snapshot and a dry run's copy). Defaults to the OS temp directory. */
+  tmpdir?: string;
 }
 
 export interface ApplyRequest {
@@ -94,17 +106,26 @@ export interface ApplyResult {
   summary: string;
 }
 
-export function runIntegrityCheck(db: DatabaseSync): string[] {
-  return db
-    .prepare("PRAGMA integrity_check")
-    .all()
-    .map((row) => String(Object.values(row)[0]));
+/** The checked target of an apply or a dry run. */
+export interface PreparedApply {
+  dbPath: string;
+  /** Live-install mode: no `--db`, so the install's database. */
+  live: boolean;
+  platform: NodeJS.Platform;
+  homedir: string;
+  writer: Writer;
+  plan: unknown;
 }
 
-export async function apply(
+/**
+ * Steps 1 to 3, shared by `apply` and `dryRun` so both refuse with the same
+ * messages: the platform guard, the description, the database's existence,
+ * and the version guard and the writer's checks on a read-only snapshot.
+ */
+export function prepareApply(
   request: ApplyRequest,
   options: ApplyOptions = {},
-): Promise<ApplyResult> {
+): PreparedApply {
   const home = options.homedir ?? osHomedir();
   const platform = options.platform ?? process.platform;
   const requested = request.dbPath;
@@ -127,10 +148,29 @@ export async function apply(
     throw new CliError(`database not found: ${dbPath}`);
   }
 
-  withReadOnlySnapshot(dbPath, (db) => {
-    assertSupportedVersion(db);
-    writer.check?.(db, plan);
-  });
+  withReadOnlySnapshot(
+    dbPath,
+    (db) => {
+      assertSupportedVersion(db);
+      writer.check?.(db, plan);
+    },
+    options.tmpdir,
+  );
+  return { dbPath, live, platform, homedir: home, writer, plan };
+}
+
+export async function apply(
+  request: ApplyRequest,
+  options: ApplyOptions = {},
+): Promise<ApplyResult> {
+  const {
+    dbPath,
+    live,
+    platform,
+    homedir: home,
+    writer,
+    plan,
+  } = prepareApply(request, options);
 
   const control = options.processControl ?? macosProcessControl();
   // Steps 5 and 6, after the in-use guard. On non-macOS (`--db` only) there
@@ -281,20 +321,9 @@ function writeStopped<Plan>(
       `cannot open database ${dbPath} for writing: ${errorMessage(error)} (backup kept at ${backupDir})`,
     );
   }
-  let writing = false;
   try {
     db.exec("BEGIN IMMEDIATE");
-    assertSupportedVersion(db);
-    writer.check?.(db, plan);
-    writing = true;
-    const summary = writer.write(db, plan);
-    hooks.afterWrite?.(db);
-    const integrity = (hooks.integrityCheck ?? runIntegrityCheck)(db);
-    if (integrity.length !== 1 || integrity[0] !== "ok") {
-      throw new CliError(
-        `integrity check failed: ${integrity.join("; ") || "no result"}`,
-      );
-    }
+    const summary = checkWriteVerify(db, writer, plan, hooks);
     db.exec("COMMIT");
     return { backupDir, summary };
   } catch (error) {
@@ -308,7 +337,7 @@ function writeStopped<Plan>(
         );
       }
     }
-    if (!writing && error instanceof CliError) {
+    if (!(error instanceof WriteFailure) && error instanceof CliError) {
       // A refusal under the write lock (version guard or writer check), not a write failure.
       const ErrorType =
         error instanceof UnsupportedVersionError
@@ -321,9 +350,7 @@ function writeStopped<Plan>(
     }
     throw new CliError(
       `write failed, rolled back, database unchanged (backup kept at ${backupDir}): ${errorMessage(error)}`,
-      {
-        cause: error,
-      },
+      { cause: error instanceof WriteFailure ? error.cause : error },
     );
   } finally {
     db.close();
