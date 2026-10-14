@@ -8,6 +8,10 @@ Configuring a local Bitfocus Companion install from description files.
 One Companion application and its configuration directory on the local machine (on macOS, `~/Library/Application Support/companion/v5.1/`).
 _Avoid_: Server, instance (Companion uses "instance" for connections)
 
+**Companion server process**:
+The `node … Companion.app/Contents/Resources/main.js` process, a child of the Companion launcher, that holds the database open while Companion runs. "Companion is running" means this process exists; the launcher alone does not count.
+_Avoid_: Server on its own (ambiguous with the install), instance
+
 **Database**:
 The install's `db.sqlite` (SQLite in WAL mode) where Companion persists pages, controls, custom variables, surfaces and connections.
 

@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  symlinkSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
@@ -24,6 +18,7 @@ import {
   fileState,
   printedBackupDir,
   runCli,
+  STOPPED_PROCESS_CONTROL,
   type TableDump,
   tempDir,
   writeDescription,
@@ -572,7 +567,7 @@ describe("apply variables: failures inside the transaction roll back", () => {
   it("runs the writer's database check on the snapshot and again under the write lock", async () => {
     const { dir, dbPath, backupRoot } = setup();
     const seen: boolean[] = [];
-    apply(
+    await apply(
       {
         descriptionPath: writeDescription(dir, VARIABLES_YAML),
         dbPath,
@@ -583,97 +578,18 @@ describe("apply variables: failures inside the transaction roll back", () => {
           } as Writer,
         },
       },
-      { homedir: tempDir(), backupRoot },
+      {
+        homedir: tempDir(),
+        backupRoot,
+        platform: "darwin",
+        processControl: STOPPED_PROCESS_CONTROL,
+      },
     );
     assert.deepEqual(seen, [false, true]);
   });
 });
 
-describe("apply: default install database and command line", () => {
-  function fakeInstall() {
-    const home = tempDir();
-    const installDir = join(
-      home,
-      "Library",
-      "Application Support",
-      "companion",
-      "v5.1",
-    );
-    const dbPath = buildFixtureDb(installDir);
-    return { home, dbPath, file: writeDescription(home, VARIABLES_YAML) };
-  }
-
-  it("refuses the default install database", async () => {
-    const { home, dbPath, file } = fakeInstall();
-    const before = fileState(dbPath);
-    const result = await runCli(["apply", file, "--db", dbPath], {
-      homedir: home,
-    });
-    assert.equal(result.code, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /^error: refusing to write the Companion install's default database/,
-    );
-    assert.deepEqual(fileState(dbPath), before);
-  });
-
-  it("refuses a symlink that resolves to the default install database", async () => {
-    const { home, dbPath, file } = fakeInstall();
-    const link = join(tempDir(), "link.sqlite");
-    symlinkSync(dbPath, link);
-    const result = await runCli(["apply", file, "--db", link], {
-      homedir: home,
-    });
-    assert.equal(result.code, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /refusing to write the Companion install's default database/,
-    );
-  });
-
-  it("refuses a path through a symlinked directory and a ~ path", async () => {
-    const { home, file } = fakeInstall();
-    const linkDir = join(tempDir(), "linked");
-    symlinkSync(
-      join(home, "Library", "Application Support", "companion"),
-      linkDir,
-    );
-    for (const db of [
-      join(linkDir, "v5.1", "db.sqlite"),
-      "~/Library/Application Support/companion/v5.1/db.sqlite",
-    ]) {
-      const result = await runCli(["apply", file, "--db", db], {
-        homedir: home,
-      });
-      assert.equal(result.code, 1, db);
-      assert.match(
-        result.stderr[0] ?? "",
-        /refusing to write the Companion install's default database/,
-      );
-    }
-  });
-
-  it("allows a copy elsewhere in the same home", async () => {
-    const { home, file } = fakeInstall();
-    const copyDir = join(home, "copies");
-    mkdirSync(copyDir);
-    const copy = buildFixtureDb(copyDir);
-    const result = await runCli(["apply", file, "--db", copy], {
-      homedir: home,
-    });
-    assert.equal(result.code, 0, result.stderr.join("\n"));
-  });
-
-  it("requires --db", async () => {
-    const result = await runCli([
-      "apply",
-      writeDescription(tempDir(), VARIABLES_YAML),
-    ]);
-    assert.equal(result.code, 2);
-    assert.equal(result.stderr.length, 1);
-    assert.match(result.stderr[0] ?? "", /--db is required/);
-  });
-
+describe("apply: command line", () => {
   it("rejects unknown commands, options and missing files", async () => {
     for (const argv of [
       [],

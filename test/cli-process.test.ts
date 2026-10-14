@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildFixtureDb } from "./fixtures/companion-db.ts";
-import { customVariables, tempDir, writeDescription } from "./helpers.ts";
+import { fileState, tempDir, writeDescription } from "./helpers.ts";
 
 const BIN = fileURLToPath(
   new URL("../src/bin/companion-cli.ts", import.meta.url),
@@ -31,22 +32,27 @@ function cli(args: string[], home: string) {
 }
 
 describe("companion-cli executable", () => {
-  it("exits 0 on success and prints the backup path", () => {
+  // The executable uses the real process control, whose command runner
+  // refuses inside the test runner (NODE_TEST_CONTEXT is inherited). So a
+  // valid apply exercises the in-use guard failing closed instead of running
+  // lsof; successful applies are covered in-process with fakes.
+  it("fails closed, byte-identical, when the in-use check cannot run", () => {
     const dir = tempDir();
     const dbPath = buildFixtureDb(join(dir, "copy"));
+    const before = fileState(dbPath);
     const file = writeDescription(
       dir,
       "kind: variables\nvariables:\n  - {name: from_bin, default: 1}\n",
     );
     const result = cli(["apply", file, "--db", dbPath], dir);
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stderr, "");
-    assert.match(result.stdout, /^backup: .*companion-cli-backups/m);
-    assert.equal(
-      (customVariables(dbPath)["from_bin"] as { defaultValue: number })
-        .defaultValue,
-      1,
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(result.stderr.trimEnd().split("\n").length, 1, result.stderr);
+    assert.match(
+      result.stderr,
+      /^error: cannot tell whether the database is in use \(refusing to run lsof inside the test runner/,
     );
+    assert.deepEqual(fileState(dbPath), before);
+    assert.equal(existsSync(join(dir, "copy", "companion-cli-backups")), false);
   });
 
   it("exits non-zero with exactly one stderr line on failure", () => {
@@ -60,12 +66,6 @@ describe("companion-cli executable", () => {
     assert.equal(result.status, 1);
     assert.equal(result.stderr.trimEnd().split("\n").length, 1, result.stderr);
     assert.match(result.stderr, /page_config_version is 18/);
-  });
-
-  it("exits 2 without --db", () => {
-    const result = cli(["apply", "x.yaml"], tempDir());
-    assert.equal(result.status, 2);
-    assert.match(result.stderr, /--db is required/);
   });
 
   it("exits 1 with one stderr line when Companion is not reachable", async () => {

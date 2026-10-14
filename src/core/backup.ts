@@ -23,7 +23,13 @@ export function backupDatabase(
   root: string,
   now: Date,
 ): string {
-  mkdirSync(root, { recursive: true });
+  try {
+    mkdirSync(root, { recursive: true });
+  } catch (error) {
+    throw new CliError(
+      `cannot create backup directory ${root}: ${errorMessage(error)}`,
+    );
+  }
   const stem = join(root, timestamp(now));
   let dir = stem;
   for (let n = 2; ; n++) {

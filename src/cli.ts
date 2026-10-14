@@ -105,7 +105,7 @@ function synopsis(spec: RestCommandSpec): string {
     .join(" ");
 }
 
-const APPLY_SYNOPSIS = "apply <description-file> --db <path-to-db.sqlite>";
+const APPLY_SYNOPSIS = "apply <description-file> [--db <path-to-db.sqlite>]";
 const SYNOPSES = [APPLY_SYNOPSIS, ...REST_TABLE.map(synopsis)];
 
 /** One line: every exit-2 message ends with it. */
@@ -115,7 +115,11 @@ export const HELP = [
   "usage:",
   ...SYNOPSES.map((line) => `  companion-cli ${line}`),
   "",
-  "apply writes a description file into a stopped Companion's database.",
+  "apply writes a description file into Companion's database. Without --db it",
+  "targets the local install (macOS): it quits Companion if it is running,",
+  "backs up and writes the database, then starts Companion again. With --db it",
+  "writes that database and never stops or starts Companion; it refuses the",
+  "install's database while Companion is running.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory; environment variables take precedence.",
@@ -158,11 +162,11 @@ export async function run(
   return runApply(argv, io, options);
 }
 
-function runApply(
+async function runApply(
   argv: readonly string[],
   io: CliIo,
   options: CliOptions,
-): number {
+): Promise<number> {
   let parsed;
   try {
     parsed = parseArgs({
@@ -195,13 +199,13 @@ function runApply(
   if (file === undefined || extra.length > 0) {
     return usageError(io, "apply takes exactly one description file");
   }
-  if (!values.db) {
-    return usageError(io, "--db is required");
+  if (values.db === "") {
+    return usageError(io, "--db needs a path");
   }
 
   const { env: _env, cwd: _cwd, ...applyOptions } = options;
   try {
-    const result = apply(
+    const result = await apply(
       { descriptionPath: file, dbPath: values.db, writers },
       { ...applyOptions, log: applyOptions.log ?? io.stdout },
     );

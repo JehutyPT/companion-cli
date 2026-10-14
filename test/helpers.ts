@@ -13,6 +13,7 @@ import { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { run } from "../src/cli.ts";
 import type { CliOptions } from "../src/cli.ts";
+import type { ProcessControl } from "../src/core/process.ts";
 
 const tempDirs: string[] = [];
 after(() => {
@@ -42,10 +43,90 @@ export interface CliRun {
 }
 
 /**
+ * The default process control for tests: Companion is not running and nothing
+ * holds the database, and quitting, waiting or starting fails the test. A test
+ * that expects those calls passes a fake, so no test can reach the real
+ * Companion.
+ */
+export const STOPPED_PROCESS_CONTROL: ProcessControl = {
+  serverPids: async () => [],
+  databaseHolders: async () => [],
+  quit: () => forbidden("quit"),
+  waitForExit: () => forbidden("waitForExit"),
+  start: () => forbidden("start"),
+};
+
+function forbidden(name: string): never {
+  throw new Error(`test reached the process control (${name}) without a fake`);
+}
+
+export interface FakeProcessOptions {
+  /** Whether the server is running when the apply begins. */
+  running: boolean;
+  /** Shared call log; tests push pipeline steps into the same array. */
+  calls?: string[];
+  failCheck?: boolean;
+  /** PIDs holding the database file when the in-use check runs. */
+  holders?: readonly number[];
+  failHolders?: boolean;
+  failQuit?: boolean;
+  failWait?: boolean;
+  timeout?: boolean;
+  failStart?: boolean;
+}
+
+/** A fake process control recording `check`, `holders`, `quit`, `wait` and `start`. */
+export function fakeProcessControl(options: FakeProcessOptions): {
+  control: ProcessControl;
+  calls: string[];
+  waitedFor: number[][];
+  timeouts: number[];
+} {
+  const calls = options.calls ?? [];
+  const waitedFor: number[][] = [];
+  const timeouts: number[] = [];
+  const control: ProcessControl = {
+    serverPids: async () => {
+      calls.push("check");
+      if (options.failCheck) throw new Error("ps exploded");
+      return options.running ? [4242] : [];
+    },
+    databaseHolders: async () => {
+      calls.push("holders");
+      if (options.failHolders) throw new Error("lsof exploded");
+      return [...(options.holders ?? [])];
+    },
+    quit: async () => {
+      calls.push("quit");
+      if (options.failQuit) throw new Error("osascript failed");
+    },
+    waitForExit: async (pids, timeoutMs) => {
+      calls.push("wait");
+      if (options.failWait) throw new Error("ps vanished");
+      waitedFor.push([...pids]);
+      timeouts.push(timeoutMs);
+      return !options.timeout;
+    },
+    start: async () => {
+      calls.push("start");
+      if (options.failStart) throw new Error("open failed");
+    },
+  };
+  return { control, calls, waitedFor, timeouts };
+}
+
+/** `~/Library/Application Support/companion/v5.1` under `home`. */
+export function installDir(home: string): string {
+  return join(home, "Library", "Application Support", "companion", "v5.1");
+}
+
+/**
  * Runs the CLI in-process, with a temp home directory unless one is given.
  * The environment defaults to empty and the working directory to a temp
  * directory, so a test never reads the developer's `COMPANION_*` variables or
- * the repository's `.env.local`.
+ * the repository's `.env.local`. The platform defaults to macOS and the
+ * process control to `STOPPED_PROCESS_CONTROL`, so no test can fall back to
+ * the real home or the real Companion process.
  */
 export async function runCli(
   argv: string[],
@@ -59,7 +140,14 @@ export async function runCli(
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
     },
-    { homedir: tempDir(), env: {}, cwd: tempDir(), ...options },
+    {
+      env: {},
+      cwd: tempDir(),
+      platform: "darwin",
+      ...options,
+      homedir: options.homedir ?? tempDir(),
+      processControl: options.processControl ?? STOPPED_PROCESS_CONTROL,
+    },
   );
   return { code, stdout, stderr };
 }

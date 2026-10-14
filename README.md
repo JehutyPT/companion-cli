@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer and the single-button writer work against a database copy, and the REST helper's runtime commands work against a running local Companion; multi-step buttons, feedbacks, the page and trigger writers, and stopping and restarting Companion are not built yet. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer and the single-button writer work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), and the REST helper's runtime commands work against a running local Companion; multi-step buttons, feedbacks, and the page and trigger writers are not built yet. Live-install mode is covered by tests with a fake process control; it has not yet been run against a real Companion. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -24,7 +24,7 @@ Every write is an idempotent "replace this one thing" operation, and every write
 ## Safety model
 
 - **Local development installs only.** Not for production or remote Companion machines.
-- **Stops Companion before writing.** Companion holds pages, controls and variables in memory and overwrites edits made while it runs.
+- **Stops Companion before writing.** Companion holds pages, controls and variables in memory and overwrites edits made while it runs. On macOS it also refuses to write a database any other process has open.
 - **Backs up first.** The database (and its WAL files) is copied before any write; the integrity check runs after.
 - **One database version.** The tool targets Companion 5.1's database (`page_config_version` 17) and refuses anything else.
 
@@ -37,6 +37,7 @@ Every write is an idempotent "replace this one thing" operation, and every write
 ```sh
 npm install
 npm run build
+node dist/bin/companion-cli.js apply variables.yaml                    # the local install (macOS)
 node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
 ```
 
@@ -51,7 +52,13 @@ variables:
     persist: false     # optional persist-on-restart flag, default false
 ```
 
-`apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Until live-install mode exists, `--db` is required and the install's default database is refused.
+`apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Backups always sit next to the database being written, including the install's: `~/Library/Application Support/companion/v5.1/companion-cli-backups/<timestamp>/`.
+
+Without `--db`, `apply` targets the install's database, `~/Library/Application Support/companion/v5.1/db.sqlite` (macOS only; other platforms are refused). After the file and the snapshot checks pass, it quits Companion if its server is running (`osascript -e 'quit app "Companion"'`), waits up to 30 seconds for the server process to exit, backs up and writes, then starts Companion again (`open -a Companion`), also after a failed write. If Companion was not running, it is neither quit nor started. If the server does not exit in time, nothing is written and Companion may be partly stopped. If the write succeeds but Companion does not start, the apply fails with a reason saying the change was written and Companion must be started manually.
+
+With `--db`, `apply` never quits or starts Companion. It refuses to write the install's database (through `~`, symlinks or hard links too) while Companion is running, or when it cannot tell whether Companion is running.
+
+On macOS, in both modes, `apply` also refuses right before the backup if any other process has the database or its `-wal` / `-shm` file open (checked with `lsof -t`), or if that check fails. This catches a Companion the process match misses, such as a renamed bundle or a development build, and any other SQLite client. In live-install mode Companion is still started again if the tool quit it. If quitting Companion or waiting for it fails with an error, nothing is written and the tool starts Companion again; only a wait timeout leaves it as it is.
 
 `button.yaml` replaces the button at one location:
 
