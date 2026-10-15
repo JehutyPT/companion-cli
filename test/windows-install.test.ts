@@ -206,7 +206,7 @@ describe("Windows install: live-install writes", () => {
                 "start",
                 "started",
               ]
-            : ["check", "holders"],
+            : ["check", "check", "holders"],
         );
         assert.equal(fake.launches.length, running ? 1 : 0);
         assert.ok(

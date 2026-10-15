@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { USAGE } from "../src/cli.ts";
@@ -103,6 +103,8 @@ function liveSuite(platform: "darwin" | "win32"): void {
     platform === "win32" ? windowsInstallDir(home) : installDir(home);
   const liveEnv = (home: string): Record<string, string> =>
     platform === "win32" ? { APPDATA: home } : {};
+  /** The trailing separator the launcher writes, under this platform's path rules. */
+  const trailing = platform === "win32" ? "\\" : "/";
 
   function liveHome(options: FixtureOptions = {}) {
     const home = tempDir();
@@ -607,6 +609,7 @@ function liveSuite(platform: "darwin" | "win32"): void {
           "check",
           "snapshot check",
           "check",
+          ...(platform === "win32" ? ["session"] : []),
           "quit",
           "wait",
           "holders",
@@ -723,7 +726,7 @@ function liveSuite(platform: "darwin" | "win32"): void {
           home,
           file,
           // As the launcher writes it, with a trailing separator.
-          { running: true, configDir: `${defaultRoot}${sep}` },
+          { running: true, configDir: `${defaultRoot}${trailing}` },
           undefined,
           {
             env: {
@@ -774,7 +777,7 @@ function liveSuite(platform: "darwin" | "win32"): void {
           {
             env: {
               ...liveEnv(home),
-              COMPANION_CONFIG_BASEDIR: `${root}${sep}`,
+              COMPANION_CONFIG_BASEDIR: `${root}${trailing}`,
             },
           },
         );
