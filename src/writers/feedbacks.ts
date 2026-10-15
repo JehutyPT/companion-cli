@@ -423,6 +423,71 @@ export function feedbackVariableReferences(
   );
 }
 
+/**
+ * Trigger conditions: boolean feedbacks, tagged with `condition`, that must
+ * all hold for the trigger's actions to run.
+ *
+ *   conditions:
+ *     - condition: expression
+ *       expression: "$(custom:fx_on) == 1"
+ *       invert: true                       # optional, default false
+ *     - { condition: passthrough, connection: FixtureConnectionAAAA, definition: tally }
+ *
+ * The kinds are the feedback kinds a trigger can use (no `step`: a trigger
+ * has no steps). An entry takes `invert` and the common entity fields but no
+ * `style` or `variableName`. Each is stored exactly as a feedback without a
+ * style, with `isInverted` and `styleOverrides: []`, as Companion's entity
+ * factory creates every feedback.
+ */
+export const CONDITION_KINDS = {
+  expression: FEEDBACK_KINDS.expression,
+  passthrough: FEEDBACK_KINDS.passthrough,
+};
+
+const CONDITIONS = taggedKinds<FeedbackContext>("condition")(CONDITION_KINDS);
+
+/** Fields every condition entry accepts besides its kind's own. */
+export const CONDITION_FIELDS = ["invert", ...ENTITY_FIELDS] as const;
+
+export const CONDITION_FIELD_SCHEMAS: Record<
+  (typeof CONDITION_FIELDS)[number],
+  FieldSchema
+> = {
+  invert: FEEDBACK_FIELD_SCHEMAS.invert,
+  ...ENTITY_FIELD_SCHEMAS,
+};
+
+/**
+ * Parses an optional condition list such as a trigger's `conditions`; a
+ * missing field is an empty list. Each entry is a feedback spec without a
+ * style, so the feedback reference check and builder apply unchanged.
+ */
+export function parseConditionList(
+  fields: Fields,
+  key: string,
+  context: FeedbackContext,
+  parent = "",
+): FeedbackSpec[] {
+  if (!Object.hasOwn(fields, key)) return [];
+  const path = fieldPath(parent, key);
+  return expectList(fields[key], path).map((item, index) => {
+    const itemPath = fieldPath(path, index);
+    const entry = expectMapping(item, itemPath);
+    return {
+      ...CONDITIONS.parse(entry, itemPath, context, CONDITION_FIELDS),
+      style: { overrides: [], references: [] },
+      invert: Object.hasOwn(entry, "invert")
+        ? parseBooleanOrExpression(
+            entry["invert"],
+            fieldPath(itemPath, "invert"),
+          )
+        : prop(false),
+      variableName: undefined,
+      common: parseEntityCommon(entry, itemPath),
+    };
+  });
+}
+
 /** Companion 5.1 feedback JSON with fresh ids. */
 export function buildFeedback(spec: FeedbackSpec): Record<string, unknown> {
   return entityJson(

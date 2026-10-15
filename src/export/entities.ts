@@ -208,7 +208,7 @@ function storedOptions(stored: Fields, path: string, area: Area): Fields {
 
 /** A pass-through entry's connection, definition, options and children. */
 function passthrough(
-  tag: "action" | "feedback",
+  tag: "action" | "feedback" | "condition",
   stored: Fields,
   options: Fields,
   path: string,
@@ -414,13 +414,13 @@ function exportStyle(stored: Fields, path: string): Fields {
 }
 
 /** A stored `isInverted` as `invert`: left out when false. */
-function exportInvert(stored: Fields, path: string): Fields {
+function exportInvert(
+  stored: Fields,
+  path: string,
+  area: Area = "feedback",
+): Fields {
   if (!Object.hasOwn(stored, "isInverted")) return {};
-  const invert = optionValue(
-    stored["isInverted"],
-    `${path}.isInverted`,
-    "feedback",
-  );
+  const invert = optionValue(stored["isInverted"], `${path}.isInverted`, area);
   return invert === false ? {} : { invert };
 }
 
@@ -436,6 +436,43 @@ export function exportFeedback(stored: unknown, path: string): Fields {
     ...exportInvert(stored, path),
     ...commonFields(stored, true),
     ...exportChildren(stored, path, "feedback"),
+  };
+}
+
+/**
+ * One stored trigger condition at `path` (`condition[0]`) as a condition
+ * entry: `expression` when the stored feedback is exactly that, otherwise
+ * `passthrough` (a stored `bank_current_step` too: a trigger has no steps).
+ * Style overrides and `variableName` are refused: a condition has neither.
+ */
+export function exportCondition(stored: unknown, path: string): Fields {
+  if (!isJsonObject(stored))
+    refuse(path, `is ${describeStored(stored)}, not a condition`, "condition");
+  const overrides = stored["styleOverrides"];
+  if (
+    overrides !== undefined &&
+    !(Array.isArray(overrides) && overrides.length === 0)
+  )
+    refuse(
+      `${path}.styleOverrides`,
+      "is set, which a trigger condition cannot carry",
+      "condition",
+    );
+  if (Object.hasOwn(stored, "variableName"))
+    refuse(
+      `${path}.variableName`,
+      "is set, which a trigger condition cannot carry",
+      "condition",
+    );
+  const options = storedOptions(stored, path, "condition");
+  const named = namedFeedback(stored, options);
+  return {
+    ...(named?.["feedback"] === "expression"
+      ? { condition: "expression", expression: named["expression"] }
+      : passthrough("condition", stored, options, path)),
+    ...exportInvert(stored, path, "condition"),
+    ...commonFields(stored, false),
+    ...exportChildren(stored, path, "condition"),
   };
 }
 
@@ -477,6 +514,7 @@ function entityPath(entry: unknown, rest: string): string {
   switch (key) {
     case "action":
     case "feedback":
+    case "condition":
       return "";
     case "variable":
       return ".options.name";
@@ -484,7 +522,8 @@ function entityPath(entry: unknown, rest: string): string {
     case "by":
       return ".options.value";
     case "expression":
-      return Object.hasOwn(fields, "feedback")
+      return Object.hasOwn(fields, "feedback") ||
+        Object.hasOwn(fields, "condition")
         ? ".options.expression"
         : ".options.value";
     case "step":

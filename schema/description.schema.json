@@ -356,7 +356,7 @@
     {
       "type": "object",
       "title": "kind: trigger",
-      "description": "Creates or replaces one trigger, identified by its name. Its condition is always empty and its notes are reset.",
+      "description": "Creates or replaces one trigger, identified by its name.",
       "examples": [
         {
           "kind": "trigger",
@@ -400,13 +400,27 @@
           "type": "boolean",
           "default": true
         },
+        "notes": {
+          "description": "Notes on the trigger, shown in Companion's editor.",
+          "type": "string",
+          "default": ""
+        },
         "events": {
           "description": "What starts the trigger. At least one.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/event"
           },
-          "minItems": 1
+          "minItems": 1,
+          "$comment": "Not expressible here: condition_true and condition_false need at least one condition."
+        },
+        "conditions": {
+          "description": "What must all hold for the actions to run when an event starts the trigger.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/condition"
+          },
+          "default": []
         },
         "actions": {
           "description": "The actions the trigger runs, in order.",
@@ -1737,13 +1751,27 @@
           "type": "boolean",
           "default": true
         },
+        "notes": {
+          "description": "Notes on the trigger, shown in Companion's editor.",
+          "type": "string",
+          "default": ""
+        },
         "events": {
           "description": "What starts the trigger. At least one.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/event"
           },
-          "minItems": 1
+          "minItems": 1,
+          "$comment": "Not expressible here: condition_true and condition_false need at least one condition."
+        },
+        "conditions": {
+          "description": "What must all hold for the actions to run when an event starts the trigger.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/condition"
+          },
+          "default": []
         },
         "actions": {
           "description": "The actions the trigger runs, in order.",
@@ -2130,6 +2158,173 @@
           },
           "required": [
             "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: condition_true",
+          "description": "Runs when the trigger's conditions, taken together, become true. The trigger needs at least one condition: without any, they always hold and the event never fires.",
+          "properties": {
+            "event": {
+              "description": "Selects the condition_true event.",
+              "const": "condition_true"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: condition_false",
+          "description": "Runs when the trigger's conditions, taken together, become false. The trigger needs at least one condition: without any, they always hold and the event never fires.",
+          "properties": {
+            "event": {
+              "description": "Selects the condition_false event.",
+              "const": "condition_false"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "condition": {
+      "description": "A trigger condition, tagged with `condition`: a boolean feedback that must hold for the trigger's actions to run.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "condition: expression",
+          "description": "Holds while a Companion boolean expression is true. Written as Companion's internal `check_expression` feedback.",
+          "properties": {
+            "condition": {
+              "description": "Selects the expression condition.",
+              "const": "expression"
+            },
+            "expression": {
+              "description": "A Companion expression, for example `$(custom:fx_label) == 'on'`. `$(custom:…)` references in it are checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "invert": {
+              "description": "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "default": false
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "condition",
+            "expression"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "condition: passthrough",
+          "description": "Any connection's feedback (boolean, advanced or value), written literally: connection, definition and options are not checked against the database.",
+          "dependentSchemas": {
+            "children": {
+              "$comment": "`children` only on connection `internal`.",
+              "properties": {
+                "connection": {
+                  "const": "internal"
+                }
+              }
+            }
+          },
+          "properties": {
+            "condition": {
+              "description": "Selects the passthrough condition.",
+              "const": "passthrough"
+            },
+            "connection": {
+              "description": "The connection id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "definition": {
+              "description": "The connection's definition id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "description": "The definition's options, not checked. Each value is stored as a plain value, except `{expr: \"<expression>\"}`, which is stored as an expression.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/optionValue"
+              },
+              "default": {}
+            },
+            "children": {
+              "description": "Child entries by group, for internal entities that have them (such as `logic_if`). Only on connection `internal`: Companion discards the children of other connections' entities.",
+              "$ref": "#/$defs/children"
+            },
+            "invert": {
+              "description": "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "default": false
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "condition",
+            "connection",
+            "definition"
           ],
           "additionalProperties": false
         }

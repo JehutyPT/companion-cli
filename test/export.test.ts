@@ -463,20 +463,20 @@ triggers:
   const refusals: [string, string, (value: Json) => unknown, string, string][] =
     [
       [
-        "non-empty notes",
+        "notes that are not a string",
         COLLECTED,
         (value) => ({
           ...value,
-          options: { ...(value["options"] as Json), notes: "hello" },
+          options: { ...(value["options"] as Json), notes: 5 },
         }),
-        'options.notes is "hello", which apply would store as ""',
+        "options.notes cannot be expressed: must be a string, got a number",
         "trigger option",
       ],
       [
-        "a condition",
+        "a condition without options",
         COLLECTED,
         (value) => ({ ...value, condition: [{ type: "feedback" }] }),
-        "condition is set, which the description format does not support yet",
+        "condition[0].options is missing, not a mapping",
         "condition",
       ],
       [
@@ -494,13 +494,13 @@ triggers:
           events: [
             {
               id: "SeedEventAAAAAAAAAAAA",
-              type: "condition_false",
+              type: "condition_maybe",
               enabled: true,
               options: {},
             },
           ],
         }),
-        'events[0].type is "condition_false", which the description format does not support yet',
+        'events[0].type is "condition_maybe", which the description format does not support yet',
         "event",
       ],
       [
@@ -766,11 +766,11 @@ triggers:
     }));
     mutate(db, "controls", collected, (value) => ({
       ...value,
-      options: { ...(value["options"] as Json), notes: "n" },
+      options: { ...(value["options"] as Json), notes: 5 },
     }));
     db.close();
     const line =
-      '2 triggers cannot be exported: "Startup set" (condition); "In a collection" (options.notes)';
+      '2 triggers cannot be exported: "Startup set" (condition[0].options); "In a collection" (options.notes)';
     const text = await exportFrom(env, ["triggers"]);
     assert.equal(text.code, 1);
     assert.deepEqual(text.stdout, []);
@@ -781,15 +781,15 @@ triggers:
     assert.deepEqual(error, {
       code: "export_unsupported",
       message: line,
-      path: "condition",
+      path: "condition[0].options",
       hint: "see docs/support-matrix.md (condition)",
       items: [
         {
-          message: `cannot export trigger "Startup set" (${startup}): condition is set, which the description format does not support yet (see docs/support-matrix.md, condition)`,
-          path: "condition",
+          message: `cannot export trigger "Startup set" (${startup}): condition[0].options is missing, not a mapping (see docs/support-matrix.md, condition)`,
+          path: "condition[0].options",
         },
         {
-          message: `cannot export trigger "In a collection" (${collected}): options.notes is "n", which apply would store as "" (see docs/support-matrix.md, trigger option)`,
+          message: `cannot export trigger "In a collection" (${collected}): options.notes cannot be expressed: must be a string, got a number (see docs/support-matrix.md, trigger option)`,
           path: "options.notes",
         },
       ],
@@ -1097,9 +1097,9 @@ events:
 
   const refusals: Array<[string, Json, string]> = [
     [
-      "a condition event, which waits for trigger conditions (#26)",
+      "a condition event on a trigger without conditions",
       { type: "condition_true", enabled: true, options: {} },
-      'events[0].type is "condition_true", which the description format does not support yet',
+      "events[0].type cannot be expressed: condition_true needs at least one condition: without conditions it never fires",
     ],
     [
       "a time of day Companion would never run",

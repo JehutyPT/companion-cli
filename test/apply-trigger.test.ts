@@ -472,8 +472,8 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
   const parseCases: Array<[string, string, RegExp]> = [
     [
       "unknown top-level field",
-      trigger("  - { event: startup }\n", "notes: hi\n"),
-      /: notes: unknown field$/,
+      trigger("  - { event: startup }\n", "note: hi\n"),
+      /: note: unknown field$/,
     ],
     [
       "condition",
@@ -523,8 +523,8 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
     ],
     [
       "unknown event",
-      trigger("  - { event: startup }\n  - { event: condition_true }\n"),
-      /: events\[1\]\.event: unknown event "condition_true" \(expected one of: startup, interval, intervalRandom, timeofday, specificDate, sun_event, client_connect, button_press, button_release, variable_changed, computer_locked, computer_unlocked\)$/,
+      trigger("  - { event: startup }\n  - { event: condition_maybe }\n"),
+      /: events\[1\]\.event: unknown event "condition_maybe" \(expected one of: startup, interval, intervalRandom, timeofday, specificDate, sun_event, client_connect, button_press, button_release, variable_changed, computer_locked, computer_unlocked, condition_true, condition_false\)$/,
     ],
     [
       "unknown event field",

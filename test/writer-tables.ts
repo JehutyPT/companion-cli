@@ -11,6 +11,8 @@ import {
   STEP_FIELDS,
 } from "../src/writers/button-control.ts";
 import {
+  CONDITION_FIELDS,
+  CONDITION_KINDS,
   FEEDBACK_FIELDS,
   FEEDBACK_KINDS,
   STYLE_FIELDS,
@@ -42,6 +44,8 @@ export interface WriterTables {
   styleFields: readonly string[];
   styleOverrideFields: readonly string[];
   feedbackFields: readonly string[];
+  conditionKinds: Record<string, { fields: readonly string[] }>;
+  conditionFields: readonly string[];
   buttonFields: readonly string[];
   stepFields: readonly string[];
   holdFields: readonly string[];
@@ -64,6 +68,8 @@ export const WRITER_TABLES: WriterTables = {
   styleFields: Object.keys(STYLE_FIELDS),
   styleOverrideFields: Object.keys(STYLE_OVERRIDE_FIELD_SCHEMAS),
   feedbackFields: FEEDBACK_FIELDS,
+  conditionKinds: CONDITION_KINDS,
+  conditionFields: CONDITION_FIELDS,
   buttonFields: BUTTON_FIELDS,
   stepFields: STEP_FIELDS,
   holdFields: HOLD_FIELDS,
@@ -105,6 +111,8 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("feedback", tables.feedbackFields),
     ...under("feedback.style", tables.styleFields),
     ...under("feedback.style[]", tables.styleOverrideFields),
+    ...tagged("condition", tables.conditionKinds),
+    ...under("condition", tables.conditionFields),
     ...tagged("event", tables.eventKinds),
     ...under("event", tables.eventFields),
   ]);

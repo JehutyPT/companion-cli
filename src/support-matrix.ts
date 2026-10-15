@@ -468,10 +468,57 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     "kept; a new trigger goes after the highest",
   ),
   supported("trigger option", "options.collectionId", [], "kept"),
-  planned("trigger option", "options.notes", "#26", 'reset to "" today'),
+  supported("trigger option", "options.notes", ["trigger.notes"]),
 
   // Conditions
-  planned("condition", "condition", "#26", "boolean feedback entities"),
+  supported(
+    "condition",
+    "condition",
+    ["trigger.conditions"],
+    "boolean feedback entities; all must hold for the actions to run",
+  ),
+  supported(
+    "condition",
+    "check_expression",
+    tagged("condition", "expression", ["expression"]),
+  ),
+  supported(
+    "condition",
+    "module feedback",
+    tagged("condition", "passthrough", [...PASSTHROUGH, "children"]),
+    "any boolean feedback, with literal options; `children` on connection `internal` only",
+  ),
+  supported(
+    "condition",
+    "bank_current_step",
+    ["condition: passthrough"],
+    "pass-through: a trigger has no steps",
+  ),
+  supported(
+    "condition",
+    "condition.isInverted",
+    ["condition.invert"],
+    "or `{expr: …}`",
+  ),
+  supported(
+    "condition",
+    "condition.styleOverrides",
+    [],
+    "always `[]`; export refuses a condition with overrides",
+  ),
+  supported("condition", "condition.disabled", ["condition.disabled"]),
+  supported("condition", "condition.headline", ["condition.headline"]),
+  supported(
+    "condition",
+    "condition.upgradeIndex",
+    ["condition.upgradeIndex"],
+    "left out, Companion assumes the connection's current index",
+  ),
+  unsupported(
+    "condition",
+    "condition.variableName",
+    "a value-feedback field; export refuses it on a condition",
+  ),
 
   // Events
   supported("event", "startup", tagged("event", "startup", ["delay"])),
@@ -518,17 +565,17 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     ["event: variable_changed.variableId"],
     "any `<label>:<name>`, including `local:`; not checked against the database",
   ),
-  planned(
+  supported(
     "event",
     "condition_true",
-    "#26",
-    "fires when the trigger's conditions change",
+    tagged("event", "condition_true", []),
+    "fires when the trigger's conditions become true; needs at least one condition",
   ),
-  planned(
+  supported(
     "event",
     "condition_false",
-    "#26",
-    "fires when the trigger's conditions change",
+    tagged("event", "condition_false", []),
+    "fires when the trigger's conditions become false; needs at least one condition",
   ),
   supported(
     "event",

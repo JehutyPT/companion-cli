@@ -151,6 +151,29 @@ events:
   - { event: variable_changed, variableId: "internal:time_hms" }
   - { event: computer_locked }
   - { event: computer_unlocked }
+  - { event: condition_true }
+  - { event: condition_false, enabled: false }
+conditions:
+  - { condition: expression, expression: "$(custom:a) > 1", invert: true }
+`,
+  "a trigger with notes and every condition field": `kind: trigger
+name: t
+notes: |
+  line one
+  line two
+events: [{ event: interval, seconds: 5 }]
+conditions:
+  - condition: expression
+    expression: "1 > 0"
+    invert: { expr: "$(custom:a)" }
+    disabled: true
+    headline: H
+    upgradeIndex: 2
+  - condition: passthrough
+    connection: internal
+    definition: logic_and
+    options: { x: 1 }
+    children: { feedbacks: [{ feedback: expression, expression: "1 > 0" }] }
 `,
   "a surface with every field": `kind: surface
 surface: "skaarhoj:SK_1"
@@ -329,7 +352,15 @@ buttons:
   "a trigger with a string enabled":
     "kind: trigger\nname: t\nenabled: 'true'\nevents: [{ event: startup }]\n",
   "unknown event":
-    "kind: trigger\nname: t\nevents: [{ event: condition_true }]\n",
+    "kind: trigger\nname: t\nevents: [{ event: condition_maybe }]\n",
+  "a condition with a style":
+    "kind: trigger\nname: t\nevents: [{ event: startup }]\nconditions: [{ condition: expression, expression: '1', style: { text: x } }]\n",
+  "a step condition":
+    "kind: trigger\nname: t\nevents: [{ event: startup }]\nconditions: [{ condition: step, step: 1 }]\n",
+  "a condition with a variableName":
+    "kind: trigger\nname: t\nevents: [{ event: startup }]\nconditions: [{ condition: passthrough, connection: c, definition: d, variableName: v }]\n",
+  "a trigger with numeric notes":
+    "kind: trigger\nname: t\nnotes: 1\nevents: [{ event: startup }]\n",
   "a time of day without seconds":
     "kind: trigger\nname: t\nevents: [{ event: timeofday, time: '08:30' }]\n",
   "an unknown day name":
@@ -367,6 +398,8 @@ const EXCEPTIONS: Record<string, string> = {
     "kind: trigger\nname: t\nevents: [{ event: variable_changed }]\n",
   "a variableId on a custom variable":
     "kind: trigger\nname: t\nevents: [{ event: variable_changed, variableId: 'custom:a' }]\n",
+  "a condition event without conditions":
+    "kind: trigger\nname: t\nevents: [{ event: condition_true }]\n",
   "a random interval with max below min":
     "kind: trigger\nname: t\nevents: [{ event: intervalRandom, min: 5, max: 2 }]\n",
   "a date that is not on the calendar":
@@ -420,6 +453,7 @@ function schemaFields(schema: Json): Set<string> {
   const actionCommon = commonTo("action");
   const feedbackCommon = commonTo("feedback");
   const eventCommon = commonTo("event");
+  const conditionCommon = commonTo("condition");
   return new Set([
     ...(schema["oneOf"] as Json[]).flatMap((branch) => {
       const kind = ((branch["properties"] as Json)["kind"] as Json)["const"];
@@ -440,6 +474,8 @@ function schemaFields(schema: Json): Set<string> {
     ...under("feedback", feedbackCommon),
     ...under("feedback.style", props(defs["styleShortcuts"] as Json)),
     ...under("feedback.style[]", props(defs["styleOverride"] as Json)),
+    ...tagged("condition", conditionCommon),
+    ...under("condition", conditionCommon),
     ...tagged("event", eventCommon),
     ...under("event", eventCommon),
   ]);

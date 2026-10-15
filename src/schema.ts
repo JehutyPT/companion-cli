@@ -24,6 +24,8 @@ import {
 import * as button from "./writers/button.ts";
 import * as connection from "./writers/connection.ts";
 import {
+  CONDITION_FIELD_SCHEMAS,
+  CONDITION_KINDS,
   FEEDBACK_FIELD_SCHEMAS,
   FEEDBACK_KINDS,
   STYLE_FIELD_SCHEMAS,
@@ -341,6 +343,12 @@ function defs(): Record<string, unknown> {
       "What starts a trigger, tagged with `event`.",
       trigger.EVENT_KINDS,
       trigger.EVENT_FIELD_SCHEMAS,
+    ),
+    condition: taggedSchema(
+      "condition",
+      "A trigger condition, tagged with `condition`: a boolean feedback that must hold for the trigger's actions to run.",
+      CONDITION_KINDS,
+      CONDITION_FIELD_SCHEMAS,
     ),
   };
 }

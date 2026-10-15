@@ -230,7 +230,9 @@ export type ActionSpec = TaggedSpec<typeof ACTION_KINDS> & {
  * What an action's children see of the control: a `feedback: step` child of
  * an action is not checked against the button's number of steps.
  */
-const ACTION_CONTEXT: FeedbackContext = { stepCount: Number.MAX_SAFE_INTEGER };
+export const ACTION_CONTEXT: FeedbackContext = {
+  stepCount: Number.MAX_SAFE_INTEGER,
+};
 
 /** Parses one action entry at `path`. */
 export function parseAction(

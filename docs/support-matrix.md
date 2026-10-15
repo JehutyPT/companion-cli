@@ -158,7 +158,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `options.enabled` | supported | `trigger.enabled` |  |
 | `options.sortOrder` | supported |  | kept; a new trigger goes after the highest |
 | `options.collectionId` | supported |  | kept |
-| `options.notes` | planned (#26) |  | reset to "" today |
+| `options.notes` | supported | `trigger.notes` |  |
 
 ## Event
 
@@ -175,8 +175,8 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `button_release` | supported | `event: button_release` |  |
 | `variable_changed (custom: variables)` | supported | `event: variable_changed`, `event: variable_changed.variable` |  |
 | `variable_changed (other variables)` | supported | `event: variable_changed.variableId` | any `<label>:<name>`, including `local:`; not checked against the database |
-| `condition_true` | planned (#26) |  | fires when the trigger's conditions change |
-| `condition_false` | planned (#26) |  | fires when the trigger's conditions change |
+| `condition_true` | supported | `event: condition_true` | fires when the trigger's conditions become true; needs at least one condition |
+| `condition_false` | supported | `event: condition_false` | fires when the trigger's conditions become false; needs at least one condition |
 | `computer_locked` | supported | `event: computer_locked` | Companion registers it on macOS and Windows only; Companion on Linux ignores it |
 | `computer_unlocked` | supported | `event: computer_unlocked` | Companion registers it on macOS and Windows only; Companion on Linux ignores it |
 | `enabled = false` | supported | `event.enabled` | on any event; enabled by default |
@@ -185,7 +185,16 @@ An export refusal names the stored field it cannot express; this file says wheth
 
 | Item | Status | Field | Note |
 | --- | --- | --- | --- |
-| `condition` | planned (#26) |  | boolean feedback entities |
+| `condition` | supported | `trigger.conditions` | boolean feedback entities; all must hold for the actions to run |
+| `check_expression` | supported | `condition: expression`, `condition: expression.expression` |  |
+| `module feedback` | supported | `condition: passthrough`, `condition: passthrough.connection`, `condition: passthrough.definition`, `condition: passthrough.options`, `condition: passthrough.children` | any boolean feedback, with literal options; `children` on connection `internal` only |
+| `bank_current_step` | supported | `condition: passthrough` | pass-through: a trigger has no steps |
+| `condition.isInverted` | supported | `condition.invert` | or `{expr: …}` |
+| `condition.styleOverrides` | supported |  | always `[]`; export refuses a condition with overrides |
+| `condition.disabled` | supported | `condition.disabled` |  |
+| `condition.headline` | supported | `condition.headline` |  |
+| `condition.upgradeIndex` | supported | `condition.upgradeIndex` | left out, Companion assumes the connection's current index |
+| `condition.variableName` | unsupported |  | a value-feedback field; export refuses it on a condition |
 
 ## Custom variable
 

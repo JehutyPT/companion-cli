@@ -323,7 +323,8 @@ function triggerPath(control: unknown, s: Segment[]): string | undefined {
     return entityPath(
       at(control, s.slice(0, 2)),
       s.slice(2),
-      join("", s.slice(0, 2)),
+      // The description names the stored `condition` list `conditions`.
+      join("", [s[0] === "condition" ? "conditions" : s[0], s[1]]),
     );
   return undefined;
 }

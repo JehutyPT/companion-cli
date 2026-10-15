@@ -260,6 +260,7 @@ describe("support matrix", () => {
         (row) => !(row.area === "event" && row.item === "condition_true"),
       );
       assert.deepEqual(matrixProblems(rows, WRITER_TABLES, REFERENCE_LISTS), [
+        "writer field event: condition_true has no supported row",
         "event condition_true has no row",
       ]);
     });

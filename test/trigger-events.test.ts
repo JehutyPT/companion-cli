@@ -275,9 +275,9 @@ describe("trigger events: refusals name the field", () => {
       "variableId: is a custom variable; write variable: fx_counter instead",
     ],
     [
-      "a condition event, which waits for trigger conditions",
+      "a condition event on a trigger without conditions",
       { event: "condition_true" },
-      'event: unknown event "condition_true"',
+      "event: condition_true needs at least one condition: without conditions it never fires",
     ],
   ];
   for (const [name, entry, expected] of cases) {

@@ -2,8 +2,9 @@
  * `export trigger "<name>"` (one `kind: trigger` file) and
  * `export triggers [<pattern>...]` (one `kind: triggers` file, in
  * `sortOrder`, then id order). Triggers are read as the trigger writer reads
- * them (`readTriggers`). Each entry emits `name`, `enabled`, `events` and
- * `actions` (left out when empty).
+ * them (`readTriggers`). Each entry emits `name`, `enabled`, `notes` (left
+ * out when empty), `events`, and `conditions` and `actions` (each left out
+ * when empty).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { CliError } from "../core/errors.ts";
@@ -18,7 +19,7 @@ import {
   readTriggers,
   type StoredTrigger,
 } from "../writers/trigger.ts";
-import { entityListPath, exportAction } from "./entities.ts";
+import { entityListPath, exportAction, exportCondition } from "./entities.ts";
 import {
   describeStored,
   type Exporter,
@@ -48,8 +49,12 @@ const SAME_NAME_OPTIONS =
 function storedPath(field: string, body: Fields): string {
   if (field.startsWith("actions["))
     return `actions${entityListPath(body["actions"], field.slice("actions".length))}`;
+  if (field.startsWith("conditions["))
+    return `condition${entityListPath(body["conditions"], field.slice("conditions".length))}`;
+  if (field === "conditions") return "condition";
   return field
-    .replace(/^(name|enabled)$/, "options.$1")
+    .replace(/^(name|enabled|notes)$/, "options.$1")
+    .replace(/^(events\[\d+\])\.event$/, "$1.type")
     .replace(
       /^(events\[\d+\])\.(variable|variableId)$/,
       "$1.options.variableId",
@@ -148,6 +153,8 @@ const EVENTS: Record<string, (options: Fields, path: string) => Fields> = {
   },
   computer_locked: () => ({}),
   computer_unlocked: () => ({}),
+  condition_true: () => ({}),
+  condition_false: () => ({}),
 };
 
 function exportEvent(stored: unknown, path: string): Fields {
@@ -198,7 +205,7 @@ function entry(db: DatabaseSync, trigger: StoredTrigger): Fields {
       `is ${describeStored(options)}; a trigger without options takes Companion's defaults, which apply would store explicitly`,
       "trigger option",
     );
-  const { name, enabled, sortOrder, collectionId } = options;
+  const { name, enabled, notes, sortOrder, collectionId } = options;
   if (typeof name !== "string" || name === "")
     refuse("options.name", "is not a non-empty string", "trigger option");
   if (typeof enabled !== "boolean")
@@ -216,13 +223,18 @@ function entry(db: DatabaseSync, trigger: StoredTrigger): Fields {
   const events = list(control, "events").map((event, index) =>
     exportEvent(event, `events[${index}]`),
   );
+  const conditions = list(control, "condition").map((condition, index) =>
+    exportCondition(condition, `condition[${index}]`),
+  );
   const actions = list(control, "actions").map((action, index) =>
     exportAction(action, `actions[${index}]`),
   );
   const body: Fields = {
     name,
     enabled,
+    ...(notes === "" || notes === undefined ? {} : { notes }),
     events,
+    ...(conditions.length > 0 ? { conditions } : {}),
     ...(actions.length > 0 ? { actions } : {}),
   };
   selfCheck({

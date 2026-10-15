@@ -10,6 +10,7 @@ import {
   NON_EMPTY_STRING,
   ref,
   requiredField,
+  STRING,
 } from "../core/field-schema.ts";
 import {
   expectBoolean,
@@ -28,11 +29,18 @@ import {
 } from "../core/validate.ts";
 import type { Writer } from "../core/writer.ts";
 import {
+  ACTION_CONTEXT,
   type ActionSpec,
   actionVariableReferences,
   buildAction,
   parseActionList,
 } from "./actions.ts";
+import {
+  buildFeedback,
+  type FeedbackSpec,
+  feedbackVariableReferences,
+  parseConditionList,
+} from "./feedbacks.ts";
 import { controlExists, freshId, newId } from "./ids.ts";
 import {
   checkVariablesExist,
@@ -51,21 +59,25 @@ import {
  *   kind: trigger
  *   name: Reset counter                    # required, non-empty; the identity
  *   enabled: true                          # optional, default true
+ *   notes: "Resets at startup"             # optional, default ""
  *   events:                                # required, non-empty
  *     - { event: startup, delay: 0 }       # delay in ms, optional, default 10000
  *     - { event: interval, seconds: 5 }    # positive integer
  *     - { event: variable_changed, variable: fx_counter }
  *     - { event: timeofday, time: "08:00:00", days: [mon, fri], enabled: false }
+ *     - { event: condition_true }          # needs at least one condition
+ *   conditions:                            # optional condition list, default []
+ *     - { condition: expression, expression: "$(custom:fx_counter) > 0" }
  *   actions:                               # optional action list, default []
  *     - { action: increment, variable: fx_counter }
  *
  * The control is Companion 5.1's stored trigger: `{type: "trigger", options,
- * actions, condition: [], events, localVariables: []}`, with event options as
- * plain values. Every Companion 5.1 event type except the condition events is
- * written (EVENT_KINDS); `enabled: false` on an event stores it disabled.
- * A trigger with the same name is rewritten under its control
- * id, keeping its `sortOrder` and `collectionId`; everything else is replaced,
- * and `notes` is reset to "". Otherwise a new `trigger:<id>` row is appended
+ * actions, condition, events, localVariables: []}`, with event options as
+ * plain values. Every Companion 5.1 event type is written (EVENT_KINDS);
+ * `enabled: false` on an event stores it disabled. Conditions are boolean
+ * feedbacks (feedbacks.ts, `parseConditionList`). A trigger with the same
+ * name is rewritten under its control id, keeping its `sortOrder` and
+ * `collectionId`; everything else is replaced. Otherwise a new `trigger:<id>` row is appended
  * after the highest `sortOrder`. Two triggers with the same name refuse the
  * apply. See docs/companion-internals.md, "Triggers".
  */
@@ -237,6 +249,9 @@ const noOptions = (type: string, doc: string) =>
     references: () => [],
     build: () => ({ type, options: {} }),
   });
+
+const CONDITION_NOTE =
+  " The trigger needs at least one condition: without any, they always hold and the event never fires.";
 
 const PLATFORM_NOTE =
   " Companion registers it only on macOS and Windows; Companion on Linux ignores it.";
@@ -476,7 +491,21 @@ export const EVENT_KINDS = {
     "computer_unlocked",
     `Runs when the computer running Companion unlocks.${PLATFORM_NOTE}`,
   ),
+  condition_true: noOptions(
+    "condition_true",
+    `Runs when the trigger's conditions, taken together, become true.${CONDITION_NOTE}`,
+  ),
+  condition_false: noOptions(
+    "condition_false",
+    `Runs when the trigger's conditions, taken together, become false.${CONDITION_NOTE}`,
+  ),
 };
+
+/** The events that fire on the trigger's conditions. */
+const CONDITION_EVENTS: readonly string[] = [
+  "condition_true",
+  "condition_false",
+] satisfies (keyof typeof EVENT_KINDS)[];
 
 const EVENTS = taggedKinds<undefined, EventBody>("event")(EVENT_KINDS);
 
@@ -507,11 +536,20 @@ function parseEvent(item: unknown, path: string): EventSpec {
 export interface TriggerPlan {
   name: string;
   enabled: boolean;
+  notes: string;
   events: EventSpec[];
+  conditions: FeedbackSpec[];
   actions: ActionSpec[];
 }
 
-export const FIELDS = ["name", "enabled", "events", "actions"] as const;
+export const FIELDS = [
+  "name",
+  "enabled",
+  "notes",
+  "events",
+  "conditions",
+  "actions",
+] as const;
 
 export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
   name: requiredField(
@@ -519,9 +557,21 @@ export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
     NON_EMPTY_STRING,
   ),
   enabled: field("Whether the trigger runs.", { ...BOOLEAN, default: true }),
+  notes: field("Notes on the trigger, shown in Companion's editor.", {
+    ...STRING,
+    default: "",
+  }),
   events: requiredField(
     "What starts the trigger. At least one.",
-    list(ref("event"), { minItems: 1 }),
+    list(ref("event"), {
+      minItems: 1,
+      $comment:
+        "Not expressible here: condition_true and condition_false need at least one condition.",
+    }),
+  ),
+  conditions: field(
+    "What must all hold for the actions to run when an event starts the trigger.",
+    { ...list(ref("condition")), default: [] },
   ),
   actions: field("The actions the trigger runs, in order.", {
     ...list(ref("action")),
@@ -530,8 +580,7 @@ export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
 };
 
 /** What a trigger file does: the kind's `description` in the schema. */
-export const DOC =
-  "Creates or replaces one trigger, identified by its name. Its condition is always empty and its notes are reset.";
+export const DOC = "Creates or replaces one trigger, identified by its name.";
 
 /** YAML examples of a trigger file, as the schema shows them. */
 export const EXAMPLES = [
@@ -568,10 +617,30 @@ export function parseTrigger(fields: Fields, parent = ""): TriggerPlan {
   const events = list.map((item, index) =>
     parseEvent(item, fieldPath(eventsPath, index)),
   );
+  const conditions = parseConditionList(
+    fields,
+    "conditions",
+    ACTION_CONTEXT,
+    parent,
+  );
+  if (conditions.length === 0) {
+    const index = events.findIndex((spec) =>
+      CONDITION_EVENTS.includes(spec.kind),
+    );
+    if (index >= 0)
+      throw new ValidationError(
+        fieldPath(fieldPath(eventsPath, index), "event"),
+        `${(events[index] as EventSpec).kind} needs at least one condition: without conditions it never fires`,
+      );
+  }
   return {
     name,
     enabled,
+    notes: Object.hasOwn(fields, "notes")
+      ? expectString(fields["notes"], fieldPath(parent, "notes"))
+      : "",
     events,
+    conditions,
     actions: parseActionList(fields, "actions", parent),
   };
 }
@@ -655,6 +724,10 @@ export function checkTrigger(
     ...plan.events.flatMap((spec, index) =>
       EVENTS.references(spec, fieldPath(eventsPath, index)),
     ),
+    ...feedbackVariableReferences(
+      plan.conditions,
+      fieldPath(parent, "conditions"),
+    ),
     ...actionVariableReferences(plan.actions, fieldPath(parent, "actions")),
   ]);
   readTarget(db, plan.name, fieldPath(parent, "name"));
@@ -682,13 +755,13 @@ export function buildTriggerControl(
       name: plan.name,
       enabled: plan.enabled,
       sortOrder,
-      notes: "",
+      notes: plan.notes,
       ...(collectionId === undefined || collectionId === null
         ? {}
         : { collectionId }),
     },
     actions: plan.actions.map(buildAction),
-    condition: [],
+    condition: plan.conditions.map(buildFeedback),
     events: plan.events.map((spec) => {
       const { type, options } = EVENTS.build(spec);
       return { id: newId(), type, enabled: spec.enabled, options };

@@ -73,7 +73,10 @@ A named list of entities nested inside an `internal` entity (for example `logic_
 Where an action puts its result: a custom, local or page variable. Written as `store` in a description; stored as `storeResult`.
 
 **Trigger**:
-A control with no location that runs actions when one of its events occurs (startup, variable change, interval and others) and its condition holds. The tool identifies a trigger by its name.
+A control with no location that runs actions when one of its events occurs (startup, variable change, interval and others) and all its conditions hold. The tool identifies a trigger by its name.
+
+**Condition**:
+A boolean feedback on a trigger that must hold for the trigger's actions to run. Written as a `conditions` entry tagged `condition:` in a description; stored in the trigger's `condition` list, without style overrides. The `condition_true` and `condition_false` events fire when the conditions, taken together, change.
 
 **Event**:
 One occurrence a trigger listens for, such as startup (after a delay), a fixed interval, or a change of a custom variable. A trigger has one or more events.

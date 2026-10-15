@@ -409,7 +409,7 @@ describe("find --connection", () => {
       `trigger "Uses gamma"  trigger:SeedTrigGammaAAAAAAA  ${via("gamma", "ConnGammaAAAAAAAAAAAA")}  actions[0].connection`,
     ]);
     assert.deepEqual(ok(await find(env, ["--connection", "delta"])), [
-      `trigger "Uses delta"  trigger:SeedTrigDeltaAAAAAAA  ${via("delta", "ConnDeltaAAAAAAAAAAAA")}  condition[0].connection`,
+      `trigger "Uses delta"  trigger:SeedTrigDeltaAAAAAAA  ${via("delta", "ConnDeltaAAAAAAAAAAAA")}  conditions[0].connection`,
     ]);
   });
 
@@ -464,7 +464,7 @@ describe("find --connection", () => {
       line(
         'trigger "Reset counter"',
         TRIGGER,
-        `${via}  condition[0].connection`,
+        `${via}  conditions[0].connection`,
         w,
       ),
     ]);
@@ -549,7 +549,7 @@ describe("find <text>", () => {
       `page 2 row 0 column 2  ${FEEDBACK}  feedbacks[1].children.group[0].options.source`,
     ]);
     assert.deepEqual(await texts(env, "program"), [
-      `trigger "Reset counter"  ${TRIGGER}  condition[0].options.bus`,
+      `trigger "Reset counter"  ${TRIGGER}  conditions[0].options.bus`,
     ]);
     assert.deepEqual(await texts(env, "> 4"), [
       `page 2 row 0 column 2  ${FEEDBACK}  feedbacks[0].expression`,
