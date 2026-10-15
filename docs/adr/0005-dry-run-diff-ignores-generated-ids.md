@@ -24,11 +24,11 @@ Two approaches were considered:
 1. **Generated ids inside a control are masked by position.** In `controls` rows, only the positions the writers fill with a fresh id are ignored, and only when they hold a 21-character nanoid:
    - `steps.<step>.action_sets.<set>[i].id` (button actions, hold sets included);
    - `actions[i].id` and `condition[i].id` (trigger actions and conditions);
-   - `feedbacks[i].id`;
+   - `feedbacks[i].id` and `localVariables[i].id` (button and trigger local variables, which are feedback entities);
    - on each of those entities, `styleOverrides[j].overrideId` when it has style overrides, and the same positions on every entity in its `children` groups (`children.<group>[k]`), at any depth;
    - `events[i].id` (trigger events).
 
-   Nothing under an entry's `options` or `storeResult` is ever masked: Companion connection ids are 21-character nanoids too, and a pass-through action or feedback may name one, so a changed option is always a change. Layer ids such as `canvas` or `text0` are not at these positions and are compared. (Amended for #23: before it, the writers always wrote `children` empty and wrote style overrides only on top-level feedbacks, so only those positions were masked.)
+   Nothing under an entry's `options` or `storeResult` is ever masked: Companion connection ids are 21-character nanoids too, and a pass-through action or feedback may name one, so a changed option is always a change. Layer ids such as `canvas` or `text0` are not at these positions and are compared. (Amended for #25: `localVariables` entities are masked like feedbacks; before it, the writers always wrote that list empty. Amended for #23: before it, the writers always wrote `children` empty and wrote style overrides only on top-level feedbacks, so only those positions were masked.)
 2. **Controls are paired by location.** A `bank:` control that the write removed is paired with the control the write added at the same page and cell, but only when the two values are equal once rule 1 masks them. A paired control counts as unchanged, and the page cell that moved from the old id to the new id counts as unchanged too. For comparison the mapping rewrites the before read (old id to new id), so the new ids are the ones reported; the report's `before` and `after` values themselves are never rewritten.
 3. **Key/value rows are compared as parsed JSON.** When a row's stored bytes differ, a row of a table with `id` and `value` columns is unchanged if the stored JSON parses to the same value. Page ids, trigger control ids and tables without that shape are compared by stored content.
 

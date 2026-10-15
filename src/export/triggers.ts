@@ -3,8 +3,8 @@
  * `export triggers [<pattern>...]` (one `kind: triggers` file, in
  * `sortOrder`, then id order). Triggers are read as the trigger writer reads
  * them (`readTriggers`). Each entry emits `name`, `enabled`, `notes` (left
- * out when empty), `events`, and `conditions` and `actions` (each left out
- * when empty).
+ * out when empty), `events`, and `conditions`, `actions` and
+ * `localVariables` (each left out when empty).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { CliError } from "../core/errors.ts";
@@ -19,7 +19,13 @@ import {
   readTriggers,
   type StoredTrigger,
 } from "../writers/trigger.ts";
-import { entityListPath, exportAction, exportCondition } from "./entities.ts";
+import {
+  entityListPath,
+  exportAction,
+  exportCondition,
+  exportLocalVariable,
+  localVariablesPath,
+} from "./entities.ts";
 import {
   describeStored,
   type Exporter,
@@ -52,6 +58,8 @@ function storedPath(field: string, body: Fields): string {
   if (field.startsWith("conditions["))
     return `condition${entityListPath(body["conditions"], field.slice("conditions".length))}`;
   if (field === "conditions") return "condition";
+  if (field.startsWith("localVariables"))
+    return `localVariables${localVariablesPath(body["localVariables"], field.slice("localVariables".length))}`;
   return field
     .replace(/^(name|enabled|notes)$/, "options.$1")
     .replace(/^(events\[\d+\])\.event$/, "$1.type")
@@ -229,6 +237,9 @@ function entry(db: DatabaseSync, trigger: StoredTrigger): Fields {
   const actions = list(control, "actions").map((action, index) =>
     exportAction(action, `actions[${index}]`),
   );
+  const locals = list(control, "localVariables").map((local, index) =>
+    exportLocalVariable(local, `localVariables[${index}]`),
+  );
   const body: Fields = {
     name,
     enabled,
@@ -236,6 +247,7 @@ function entry(db: DatabaseSync, trigger: StoredTrigger): Fields {
     events,
     ...(conditions.length > 0 ? { conditions } : {}),
     ...(actions.length > 0 ? { actions } : {}),
+    ...(locals.length > 0 ? { localVariables: locals } : {}),
   };
   selfCheck({
     stored: control,

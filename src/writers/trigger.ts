@@ -43,6 +43,15 @@ import {
 } from "./feedbacks.ts";
 import { controlExists, freshId, newId } from "./ids.ts";
 import {
+  buildLocalVariable,
+  LOCAL_VARIABLES_FIELD,
+  localVariableNames,
+  localVariableReferences,
+  type LocalVariableSpec,
+  parseLocalVariableList,
+} from "./local-variables.ts";
+import {
+  checkLocalReferences,
   checkVariablesExist,
   nextSortOrder,
   parseVariableName,
@@ -51,6 +60,7 @@ import {
   taggedKind,
   type TaggedSpec,
   taggedKinds,
+  type VariableReference,
 } from "./shared.ts";
 
 /**
@@ -70,12 +80,16 @@ import {
  *     - { condition: expression, expression: "$(custom:fx_counter) > 0" }
  *   actions:                               # optional action list, default []
  *     - { action: increment, variable: fx_counter }
+ *   localVariables:                        # optional, default []; see local-variables.ts
+ *     - { name: count, value: 0 }
  *
  * The control is Companion 5.1's stored trigger: `{type: "trigger", options,
- * actions, condition, events, localVariables: []}`, with event options as
+ * actions, condition, events, localVariables}`, with event options as
  * plain values. Every Companion 5.1 event type is written (EVENT_KINDS);
  * `enabled: false` on an event stores it disabled. Conditions are boolean
- * feedbacks (feedbacks.ts, `parseConditionList`). A trigger with the same
+ * feedbacks (feedbacks.ts, `parseConditionList`). `$(local:…)` references
+ * and `local:` event variables are checked against the trigger's own local
+ * variables. A trigger with the same
  * name is rewritten under its control id, keeping its `sortOrder` and
  * `collectionId`; everything else is replaced. Otherwise a new `trigger:<id>` row is appended
  * after the highest `sortOrder`. Two triggers with the same name refuse the
@@ -115,6 +129,9 @@ const SPECIFIC_TIME_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$";
 const DATE_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$";
 
 const SUN_EVENTS = ["sunrise", "sunset"];
+
+/** The label of a variable_changed event on one of the trigger's own local variables. */
+const LOCAL_PREFIX = "local:";
 
 /** `<label>:<name>`, as Companion names a variable. */
 const VARIABLE_ID_PATTERN = "^[^:]+:.+$";
@@ -454,13 +471,13 @@ export const EVENT_KINDS = {
         ref("variableName"),
       ),
       variableId: field(
-        "Any other variable, as `<label>:<name>` (for example `internal:time_hms` or `local:counter`), stored as given and not checked against the database. Give this or `variable`.",
+        "Any other variable, as `<label>:<name>` (for example `internal:time_hms` or `local:counter`), stored as given. Not checked against the database; a `local:` one must name one of the trigger's `localVariables`. Give this or `variable`.",
         { type: "string", pattern: VARIABLE_ID_PATTERN },
       ),
     },
     schema: {
       $comment:
-        "Not expressible here: one of variable and variableId is required, and a variableId must not start with custom: (use variable).",
+        "Not expressible here: one of variable and variableId is required, a variableId must not start with custom: (use variable), and a local: one must name one of the trigger's localVariables.",
       dependentSchemas: {
         variable: {
           $comment: "With `variable`, `variableId` is refused.",
@@ -472,7 +489,15 @@ export const EVENT_KINDS = {
     references: (payload, path) =>
       "variable" in payload
         ? [{ field: fieldPath(path, "variable"), name: payload.variable }]
-        : [],
+        : payload.variableId.startsWith(LOCAL_PREFIX)
+          ? [
+              {
+                field: fieldPath(path, "variableId"),
+                name: payload.variableId.slice(LOCAL_PREFIX.length),
+                local: true,
+              },
+            ]
+          : [],
     build: (payload) => ({
       type: "variable_changed",
       options: {
@@ -540,6 +565,7 @@ export interface TriggerPlan {
   events: EventSpec[];
   conditions: FeedbackSpec[];
   actions: ActionSpec[];
+  localVariables: LocalVariableSpec[];
 }
 
 export const FIELDS = [
@@ -549,6 +575,7 @@ export const FIELDS = [
   "events",
   "conditions",
   "actions",
+  "localVariables",
 ] as const;
 
 export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
@@ -577,6 +604,7 @@ export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
     ...list(ref("action")),
     default: [],
   }),
+  localVariables: LOCAL_VARIABLES_FIELD,
 };
 
 /** What a trigger file does: the kind's `description` in the schema. */
@@ -633,7 +661,7 @@ export function parseTrigger(fields: Fields, parent = ""): TriggerPlan {
         `${(events[index] as EventSpec).kind} needs at least one condition: without conditions it never fires`,
       );
   }
-  return {
+  const plan: TriggerPlan = {
     name,
     enabled,
     notes: Object.hasOwn(fields, "notes")
@@ -642,7 +670,45 @@ export function parseTrigger(fields: Fields, parent = ""): TriggerPlan {
     events,
     conditions,
     actions: parseActionList(fields, "actions", parent),
+    localVariables: parseLocalVariableList(
+      fields,
+      // A trigger has no steps: a `feedback: step` local variable is not
+      // checked, as in an action's children.
+      ACTION_CONTEXT,
+      parent,
+    ),
   };
+  checkLocalReferences(
+    localVariableNames(plan.localVariables),
+    triggerVariableReferences(plan, parent),
+  );
+  return plan;
+}
+
+/**
+ * Every custom and local variable a trigger body at `parent` uses, in file
+ * order: its events', its conditions', its actions' and its local
+ * variables' references.
+ */
+function triggerVariableReferences(
+  plan: TriggerPlan,
+  parent: string,
+): VariableReference[] {
+  const eventsPath = fieldPath(parent, "events");
+  return [
+    ...plan.events.flatMap((spec, index) =>
+      EVENTS.references(spec, fieldPath(eventsPath, index)),
+    ),
+    ...feedbackVariableReferences(
+      plan.conditions,
+      fieldPath(parent, "conditions"),
+    ),
+    ...actionVariableReferences(plan.actions, fieldPath(parent, "actions")),
+    ...localVariableReferences(
+      plan.localVariables,
+      fieldPath(parent, "localVariables"),
+    ),
+  ];
 }
 
 /** A `controls` row Companion loads as a trigger: a JSON object of type "trigger". */
@@ -719,17 +785,7 @@ export function checkTrigger(
   plan: TriggerPlan,
   parent = "",
 ): void {
-  const eventsPath = fieldPath(parent, "events");
-  checkVariablesExist(db, [
-    ...plan.events.flatMap((spec, index) =>
-      EVENTS.references(spec, fieldPath(eventsPath, index)),
-    ),
-    ...feedbackVariableReferences(
-      plan.conditions,
-      fieldPath(parent, "conditions"),
-    ),
-    ...actionVariableReferences(plan.actions, fieldPath(parent, "actions")),
-  ]);
+  checkVariablesExist(db, triggerVariableReferences(plan, parent));
   readTarget(db, plan.name, fieldPath(parent, "name"));
 }
 
@@ -766,7 +822,7 @@ export function buildTriggerControl(
       const { type, options } = EVENTS.build(spec);
       return { id: newId(), type, enabled: spec.enabled, options };
     }),
-    localVariables: [],
+    localVariables: plan.localVariables.map(buildLocalVariable),
   };
 }
 

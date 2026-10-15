@@ -23,6 +23,11 @@
  * otherwise a list of literal overrides; none when empty. An expression
  * `isInverted` becomes `invert: {expr: …}`.
  *
+ * A stored local variable (a feedback in `localVariables`) is the `value`
+ * or `expression` shortcut when it is exactly what that writes, otherwise
+ * a feedback entry; either way its `variableName` is `name`
+ * (`exportLocalVariable`).
+ *
  * Every entity's `headline`, `disabled`, `upgradeIndex` (and a feedback's
  * `variableName`) are emitted when present. The mapping is not trusted: the
  * caller's self-check rebuilds the entity with the writer's code and refuses
@@ -32,6 +37,11 @@ import { CliError } from "../core/errors.ts";
 import { type Fields, isJsonObject } from "../core/validate.ts";
 import { STORED_STORE_TYPES } from "../writers/actions.ts";
 import { STYLE_FIELDS } from "../writers/feedbacks.ts";
+import {
+  LOCAL_NAME,
+  LOCAL_NAME_RULE,
+  LOCAL_SHORTCUT_OPTIONS,
+} from "../writers/local-variables.ts";
 import { isExpressionMapping, parseVariableName } from "../writers/shared.ts";
 import type { Area } from "../support-matrix.ts";
 import { describeStored, refuse } from "./export.ts";
@@ -474,6 +484,108 @@ export function exportCondition(stored: unknown, path: string): Fields {
     ...commonFields(stored, false),
     ...exportChildren(stored, path, "condition"),
   };
+}
+
+/** The local `value` shortcut, when the stored entity is exactly what it writes. */
+function valueLocal(stored: Fields, options: Fields): Fields | undefined {
+  const keys = Object.keys(options).sort().join();
+  const { persist_value: persist, startup_value: value } = options;
+  if (
+    stored["definitionId"] !== "user_value" ||
+    keys !== "persist_value,startup_value" ||
+    !isOption(persist) ||
+    persist.isExpression ||
+    typeof persist.value !== "boolean" ||
+    !isOption(value) ||
+    (!value.isExpression && isExpressionMapping(value.value)) ||
+    (value.isExpression && typeof value.value !== "string")
+  )
+    return undefined;
+  return {
+    value: value.isExpression ? { expr: value.value } : value.value,
+    ...(persist.value ? { persist: true } : {}),
+  };
+}
+
+/** The local `expression` shortcut, when the stored entity is exactly what it writes. */
+function expressionLocal(stored: Fields, options: Fields): Fields | undefined {
+  const { expression } = options;
+  if (
+    stored["definitionId"] !== "expression_value" ||
+    Object.keys(options).join() !== "expression" ||
+    !isOption(expression) ||
+    !expression.isExpression ||
+    typeof expression.value !== "string" ||
+    expression.value === ""
+  )
+    return undefined;
+  return { expression: expression.value };
+}
+
+/** Whether the stored feedback has exactly the invert and style the local shortcuts write. */
+function plainLocal(stored: Fields): boolean {
+  const inverted = stored["isInverted"];
+  const overrides = stored["styleOverrides"];
+  return (
+    stored["connectionId"] === "internal" &&
+    !hasChildren(stored) &&
+    isOption(inverted) &&
+    !inverted.isExpression &&
+    inverted.value === false &&
+    Array.isArray(overrides) &&
+    overrides.length === 0
+  );
+}
+
+/**
+ * One stored local variable at `path` (`localVariables[0]`) as a
+ * `localVariables` entry: the `value` (internal `user_value`) or
+ * `expression` (internal `expression_value`) shortcut when the stored
+ * feedback is exactly what it writes, otherwise a feedback entry with `name`.
+ * A missing or invalid `variableName` is refused.
+ */
+export function exportLocalVariable(stored: unknown, path: string): Fields {
+  if (!isJsonObject(stored))
+    refuse(
+      path,
+      `is ${describeStored(stored)}, not a feedback`,
+      "local variable",
+    );
+  const name = stored["variableName"];
+  if (typeof name !== "string" || !LOCAL_NAME.test(name))
+    refuse(
+      `${path}.variableName`,
+      `is ${typeof name === "string" ? JSON.stringify(name) : describeStored(name)}, not a local variable name (${LOCAL_NAME_RULE})`,
+      "local variable",
+    );
+  const options = storedOptions(stored, path, "local variable");
+  const shortcut = plainLocal(stored)
+    ? (valueLocal(stored, options) ?? expressionLocal(stored, options))
+    : undefined;
+  if (shortcut) return { name, ...shortcut, ...commonFields(stored, false) };
+  const entry = exportFeedback(stored, path);
+  delete entry["variableName"];
+  return { name, ...entry };
+}
+
+/**
+ * A description path inside a `localVariables` list, `[i]<rest>`, as a
+ * stored path suffix. `list` is the description list.
+ */
+export function localVariablesPath(list: unknown, rest: string): string {
+  const match = /^\[(\d+)\](.*)$/.exec(rest);
+  if (!match) return rest;
+  const index = Number(match[1]);
+  const entry = item(list, index);
+  const tail = match[2] ?? "";
+  if (tail === ".name") return `[${index}].variableName`;
+  if (isJsonObject(entry) && Object.hasOwn(entry, "feedback"))
+    return `[${index}]${entityPath(entry, tail)}`;
+  const option = /^\.(value|persist|expression)(.*)$/.exec(tail);
+  if (!option) return `[${index}]${tail}`;
+  const stored =
+    LOCAL_SHORTCUT_OPTIONS[option[1] as keyof typeof LOCAL_SHORTCUT_OPTIONS];
+  return `[${index}].options.${stored}`;
 }
 
 /** The entry at `index` of a description list, if any. */

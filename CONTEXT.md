@@ -82,6 +82,9 @@ A boolean feedback on a trigger that must hold for the trigger's actions to run.
 One occurrence a trigger listens for, such as startup (after a delay), a fixed interval, or a change of a custom variable. A trigger has one or more events.
 _Avoid_: Hook, schedule
 
+**Local variable**:
+A variable belonging to one button or trigger, referenced as `$(local:<name>)` only within that control. Its value comes from a feedback: a start value ("User value"), an expression, or any other feedback. Written as a `localVariables` entry in a description.
+
 **Custom variable**:
 A user-defined variable with a name, default value, description and a persist-on-restart flag. Referenced in text and expressions as `$(custom:<name>)`.
 

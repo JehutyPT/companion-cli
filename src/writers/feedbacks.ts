@@ -31,7 +31,7 @@ import {
   buildPassthrough,
   CHILDREN_FIELD_SCHEMA,
   CHILDREN_NEED_INTERNAL,
-  customReferences,
+  variableReferences,
   ENTITY_FIELD_SCHEMAS,
   ENTITY_FIELDS,
   type EntityCommon,
@@ -151,7 +151,7 @@ export const FEEDBACK_KINDS = {
     doc: "Holds while a Companion boolean expression is true. Written as Companion's internal `check_expression` feedback.",
     fieldSchemas: {
       expression: requiredField(
-        "A Companion expression, for example `$(custom:fx_label) == 'on'`. `$(custom:…)` references in it are checked against the database.",
+        "A Companion expression, for example `$(custom:fx_label) == 'on'`. `$(custom:…)` references in it are checked against the database, `$(local:…)` ones against the control's local variables.",
         NON_EMPTY_STRING,
       ),
     },
@@ -162,7 +162,7 @@ export const FEEDBACK_KINDS = {
       ),
     }),
     references: ({ expression }, path) =>
-      customReferences(expression, fieldPath(path, "expression")),
+      variableReferences(expression, fieldPath(path, "expression")),
     build: ({ expression }) => ({
       definitionId: "check_expression",
       connectionId: "internal",
@@ -273,7 +273,7 @@ export const STYLE_OVERRIDE_FIELD_SCHEMAS: Record<
     NON_EMPTY_STRING,
   ),
   value: requiredField(
-    'The value, stored as given (colors as integers), or `{expr: "<expression>"}`. Not checked, except that `$(custom:…)` references in a plain `text0` `text` value are checked against the database.',
+    'The value, stored as given (colors as integers), or `{expr: "<expression>"}`. Not checked, except that `$(custom:…)` references in a plain `text0` `text` value are checked against the database (and `$(local:…)` ones against the control\'s local variables).',
     ref("optionValue"),
   ),
 };
@@ -305,7 +305,7 @@ function parseStyleMapping(fields: Fields, path: string): ParsedStyle {
     const value = parse(fields[name], fieldName);
     overrides.push({ elementId, elementProperty, override: prop(value) });
     if (typeof value === "string")
-      references.push(...customReferences(value, fieldName));
+      references.push(...variableReferences(value, fieldName));
   }
   return { overrides, references };
 }
@@ -340,7 +340,7 @@ function parseStyleList(items: unknown[], path: string): ParsedStyle {
       !override.isExpression &&
       typeof override.value === "string"
     )
-      references.push(...customReferences(override.value, valuePath));
+      references.push(...variableReferences(override.value, valuePath));
   });
   return { overrides, references };
 }

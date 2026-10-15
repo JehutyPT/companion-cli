@@ -480,10 +480,10 @@ triggers:
         "condition",
       ],
       [
-        "local variables",
+        "a local variable without a name",
         COLLECTED,
         (value) => ({ ...value, localVariables: [{ type: "feedback" }] }),
-        "localVariables is set, which the description format does not support yet",
+        "localVariables[0].variableName is missing, not a local variable name (letters A-Z/a-z, digits, _, - and .)",
         "local variable",
       ],
       [
@@ -925,6 +925,8 @@ events:
   - { event: variable_changed, variableId: "local:counter", enabled: false }
   - { event: computer_locked }
   - { event: computer_unlocked }
+localVariables:
+  - { name: counter, value: 0 }
 `;
 
 /**
@@ -1057,6 +1059,9 @@ events:
     enabled: false
   - event: computer_locked
   - event: computer_unlocked
+localVariables:
+  - name: counter
+    value: 0
 `,
     );
   });

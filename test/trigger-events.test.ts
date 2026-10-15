@@ -24,10 +24,10 @@ function newTrigger(before: TableDump, after: TableDump): Json {
   return JSON.parse(String(added[0]?.["value"])) as Json;
 }
 
-/** The stored events a trigger with these YAML event lines gets. */
-async function storedEvents(events: string): Promise<Json[]> {
+/** The stored events a trigger with these YAML event lines (and `rest`) gets. */
+async function storedEvents(events: string, rest = ""): Promise<Json[]> {
   const { dbPath, before, result } = await applyYaml(
-    `kind: trigger\nname: T\nevents:\n${events}`,
+    `kind: trigger\nname: T\nevents:\n${events}${rest}`,
   );
   assert.equal(result.code, 0, result.stderr.join("\n"));
   const control = stripIds(newTrigger(before, dumpDatabase(dbPath))) as Json;
@@ -44,7 +44,8 @@ const event = (type: string, options: Json, enabled = true) => ({
 describe("trigger events: stored options", () => {
   it("writes every event kind with its fields, in Companion's key order", async () => {
     assert.deepEqual(
-      await storedEvents(`  - { event: intervalRandom, min: 2, max: 9 }
+      await storedEvents(
+        `  - { event: intervalRandom, min: 2, max: 9 }
   - { event: timeofday, time: "08:30:00", days: [mon, tue, wed, thu, fri] }
   - { event: timeofday, time: "23:59:59", days: [sat, sun] }
   - { event: specificDate, date: "2026-12-31", time: "23:00:00" }
@@ -57,7 +58,9 @@ describe("trigger events: stored options", () => {
   - { event: computer_unlocked }
   - { event: variable_changed, variableId: "internal:time_hms" }
   - { event: variable_changed, variableId: "local:counter" }
-`),
+`,
+        "localVariables: [{ name: counter, value: 0 }]\n",
+      ),
       [
         event("intervalRandom", { minimum: 2, maximum: 9 }),
         event("timeofday", { time: "08:30:00", days: [1, 2, 3, 4, 5] }),

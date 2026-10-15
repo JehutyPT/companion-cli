@@ -34,7 +34,7 @@ import {
   buildPassthrough,
   CHILDREN_FIELD_SCHEMA,
   CHILDREN_NEED_INTERNAL,
-  customReferences,
+  variableReferences,
   ENTITY_FIELDS,
   type EntityCommon,
   entityJson,
@@ -140,7 +140,7 @@ export const ACTION_KINDS = {
     doc: "Sets a custom variable to a fixed value.",
     fieldSchemas: {
       value: requiredField(
-        "The value, stored as text (numbers and booleans become strings). `$(custom:…)` references in it are checked against the database.",
+        "The value, stored as text (numbers and booleans become strings). `$(custom:…)` references in it are checked against the database, `$(local:…)` ones against the control's local variables.",
         SCALAR,
       ),
     },
@@ -151,14 +151,14 @@ export const ACTION_KINDS = {
       ),
     }),
     references: ({ value }, path) =>
-      customReferences(value, fieldPath(path, "value")),
+      variableReferences(value, fieldPath(path, "value")),
     value: ({ value }) => prop(value),
   }),
   expression: variableAction({
     doc: "Sets a custom variable to the result of a Companion expression.",
     fieldSchemas: {
       expression: requiredField(
-        "A Companion expression, for example `$(custom:fx_counter) * 2`. `$(custom:…)` references in it are checked against the database.",
+        "A Companion expression, for example `$(custom:fx_counter) * 2`. `$(custom:…)` references in it are checked against the database, `$(local:…)` ones against the control's local variables.",
         NON_EMPTY_STRING,
       ),
     },
@@ -169,7 +169,7 @@ export const ACTION_KINDS = {
       ),
     }),
     references: ({ expression }, path) =>
-      customReferences(expression, fieldPath(path, "expression")),
+      variableReferences(expression, fieldPath(path, "expression")),
     value: ({ expression }) => prop(expression, true),
   }),
   increment: variableAction({

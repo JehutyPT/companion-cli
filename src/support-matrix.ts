@@ -68,13 +68,6 @@ const supported = (
   note = "",
 ): MatrixRow => ({ area, item, status: "supported", field, note });
 
-const planned = (
-  area: Area,
-  item: string,
-  ticket: string,
-  note = "",
-): MatrixRow => ({ area, item, status: "planned", field: [], ticket, note });
-
 const unsupported = (area: Area, item: string, note = ""): MatrixRow => ({
   area,
   item,
@@ -441,12 +434,56 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     "feedback",
     "feedback.variableName",
     ["feedback.variableName"],
-    "stored as given; its use in local-variables lists is #25",
+    "stored as given; in a `localVariables` entry it is `name`",
   ),
 
   // Local variables
-  planned("local variable", "localVariables (button)", "#25"),
-  planned("local variable", "localVariables (trigger)", "#25"),
+  supported(
+    "local variable",
+    "localVariables (button)",
+    ["button.localVariables"],
+    "feedback entities; `$(local:…)` references in the button are checked against them",
+  ),
+  supported(
+    "local variable",
+    "localVariables (trigger)",
+    ["trigger.localVariables"],
+    "feedback entities; `$(local:…)` references and `local:` events are checked against them",
+  ),
+  supported(
+    "local variable",
+    "localVariables.variableName",
+    ["localVariables[].name"],
+    "Companion's local rule (letters, digits, `_`, `-`, `.`); unique per control",
+  ),
+  supported(
+    "local variable",
+    "user_value",
+    ["localVariables[].value", "localVariables[].persist"],
+    "internal User Value; apply writes the file's value even when persisted",
+  ),
+  supported(
+    "local variable",
+    "expression_value",
+    ["localVariables[].expression"],
+    "internal Evaluate Expression",
+  ),
+  supported(
+    "local variable",
+    "other feedbacks",
+    ["localVariables[].feedback"],
+    "any feedback entry, with `name` for `variableName`",
+  ),
+  supported(
+    "local variable",
+    "localVariables.disabled, headline, upgradeIndex",
+    [
+      "localVariables[].disabled",
+      "localVariables[].headline",
+      "localVariables[].upgradeIndex",
+    ],
+    "on the `value` and `expression` entries; a feedback entry has the feedback's",
+  ),
 
   // Triggers
   supported("trigger", "events", ["trigger.events"]),
@@ -563,7 +600,7 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     "event",
     "variable_changed (other variables)",
     ["event: variable_changed.variableId"],
-    "any `<label>:<name>`, including `local:`; not checked against the database",
+    "any `<label>:<name>`; not checked against the database, except that `local:` must name one of the trigger's local variables",
   ),
   supported(
     "event",

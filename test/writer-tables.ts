@@ -20,6 +20,7 @@ import {
 } from "../src/writers/feedbacks.ts";
 import { FIELDS as CONNECTION_FIELDS } from "../src/writers/connection.ts";
 import { writers } from "../src/writers/index.ts";
+import { LOCAL_VARIABLE_FIELDS } from "../src/writers/local-variables.ts";
 import { FIELDS as SURFACE_FIELDS } from "../src/writers/surface.ts";
 import { FIELDS as PAGE_FIELDS } from "../src/writers/page.ts";
 import {
@@ -56,6 +57,7 @@ export interface WriterTables {
   variableFields: readonly string[];
   connectionFields: readonly string[];
   surfaceFields: readonly string[];
+  localVariableFields: readonly string[];
 }
 
 export const WRITER_TABLES: WriterTables = {
@@ -80,6 +82,7 @@ export const WRITER_TABLES: WriterTables = {
   variableFields: VARIABLE_FIELDS,
   connectionFields: CONNECTION_FIELDS,
   surfaceFields: SURFACE_FIELDS,
+  localVariableFields: LOCAL_VARIABLE_FIELDS,
 };
 
 /** Every description field the writers accept, in the matrix's field notation. */
@@ -115,5 +118,6 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("condition", tables.conditionFields),
     ...tagged("event", tables.eventKinds),
     ...under("event", tables.eventFields),
+    ...under("localVariables[]", tables.localVariableFields),
   ]);
 }

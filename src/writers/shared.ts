@@ -324,13 +324,19 @@ export function buildPassthrough({
   return { definitionId: definition, connectionId: connection, options };
 }
 
-/** A `$(custom:<name>)` reference, or an action's target variable, with the field it came from. */
+/**
+ * A `$(custom:<name>)` reference, or an action's target variable, with the
+ * field it came from. `local` marks a `$(local:<name>)` reference, which
+ * names one of the control's own local variables instead.
+ */
 export interface VariableReference {
   field: string;
   name: string;
+  local?: true;
 }
 
 const CUSTOM_REFERENCE = /\$\(custom:([^)]*)\)/g;
+const REFERENCE = /\$\((custom|local):([^)]*)\)/g;
 
 /** Every `$(custom:<name>)` in a text, attributed to `field`. */
 export function customReferences(
@@ -343,7 +349,27 @@ export function customReferences(
   }));
 }
 
-/** Refuses the first reference to a custom variable the database does not have. */
+/**
+ * Every `$(custom:<name>)` and `$(local:<name>)` in a text, in text order,
+ * attributed to `field`. The writers check the custom ones against the
+ * database (`checkVariablesExist`) and the local ones against the control's
+ * local variables (`checkLocalReferences`).
+ */
+export function variableReferences(
+  text: string,
+  field: string,
+): VariableReference[] {
+  return [...text.matchAll(REFERENCE)].map((match) => ({
+    field,
+    name: match[2] ?? "",
+    ...(match[1] === "local" ? { local: true as const } : {}),
+  }));
+}
+
+/**
+ * Refuses the first reference to a custom variable the database does not
+ * have. Local references are `checkLocalReferences`'s.
+ */
 export function checkVariablesExist(
   db: DatabaseSync,
   references: readonly VariableReference[],
@@ -354,11 +380,34 @@ export function checkVariablesExist(
       .all()
       .map((row) => String(row["id"])),
   );
-  for (const { field, name } of references) {
+  for (const { field, name, local } of references) {
+    if (local) continue;
     if (!known.has(name))
       throw new CheckError(field, `unknown custom variable "${name}"`, {
         hint: "run companion-cli list variables",
       });
+  }
+}
+
+/**
+ * Refuses the first `$(local:<name>)` reference that names none of the
+ * control's local variables (`names`). It needs no database, so the parsers
+ * call it.
+ */
+export function checkLocalReferences(
+  names: ReadonlySet<string>,
+  references: readonly VariableReference[],
+): void {
+  for (const { field, name, local } of references) {
+    if (local && !names.has(name))
+      throw new ValidationError(
+        field,
+        `unknown local variable "${name}" (${
+          names.size === 0
+            ? "the control has no localVariables"
+            : `the control's localVariables are ${[...names].join(", ")}`
+        })`,
+      );
   }
 }
 

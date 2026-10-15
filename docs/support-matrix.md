@@ -133,14 +133,19 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `feedback.headline` | supported | `feedback.headline` |  |
 | `feedback.upgradeIndex` | supported | `feedback.upgradeIndex` | left out, Companion assumes the connection's current index |
 | `feedback.children` | supported | `feedback: passthrough.children` | on connection `internal` only; `{}` on every internal feedback |
-| `feedback.variableName` | supported | `feedback.variableName` | stored as given; its use in local-variables lists is #25 |
+| `feedback.variableName` | supported | `feedback.variableName` | stored as given; in a `localVariables` entry it is `name` |
 
 ## Local variable
 
 | Item | Status | Field | Note |
 | --- | --- | --- | --- |
-| `localVariables (button)` | planned (#25) |  |  |
-| `localVariables (trigger)` | planned (#25) |  |  |
+| `localVariables (button)` | supported | `button.localVariables` | feedback entities; `$(local:…)` references in the button are checked against them |
+| `localVariables (trigger)` | supported | `trigger.localVariables` | feedback entities; `$(local:…)` references and `local:` events are checked against them |
+| `localVariables.variableName` | supported | `localVariables[].name` | Companion's local rule (letters, digits, `_`, `-`, `.`); unique per control |
+| `user_value` | supported | `localVariables[].value`, `localVariables[].persist` | internal User Value; apply writes the file's value even when persisted |
+| `expression_value` | supported | `localVariables[].expression` | internal Evaluate Expression |
+| `other feedbacks` | supported | `localVariables[].feedback` | any feedback entry, with `name` for `variableName` |
+| `localVariables.disabled, headline, upgradeIndex` | supported | `localVariables[].disabled`, `localVariables[].headline`, `localVariables[].upgradeIndex` | on the `value` and `expression` entries; a feedback entry has the feedback's |
 
 ## Trigger
 
@@ -174,7 +179,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `button_press` | supported | `event: button_press` |  |
 | `button_release` | supported | `event: button_release` |  |
 | `variable_changed (custom: variables)` | supported | `event: variable_changed`, `event: variable_changed.variable` |  |
-| `variable_changed (other variables)` | supported | `event: variable_changed.variableId` | any `<label>:<name>`, including `local:`; not checked against the database |
+| `variable_changed (other variables)` | supported | `event: variable_changed.variableId` | any `<label>:<name>`; not checked against the database, except that `local:` must name one of the trigger's local variables |
 | `condition_true` | supported | `event: condition_true` | fires when the trigger's conditions become true; needs at least one condition |
 | `condition_false` | supported | `event: condition_false` | fires when the trigger's conditions become false; needs at least one condition |
 | `computer_locked` | supported | `event: computer_locked` | Companion registers it on macOS and Windows only; Companion on Linux ignores it |

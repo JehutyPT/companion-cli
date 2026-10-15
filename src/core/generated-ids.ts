@@ -8,7 +8,8 @@ import { isDeepStrictEqual } from "node:util";
  *
  *  - the `id` of each entity (action or feedback) in
  *    `steps.<step>.action_sets.<set>` (button actions), `actions` and
- *    `condition` (trigger actions and conditions) and `feedbacks`;
+ *    `condition` (trigger actions and conditions), `feedbacks` and
+ *    `localVariables` (button and trigger local variables);
  *  - each such entity's `styleOverrides[j].overrideId`;
  *  - the same, at any depth, for the entities in an entity's
  *    `children.<group>` lists;
@@ -93,7 +94,7 @@ export function maskGeneratedIds(control: unknown): unknown {
         : step,
     );
   }
-  for (const key of ["actions", "condition", "feedbacks"]) {
+  for (const key of ["actions", "condition", "feedbacks", "localVariables"]) {
     if (key in control) masked[key] = maskEntries(control[key], maskEntity);
   }
   if ("events" in control) masked["events"] = maskEntries(control["events"]);

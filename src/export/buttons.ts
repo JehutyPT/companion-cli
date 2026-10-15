@@ -6,7 +6,7 @@
  * Only the free parts of the writer's template are read: the control type,
  * the button options, `box0.color`, `text0.color` and `text0.text`, each
  * step's action sets (the four named ones and the hold sets) and
- * `runWhileHeld`, and the feedbacks. Everything else is left to the caller's
+ * `runWhileHeld`, the feedbacks and the local variables. Everything else is left to the caller's
  * self-check, which rebuilds the control with the writer's
  * `buildButtonControl` and refuses any difference (a changed `fontsize`, a
  * fifth layer, an unknown key on an action).
@@ -39,6 +39,8 @@ import {
   entityListPath,
   exportAction,
   exportFeedback,
+  exportLocalVariable,
+  localVariablesPath,
   plainValue,
   text,
 } from "./entities.ts";
@@ -151,6 +153,8 @@ export function buttonStoredPath(field: string, fields: Fields = {}): string {
   }
   if (field.startsWith("feedbacks"))
     return `feedbacks${entityListPath(fields["feedbacks"], field.slice("feedbacks".length))}`;
+  if (field.startsWith("localVariables"))
+    return `localVariables${localVariablesPath(fields["localVariables"], field.slice("localVariables".length))}`;
   return field;
 }
 
@@ -404,6 +408,14 @@ export function buttonFields(control: unknown): Fields {
       "feedback",
     );
 
+  const locals = control["localVariables"] ?? [];
+  if (!Array.isArray(locals))
+    refuse(
+      "localVariables",
+      `is ${describeStored(locals)}, not a list`,
+      "local variable",
+    );
+
   const lists = steps.map(nonEmpty);
   if (rotary && rotateList === undefined)
     (lists[0] as Fields)["rotate_left"] = [];
@@ -417,6 +429,13 @@ export function buttonFields(control: unknown): Fields {
       ? {
           feedbacks: feedbacks.map((feedback, index) =>
             exportFeedback(feedback, `feedbacks[${index}]`),
+          ),
+        }
+      : {}),
+    ...(locals.length > 0
+      ? {
+          localVariables: locals.map((local, index) =>
+            exportLocalVariable(local, `localVariables[${index}]`),
           ),
         }
       : {}),

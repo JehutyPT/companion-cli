@@ -40,10 +40,19 @@ import {
 } from "./feedbacks.ts";
 import { controlExists, freshId } from "./ids.ts";
 import {
-  customReferences,
+  buildLocalVariable,
+  LOCAL_VARIABLES_FIELD,
+  localVariableNames,
+  localVariableReferences,
+  type LocalVariableSpec,
+  parseLocalVariableList,
+} from "./local-variables.ts";
+import {
+  checkLocalReferences,
   parseColor,
   parseText,
   prop,
+  variableReferences,
   type VariableReference,
 } from "./shared.ts";
 
@@ -114,6 +123,8 @@ export interface ButtonContent {
   notes: string;
   /** `options.canModifyStyleInApis`. */
   apiStyle: boolean;
+  /** In stored order; names unique. */
+  localVariables: LocalVariableSpec[];
 }
 
 /** A parsed button description whose location has the shape `L`. */
@@ -148,6 +159,7 @@ export const TOP_LEVEL_FIELDS = [
   ...STEP_FIELDS,
   "steps",
   "feedbacks",
+  "localVariables",
 ] as const;
 
 const ACTION_SET_DOCS: Record<ActionSetName, string> = {
@@ -270,6 +282,7 @@ export function buttonFieldSchemas(
       "Boolean feedbacks that override the button's style while they hold.",
       { ...list(ref("feedback")), default: [] },
     ),
+    localVariables: LOCAL_VARIABLES_FIELD,
   };
 }
 
@@ -434,19 +447,15 @@ export function parseButtonDescription<L>(
     : defaultTextColor(background);
   const { steps, rotaryActions } = parseSteps(fields, prefix);
   const { progression, stepExpression } = parseProgression(fields, prefix);
-  return {
+  const context = { stepCount: steps.length };
+  const description: ButtonDescription<L> = {
     location,
     text,
     background,
     textColor,
     steps,
     rotaryActions,
-    feedbacks: parseFeedbackList(
-      fields,
-      "feedbacks",
-      { stepCount: steps.length },
-      prefix,
-    ),
+    feedbacks: parseFeedbackList(fields, "feedbacks", context, prefix),
     progression,
     stepExpression,
     notes: Object.hasOwn(fields, "notes")
@@ -455,7 +464,13 @@ export function parseButtonDescription<L>(
     apiStyle: Object.hasOwn(fields, "apiStyle")
       ? expectBoolean(fields["apiStyle"], path("apiStyle"))
       : false,
+    localVariables: parseLocalVariableList(fields, context, prefix),
   };
+  checkLocalReferences(
+    localVariableNames(description.localVariables),
+    buttonVariableReferences(description, prefix),
+  );
+  return description;
 }
 
 /**
@@ -500,16 +515,17 @@ export function parseButton(fields: Fields, prefix = ""): ButtonPlan {
 }
 
 /**
- * Every custom variable the button uses, in file order: references in its
- * text, its actions' targets and references, and its feedbacks' expressions
- * and style text. `prefix` is the one given to the parser.
+ * Every custom and local variable the button uses, in file order: references
+ * in its text, its actions' targets and references, its feedbacks'
+ * expressions and style text, and its local variables' expressions.
+ * `prefix` is the one given to the parser.
  */
 export function buttonVariableReferences(
   plan: ButtonContent,
   prefix = "",
 ): VariableReference[] {
   return [
-    ...customReferences(plan.text, fieldPath(prefix, "text")),
+    ...variableReferences(plan.text, fieldPath(prefix, "text")),
     ...plan.steps.flatMap((step) => [
       ...ACTION_SETS.flatMap((set) =>
         actionVariableReferences(
@@ -530,6 +546,10 @@ export function buttonVariableReferences(
     ...feedbackVariableReferences(
       plan.feedbacks,
       fieldPath(prefix, "feedbacks"),
+    ),
+    ...localVariableReferences(
+      plan.localVariables,
+      fieldPath(prefix, "localVariables"),
     ),
   ];
 }
@@ -687,7 +707,7 @@ export function buildButtonControl(
       canModifyStyleInApis: plan.apiStyle,
       notes: plan.notes,
     },
-    localVariables: [],
+    localVariables: plan.localVariables.map(buildLocalVariable),
     steps: Object.fromEntries(
       plan.steps.map((step, index) => [
         String(index),

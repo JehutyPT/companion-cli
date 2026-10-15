@@ -127,6 +127,19 @@ feedbacks:
       - { element: box0, property: color, value: { expr: "$(custom:c)" } }
   - { feedback: step, step: 1, invert: true, disabled: false }
 `,
+  "a button with every kind of local variable (#25)": `${BUTTON}down: [{ action: set, variable: v, value: "$(local:count) $(local:my-var.2)" }]
+localVariables:
+  - { name: count, value: 0 }
+  - { name: my-var.2, value: { expr: "1 + 1" }, persist: true, headline: h, disabled: false, upgradeIndex: 1 }
+  - { name: double, expression: "$(local:count) * 2" }
+  - { name: lvl, feedback: passthrough, connection: c, definition: d, options: { a: 1 }, invert: true }
+  - { name: on, feedback: expression, expression: "$(local:count) > 0", style: [] }
+`,
+  "a trigger with local variables": `kind: trigger
+name: t
+events: [{ event: variable_changed, variableId: "local:x" }]
+localVariables: [{ name: x, value: "" }]
+`,
   "a page with no buttons": `kind: page
 page: 3
 name: Empty
@@ -335,6 +348,15 @@ background: "#000000"
   "a style override with an empty element": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: [{ element: "", property: size, value: 1 }] }]\n`,
   "a style override with an unknown field": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: [{ element: text0, property: size, value: 1, x: 1 }] }]\n`,
   "a numeric variableName": `${BUTTON}feedbacks: [{ feedback: step, step: 1, variableName: 1 }]\n`,
+  "a local variable without a name": `${BUTTON}localVariables: [{ value: 1 }]\n`,
+  "a local variable name with a space": `${BUTTON}localVariables: [{ name: "a b", value: 1 }]\n`,
+  "a local variable with value and expression": `${BUTTON}localVariables: [{ name: a, value: 1, expression: "1" }]\n`,
+  "a local variable with neither value nor expression": `${BUTTON}localVariables: [{ name: a }]\n`,
+  "an empty local expression": `${BUTTON}localVariables: [{ name: a, expression: "" }]\n`,
+  "a local variable with persist on an expression": `${BUTTON}localVariables: [{ name: a, expression: "1", persist: true }]\n`,
+  "a local feedback with variableName": `${BUTTON}localVariables: [{ name: a, feedback: step, step: 1, variableName: a }]\n`,
+  "a local variable with an unknown field": `${BUTTON}localVariables: [{ name: a, value: 1, x: 1 }]\n`,
+  "local variables as a mapping": `${BUTTON}localVariables: { a: 1 }\n`,
   "a page without buttons": "kind: page\npage: 1\nname: P\n",
   "an empty page name": "kind: page\npage: 1\nname: ''\nbuttons: []\n",
   "a page button with a full location": `kind: page
@@ -409,6 +431,10 @@ const EXCEPTIONS: Record<string, string> = {
   "duplicate hold durations in a step": `${BUTTON}steps: [{ hold: [{ after: 1 }, { after: 1 }] }]\n`,
   "duplicate variable names":
     "kind: variables\nvariables: [{ name: a, default: 1 }, { name: a, default: 2 }]\n",
+  "duplicate local variable names": `${BUTTON}localVariables: [{ name: a, value: 1 }, { name: a, expression: "1" }]\n`,
+  "an unknown local variable reference": `${BUTTON}feedbacks: [{ feedback: expression, expression: "$(local:nope) == 1" }]\n`,
+  "a variable_changed event on an unknown local variable":
+    "kind: trigger\nname: t\nevents: [{ event: variable_changed, variableId: 'local:x' }]\n",
   "duplicate page locations": `kind: page
 page: 1
 name: P
@@ -479,6 +505,13 @@ function schemaFields(schema: Json): Set<string> {
     ...under("condition", conditionCommon),
     ...tagged("event", eventCommon),
     ...under("event", eventCommon),
+    ...under("localVariables[]", [
+      ...new Set([
+        ...props(defs["localValue"] as Json),
+        ...props(defs["localExpression"] as Json),
+        "feedback",
+      ]),
+    ]),
   ]);
 }
 
@@ -675,6 +708,8 @@ describe("schema and parser agree", () => {
     assert.match(comments ?? "", /names must be distinct/);
     assert.match(comments ?? "", /locations must be distinct/);
     assert.match(comments ?? "", /durations must be distinct/);
+    assert.match(comments ?? "", /every `\$\(local:…\)` reference/);
+    assert.match(comments ?? "", /a local: one must name one of the trigger/);
   });
 });
 

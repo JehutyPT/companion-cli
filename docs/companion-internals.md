@@ -154,6 +154,26 @@ Feedbacks live at control level (`feedbacks`, a list), not per step. A feedback 
 
 `bank_current_step` rows written by the CLI loaded and rendered in the live run. Companion loading and rendering the `check_expression` and pass-through rows the CLI writes is not yet observed: the SKAARHOJ test page has neither.
 
+## Local variables
+
+A button or trigger control's `localVariables` is a list of feedback entities (shape and [common entity fields](#common-entity-fields) as in [Feedbacks](#feedbacks)), each with `variableName`, the name read as `$(local:<name>)` within that control. Companion's editor offers the internal definitions below plus any module feedback; a feedback's value becomes the variable's value.
+
+```json
+{"type": "feedback", "id": "<nanoid>", "definitionId": "user_value", "connectionId": "internal",
+ "options": {"persist_value": {"isExpression": false, "value": false},
+             "startup_value": {"isExpression": false, "value": "1"}},
+ "isInverted": {"isExpression": false, "value": false}, "styleOverrides": [], "children": {},
+ "variableName": "count"}
+```
+
+- **`user_value`** ("User value"): `startup_value` (default `"1"`) is the value at startup; `persist_value` (checkbox, default false) keeps the last value set across restarts instead.
+- **`expression_value`** ("Expression"): `options.expression`, `{value, isExpression: true}`.
+- **Names** match `^[a-zA-Z0-9-_.]+$`.
+- **References**: `$(local:<name>)` in the control's strings; a trigger's `variable_changed` event takes `variableId: "local:<name>"` (the event definition sets `supportsLocal`).
+- **Key order** from the entity factory: `id, definitionId, connectionId, options, upgradeIndex` (no `upgradeIndex` on internal), then `isInverted`, `styleOverrides`, `children` on internal ones.
+
+Verified by main.js and its source map (`Internal/Variables.ts`, `Instance/Definitions.ts`, shared-lib `LocalVariable.ts`, `EventDefinitions.ts`); not yet observed in a live Companion. The CLI writes them from #25.
+
 ## Triggers
 
 Stored in `controls` with id `trigger:<controlId>` (21-character nanoid, like button ids). Every fact below is verified by main.js (5.1.0); Companion loading a trigger the tool wrote is not yet observed: the live run (#10) applied no trigger.

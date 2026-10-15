@@ -32,6 +32,11 @@ import {
   STYLE_OVERRIDE_FIELD_SCHEMAS,
 } from "./writers/feedbacks.ts";
 import { writers } from "./writers/index.ts";
+import {
+  LOCAL_EXPRESSION_FIELD_SCHEMAS,
+  LOCAL_FEEDBACK_NAME_FIELD,
+  LOCAL_VALUE_FIELD_SCHEMAS,
+} from "./writers/local-variables.ts";
 import * as page from "./writers/page.ts";
 import {
   COLOR_PATTERN,
@@ -206,7 +211,7 @@ function defs(): Record<string, unknown> {
     },
     text: {
       description:
-        "Button text. Line breaks are kept, except that one trailing line break (a `|` block's) is dropped. `$(custom:…)` references in it are checked against the database; other variables are not.",
+        "Button text. Line breaks are kept, except that one trailing line break (a `|` block's) is dropped. `$(custom:…)` references in it are checked against the database and `$(local:…)` ones against the button's local variables; other variables are not.",
       type: "string",
     },
     jsonValue: {
@@ -335,6 +340,38 @@ function defs(): Record<string, unknown> {
       description:
         "One literal style override: an element's property and its value.",
     }),
+    localVariable: {
+      description:
+        "One local variable, `$(local:<name>)`: a `value` (internal `user_value`), an `expression` (internal `expression_value`), or any feedback entry with `name`.",
+      anyOf: [
+        { $ref: "#/$defs/localValue" },
+        { $ref: "#/$defs/localExpression" },
+        { $ref: "#/$defs/localFeedback" },
+      ],
+    },
+    localValue: objectSchema(LOCAL_VALUE_FIELD_SCHEMAS, {
+      title: "local variable: value",
+      description:
+        "A user value: Companion's internal `user_value`, starting at `value`.",
+    }),
+    localExpression: objectSchema(LOCAL_EXPRESSION_FIELD_SCHEMAS, {
+      title: "local variable: expression",
+      description:
+        "An expression's result: Companion's internal `expression_value`.",
+    }),
+    localFeedback: taggedSchema(
+      "feedback",
+      "Any feedback entry as a local variable, with `name` instead of `variableName`.",
+      FEEDBACK_KINDS,
+      {
+        name: LOCAL_FEEDBACK_NAME_FIELD,
+        ...Object.fromEntries(
+          Object.entries(FEEDBACK_FIELD_SCHEMAS).filter(
+            ([key]) => key !== "variableName",
+          ),
+        ),
+      },
+    ),
     triggerBody: objectSchema(trigger.FIELD_SCHEMAS, {
       description: "One trigger: every `kind: trigger` field, without `kind`.",
     }),
