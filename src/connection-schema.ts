@@ -1,15 +1,28 @@
 /**
  * `schema --connection <label>` (#22): one connection's module action and
  * feedback definitions, which exist only in the running Companion. They are
- * read over the tRPC socket after a version gate on the installed app's
- * `Resources/BUILD`. See docs/companion-internals.md, "Module definitions".
+ * read over the tRPC socket after a version gate on the installed Companion's
+ * `BUILD` file: the `/Applications` bundle's on macOS, the running server's
+ * `<install>\resources\BUILD` on Windows. See docs/companion-internals.md,
+ * "Module definitions".
  *
  * Nothing from a connection's `config` or `secrets` is printed: Companion's
  * connections payload does not carry them, and every output field is
  * allow-listed here regardless.
  */
 import { readFileSync } from "node:fs";
-import { CheckError, CliError, errorCode } from "./core/errors.ts";
+import { win32 } from "node:path";
+import {
+  CheckError,
+  CliError,
+  errorCode,
+  errorMessage,
+} from "./core/errors.ts";
+import {
+  type CompanionServer,
+  foldWin32,
+  type ProcessControl,
+} from "./core/process.ts";
 import { isJsonObject } from "./core/validate.ts";
 import { INTERNAL_CONNECTION } from "./readers/connections-use.ts";
 import {
@@ -22,9 +35,71 @@ import { OTHER_COMPANION_HINT, TrpcSubscriber } from "./rest/trpc-socket.ts";
 /** The one Companion build whose private socket API this command knows. */
 export const SUPPORTED_BUILD = "5.1.0+9981-stable-257b325d09";
 
-/** Where the installed Companion app keeps its build string. */
+/** Where the installed Companion app keeps its build string on macOS. */
 export const DEFAULT_BUILD_FILE =
   "/Applications/Companion.app/Contents/Resources/BUILD";
+
+/** The hint when the installed build cannot be read. */
+const BUILD_HINT = "this command needs the installed Companion 5.1";
+
+/**
+ * The build file to check: a path, or a lookup run only when the check is
+ * reached (after `COMPANION_URL` is checked).
+ */
+export type BuildFile = string | (() => Promise<string>);
+
+/**
+ * The build file of the Companion install the running server was started
+ * from, `<install>\resources\BUILD` (Windows, where installs live anywhere;
+ * spike #36, row 2). No server is `companion_not_running`; a failed listing,
+ * a server whose install is unknown or servers of several installs are
+ * `companion_build_unknown`.
+ */
+export async function runningBuildFile(
+  control: ProcessControl,
+): Promise<string> {
+  let servers: CompanionServer[];
+  try {
+    servers = await control.servers();
+  } catch (error) {
+    throw new CliError(
+      `cannot tell which Companion is running (${errorMessage(error)}), so its build is unknown`,
+      { code: "companion_build_unknown", hint: BUILD_HINT, cause: error },
+    );
+  }
+  if (servers.length === 0) {
+    throw new CliError(
+      "Companion is not running: no Companion server process found",
+      { code: "companion_not_running", hint: "start Companion" },
+    );
+  }
+  const installs = new Map<string, string>();
+  for (const { install } of servers) {
+    if (install === null) {
+      throw new CliError(
+        "cannot tell which install the running Companion runs from, so its build is unknown",
+        { code: "companion_build_unknown", hint: BUILD_HINT },
+      );
+    }
+    const key = foldWin32(install);
+    if (!installs.has(key)) installs.set(key, install);
+  }
+  if (installs.size > 1) {
+    throw new CliError(
+      `Companion servers from several installs are running (${[...installs.values()].join(", ")}); refusing to choose one`,
+      { code: "companion_build_unknown", hint: "quit all but one Companion" },
+    );
+  }
+  return win32.join([...installs.values()][0] as string, "resources", "BUILD");
+}
+
+/** The path of `file`, running its lookup if it is one. */
+export async function buildFilePath(
+  file: BuildFile | undefined,
+): Promise<string> {
+  if (file === undefined) return DEFAULT_BUILD_FILE;
+  return typeof file === "string" ? file : file();
+}
 
 /** Each wait on the socket, in ms. */
 export const SOCKET_TIMEOUT_MS = 5000;
@@ -67,8 +142,8 @@ export interface ConnectionSchema {
 export interface ConnectionSchemaOptions {
   env: Env;
   dirs: ConfigDirs;
-  /** Defaults to `DEFAULT_BUILD_FILE`. */
-  buildFile?: string | undefined;
+  /** A path, or a lookup run when the check is reached (the CLI's on Windows). Defaults to `DEFAULT_BUILD_FILE`. */
+  buildFile?: BuildFile | undefined;
   /** Defaults to `SOCKET_TIMEOUT_MS`. */
   timeoutMs?: number | undefined;
 }
@@ -83,7 +158,7 @@ export async function connectionSchema(
   options: ConnectionSchemaOptions,
 ): Promise<ConnectionSchema> {
   const url = loadCompanionUrl(options.env, options.dirs);
-  const build = checkBuild(options.buildFile ?? DEFAULT_BUILD_FILE);
+  const build = checkBuild(await buildFilePath(options.buildFile));
   const socketUrl = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}/trpc`;
   const socket = await TrpcSubscriber.connect(
     socketUrl,
@@ -123,10 +198,7 @@ export function checkBuild(
   } catch (error) {
     throw new CliError(
       `cannot read Companion's build from ${path}: ${errorCode(error)}`,
-      {
-        code: "companion_build_unknown",
-        hint: "this command needs Companion 5.1 installed in /Applications",
-      },
+      { code: "companion_build_unknown", hint: BUILD_HINT },
     );
   }
   if (build !== SUPPORTED_BUILD) {

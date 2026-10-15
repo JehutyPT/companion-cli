@@ -6,6 +6,7 @@ import {
   isServerCommand,
   macosProcessControl,
   serverPidsFromPs,
+  serversFromPs,
   type ProcessControl,
 } from "../src/core/process.ts";
 
@@ -94,6 +95,29 @@ describe("macOS process matching", () => {
       ),
       [77],
     );
+  });
+
+  it("lists the server with its whole command line and its bundle", () => {
+    assert.deepEqual(serversFromPs(PS_RUNNING), [
+      {
+        pid: 35454,
+        commandLine:
+          "/Applications/Companion.app/Contents/Resources/node-runtimes/node26/bin/node --use-system-ca /Applications/Companion.app/Contents/Resources/main.js --machine-id=xxxx --config-dir=/Users/someone/Library/Application Support/companion/ --admin-port=8000 --admin-address=::",
+        install: "/Applications/Companion.app",
+        sessionId: null,
+        launcher: null,
+      },
+    ]);
+    // A bundle path with a space; another bundle's runtime gives no install.
+    const [spaced, other] = serversFromPs(
+      [
+        "77 /Users/x/My Apps/Companion.app/Contents/Resources/node-runtimes/node26/bin/node /Users/x/My Apps/Companion.app/Contents/Resources/main.js --config-dir=/tmp/c/",
+        "78 /usr/local/bin/node /Users/x/Companion.app/Contents/Resources/main.js",
+      ].join("\n"),
+    );
+    assert.equal(spaced?.install, "/Users/x/My Apps/Companion.app");
+    assert.equal(other?.pid, 78);
+    assert.equal(other?.install, null);
   });
 });
 

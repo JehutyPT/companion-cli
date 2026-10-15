@@ -12,7 +12,7 @@ _Avoid_: Server, instance (Companion uses "instance" for connections)
 The folder Companion's launcher passes to the server as `--config-dir`; the server keeps the 5.1 database at `<root>/v5.1/db.sqlite`. Without `--db` the tool uses the platform's default root (a custom root from `COMPANION_CONFIG_BASEDIR` is not followed yet).
 
 **Companion server process**:
-The `node … Companion.app/Contents/Resources/main.js` process, a child of the Companion launcher, that holds the database open while Companion runs. "Companion is running" means this process exists; the launcher alone does not count.
+The process that runs Companion's `main.js` with the bundled Node runtime and holds the database open while Companion runs: `node … Companion.app/Contents/Resources/main.js` on macOS, `<install>\resources\node-runtimes\…\node.exe … <install>\resources\main.js` on Windows, a child of the Companion launcher (`Companion.exe` on Windows). "Companion is running" means this process exists; the launcher alone does not count.
 _Avoid_: Server on its own (ambiguous with the install), instance
 
 **Database**:

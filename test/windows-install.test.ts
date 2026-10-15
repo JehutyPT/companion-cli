@@ -13,6 +13,7 @@ import { win32 } from "node:path";
 import { describe, it } from "node:test";
 import { buildFixtureDb } from "./fixtures/companion-db.ts";
 import {
+  fakeProcessControl,
   fileState,
   forbiddenProcessControl,
   windowsInstallDir,
@@ -101,6 +102,73 @@ describe("Windows install: read commands and dry runs without --db", () => {
       document.error.message,
       "database not found: C:\\Users\\nobody\\AppData\\Roaming\\companion\\v5.1\\db.sqlite",
     );
+  });
+});
+
+describe("Windows install: apply --db while Companion runs", () => {
+  it(
+    "refuses the install's database while a server runs, writing nothing",
+    { skip: WINDOWS_HOST_ONLY },
+    async () => {
+      const { dbPath, options } = windowsInstall();
+      const before = fileState(dbPath);
+      const fake = fakeProcessControl({ running: true });
+      const file = writeDescription(tempDir(), VARIABLES_YAML);
+      // Another spelling of the same file: NTFS ignores case.
+      for (const target of [dbPath, dbPath.toUpperCase()]) {
+        fake.calls.length = 0;
+        const result = await runCli(["apply", file, "--db", target], {
+          ...options,
+          processControl: fake.control,
+        });
+        assert.equal(result.code, 1, target);
+        assert.deepEqual(result.stderr, [
+          `error: refusing to write the Companion install's database (${target}) while Companion is running; quit Companion or omit --db to let the tool stop and restart it`,
+        ]);
+        assert.deepEqual(fake.calls, ["check"], target);
+      }
+      assert.deepEqual(fileState(dbPath), before);
+    },
+  );
+
+  it(
+    "fails closed when the process listing fails",
+    { skip: WINDOWS_HOST_ONLY },
+    async () => {
+      const { dbPath, options } = windowsInstall();
+      const before = fileState(dbPath);
+      const fake = fakeProcessControl({ running: true, failCheck: true });
+      const file = writeDescription(tempDir(), VARIABLES_YAML);
+      const result = await runCli(["apply", file, "--db", dbPath, "--json"], {
+        ...options,
+        processControl: fake.control,
+      });
+      assert.equal(result.code, 1);
+      const document = JSON.parse(result.stdout[0] ?? "") as {
+        error: { code: string; message: string };
+      };
+      assert.equal(document.error.code, "companion_running");
+      assert.match(
+        document.error.message,
+        /^cannot tell whether Companion is running \(ps exploded\); refusing to write$/,
+      );
+      assert.deepEqual(fake.calls, ["check"]);
+      assert.deepEqual(fileState(dbPath), before);
+    },
+  );
+
+  it("writes another copy while a server runs, after the in-use check", async () => {
+    const dbPath = buildFixtureDb(tempDir());
+    const fake = fakeProcessControl({ running: true });
+    const file = writeDescription(tempDir(), VARIABLES_YAML);
+    const result = await runCli(["apply", file, "--db", dbPath], {
+      homedir: tempDir(),
+      platform: "win32",
+      env: { APPDATA: tempDir() },
+      processControl: fake.control,
+    });
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.deepEqual(fake.calls, ["holders"]);
   });
 });
 

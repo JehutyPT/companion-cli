@@ -19,7 +19,7 @@ import {
   type FixtureOptions,
 } from "./fixtures/companion-db.ts";
 import type { CliOptions } from "../src/cli.ts";
-import type { ProcessControl } from "../src/core/process.ts";
+import type { CompanionServer, ProcessControl } from "../src/core/process.ts";
 
 const tempDirs: string[] = [];
 after(() => {
@@ -55,6 +55,7 @@ export interface CliRun {
  * Companion.
  */
 export const STOPPED_PROCESS_CONTROL: ProcessControl = {
+  servers: async () => [],
   serverPids: async () => [],
   databaseHolders: async () => [],
   quit: () => forbidden("quit"),
@@ -82,6 +83,7 @@ export function forbiddenProcessControl(): {
   return {
     calls,
     control: {
+      servers: () => refuse("servers"),
       serverPids: () => refuse("serverPids"),
       databaseHolders: () => refuse("databaseHolders"),
       quit: () => refuse("quit"),
@@ -94,6 +96,8 @@ export function forbiddenProcessControl(): {
 export interface FakeProcessOptions {
   /** Whether the server is running when the apply begins. */
   running: boolean;
+  /** The running server's install folder (Windows: holds `resources\BUILD`). */
+  install?: string;
   /** Shared call log; tests push pipeline steps into the same array. */
   calls?: string[];
   failCheck?: boolean;
@@ -116,12 +120,27 @@ export function fakeProcessControl(options: FakeProcessOptions): {
   const calls = options.calls ?? [];
   const waitedFor: number[][] = [];
   const timeouts: number[] = [];
+  const servers = async (): Promise<CompanionServer[]> => {
+    calls.push("check");
+    if (options.failCheck) throw new Error("ps exploded");
+    if (!options.running) return [];
+    const install = options.install ?? null;
+    return [
+      {
+        pid: 4242,
+        commandLine:
+          install === null
+            ? "node main.js"
+            : `"${win32.join(install, "resources", "node-runtimes", "node26", "node.exe")}" "${win32.join(install, "resources", "main.js")}"`,
+        install,
+        sessionId: 1,
+        launcher: { pid: 4241, path: null, sessionId: 1 },
+      },
+    ];
+  };
   const control: ProcessControl = {
-    serverPids: async () => {
-      calls.push("check");
-      if (options.failCheck) throw new Error("ps exploded");
-      return options.running ? [4242] : [];
-    },
+    servers,
+    serverPids: async () => (await servers()).map((server) => server.pid),
     databaseHolders: async () => {
       calls.push("holders");
       if (options.failHolders) throw new Error("lsof exploded");
@@ -204,8 +223,15 @@ export async function runCli(
       homedir: options.homedir ?? tempDir(),
       processControl: options.processControl ?? STOPPED_PROCESS_CONTROL,
       // Never the real /Applications bundle: a test that needs one passes it.
-      companionBuildFile:
-        options.companionBuildFile ?? join(tempDir(), "missing-BUILD"),
+      // On Windows the build file comes from the (fake) running server's
+      // install, unless the test passes one.
+      ...(options.companionBuildFile !== undefined ||
+      (options.platform ?? "darwin") !== "win32"
+        ? {
+            companionBuildFile:
+              options.companionBuildFile ?? join(tempDir(), "missing-BUILD"),
+          }
+        : {}),
     },
   );
   return { code, stdout, stderr };

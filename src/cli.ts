@@ -45,10 +45,14 @@ import {
 } from "./rest/endpoint.ts";
 import { DEFAULT_REST_WAIT_MS, waitForRest } from "./rest/wait.ts";
 import {
+  type BuildFile,
   connectionSchema,
   connectionSchemaJson,
+  DEFAULT_BUILD_FILE,
   renderConnectionSchema,
+  runningBuildFile,
 } from "./connection-schema.ts";
+import { defaultProcessControl } from "./core/process.ts";
 import { descriptionSchema } from "./schema.ts";
 import { surfaceConfigFields } from "./surface-definitions.ts";
 import { writers } from "./writers/index.ts";
@@ -244,8 +248,9 @@ export const HELP = [
   "with their options (internal: Companion's built-in ones), for pass-through",
   "actions and feedbacks. They exist only in the running Companion, so it",
   "reads them over Companion's local socket (COMPANION_URL; no API key), after",
-  "checking that the Companion app in /Applications is build",
-  "5.1.0+9981-stable-257b325d09. It only subscribes; it changes nothing.",
+  "checking that the installed Companion (on Windows, the install of the",
+  "running one) is build 5.1.0+9981-stable-257b325d09. It only subscribes;",
+  "it changes nothing.",
   "census counts how the database uses buttons, steps, styles, actions,",
   "feedbacks, local variables, triggers and custom variables, to show what",
   "the description format covers. It prints counts and keys (types, option",
@@ -289,7 +294,7 @@ export interface CliOptions extends ApplyOptions {
   restTimeoutMs?: number;
   /** Interval between `apply`'s REST probes after a restart, in ms. Defaults to 500. */
   restPollIntervalMs?: number;
-  /** The installed Companion's `Resources/BUILD`, for `schema --connection` and surface config fields. */
+  /** The installed Companion's `BUILD` file, for `schema --connection` and surface config fields; overrides the platform's lookup. */
   companionBuildFile?: string;
   /** Each socket wait of `schema --connection` and of surface config fields, in ms. Defaults to 5000. */
   socketTimeoutMs?: number;
@@ -391,7 +396,7 @@ async function runRead(
             cwd: options.cwd ?? process.cwd(),
             homedir: options.homedir ?? homedir(),
           },
-          buildFile: options.companionBuildFile,
+          buildFile: companionBuildFile(options),
           timeoutMs: options.socketTimeoutMs,
         });
         if (json) io.stdout(connectionSchemaJson(schema));
@@ -808,6 +813,22 @@ async function runApply(
   }
 }
 
+/**
+ * The installed Companion's build file, for `schema --connection` and surface
+ * config fields: the `companionBuildFile` option when set; on Windows, where
+ * installs live anywhere, `<install>\resources\BUILD` of the running server,
+ * found through the process control when the check is reached; elsewhere the
+ * `/Applications` bundle's.
+ */
+function companionBuildFile(options: CliOptions): BuildFile {
+  if (options.companionBuildFile !== undefined)
+    return options.companionBuildFile;
+  const platform = options.platform ?? process.platform;
+  if (platform !== "win32") return DEFAULT_BUILD_FILE;
+  const control = options.processControl ?? defaultProcessControl(platform);
+  return () => runningBuildFile(control);
+}
+
 /** Per-request timeout of the config-fields request, in ms, unless `restTimeoutMs` sets one. */
 const CONFIG_FIELDS_TIMEOUT_MS = 2000;
 
@@ -856,7 +877,7 @@ function writerRuntime(options: CliOptions): WriterRuntime {
         surfaceConfigFields(surfaceId, {
           env,
           dirs,
-          buildFile: options.companionBuildFile,
+          buildFile: companionBuildFile(options),
           timeoutMs: options.socketTimeoutMs,
         })),
   };

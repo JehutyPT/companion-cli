@@ -18,7 +18,7 @@ const NOT_RUNNING_HINT = "start Companion, or check COMPANION_URL";
 
 /** The hint of an answer Companion 5.1 would not give. */
 export const OTHER_COMPANION_HINT =
-  "the running Companion may not be the 5.1 build installed in /Applications";
+  "the running Companion may not be the installed 5.1 build";
 
 /** One awaited subscription: its first `data` payload settles it. */
 interface Pending {

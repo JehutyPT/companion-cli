@@ -48,7 +48,8 @@ import {
  *     running at this point;
  *  4. live-install mode: if the Companion server process is running, quit
  *     Companion and wait for that process to exit. With an explicit database
- *     path: refuse the install's database while Companion runs, and never
+ *     path: refuse the install's database while Companion runs (macOS and
+ *     Windows, the platforms with an install database), and never
  *     quit or start Companion;
  *  5. on macOS and Windows, refuse if any other process has the database or
  *     its WAL files open (the in-use guard; it also catches a Companion step
@@ -249,8 +250,10 @@ export async function apply(
   };
 
   if (!live) {
+    // macOS and Windows have an install database to protect; on any other
+    // platform there is none (`isDefaultInstallDatabase` would refuse it).
     if (
-      platform === "darwin" &&
+      (platform === "darwin" || platform === "win32") &&
       isDefaultInstallDatabase(dbPath, install) &&
       (await runningServer(control)).length > 0
     ) {

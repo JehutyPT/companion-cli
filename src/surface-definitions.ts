@@ -2,15 +2,16 @@
  * A surface's config field definitions (#32), which exist only in the
  * running Companion, and only while the surface is connected. They are read
  * over the tRPC socket (`surfaces.watchSurfaces`) after the version gate on
- * the installed app's `Resources/BUILD`, as `schema --connection` reads its
+ * the installed Companion's `BUILD` file, as `schema --connection` reads its
  * definitions. See docs/companion-internals.md, "Surfaces".
  *
  * Only `id`, `type` and the keys the check needs are kept from a field;
  * nothing from a surface's stored config is read here.
  */
 import {
+  type BuildFile,
+  buildFilePath,
   checkBuild,
-  DEFAULT_BUILD_FILE,
   SOCKET_TIMEOUT_MS,
 } from "./connection-schema.ts";
 import { errorMessage } from "./core/errors.ts";
@@ -28,8 +29,8 @@ const SURFACES_PATH = "surfaces.watchSurfaces";
 export interface SurfaceDefinitionsOptions {
   env: Env;
   dirs: ConfigDirs;
-  /** Defaults to `DEFAULT_BUILD_FILE`. */
-  buildFile?: string | undefined;
+  /** A path, or a lookup run when the check is reached (the CLI's on Windows). Defaults to `DEFAULT_BUILD_FILE`. */
+  buildFile?: BuildFile | undefined;
   /** Defaults to `SOCKET_TIMEOUT_MS`. */
   timeoutMs?: number | undefined;
 }
@@ -59,7 +60,7 @@ export async function surfaceConfigFields(
 ): Promise<ConfigFieldsOutcome> {
   try {
     const url = loadCompanionUrl(options.env, options.dirs);
-    checkBuild(options.buildFile ?? DEFAULT_BUILD_FILE, "kind: surface");
+    checkBuild(await buildFilePath(options.buildFile), "kind: surface");
     const socketUrl = `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}/trpc`;
     const socket = await TrpcSubscriber.connect(
       socketUrl,

@@ -5,12 +5,20 @@
  * temporary BUILD file; none reaches a real Companion or reads /Applications.
  */
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { type CliRun, runCli, tempDir } from "./helpers.ts";
+import type { CompanionServer, ProcessControl } from "../src/core/process.ts";
+import {
+  type CliRun,
+  fakeProcessControl,
+  runCli,
+  STOPPED_PROCESS_CONTROL,
+  tempDir,
+  WINDOWS_HOST_ONLY,
+} from "./helpers.ts";
 import { type FakeTrpc, startFakeTrpc } from "./fake-trpc.ts";
 
 type Json = Record<string, unknown>;
@@ -331,7 +339,7 @@ describe("schema --connection refusals", () => {
     assert.match(String(error["message"]), /BUILD/);
     assert.equal(
       error["hint"],
-      "this command needs Companion 5.1 installed in /Applications",
+      "this command needs the installed Companion 5.1",
     );
     assert.equal(fake.upgrades.length, 0);
   });
@@ -399,6 +407,154 @@ describe("schema --connection usage", () => {
     assert.equal(result.code, 0);
     assert.match(result.stdout.join("\n"), /schema \[--connection <label>\]/);
     assert.equal(fake.upgrades.length, 0);
+  });
+});
+
+describe("schema --connection on Windows: the running install's build", () => {
+  /** An install folder holding `resources\BUILD` (host path rules). */
+  function install(build: string | null = `${BUILD}\n`): string {
+    const dir = tempDir();
+    if (build !== null) {
+      mkdirSync(join(dir, "resources"));
+      writeFileSync(join(dir, "resources", "BUILD"), build);
+    }
+    return dir;
+  }
+
+  function onWindows(
+    control: ProcessControl,
+    extra: { companionBuildFile?: string } = {},
+  ): Promise<CliRun> {
+    return runCli(["schema", "--connection", "mixer", "--json"], {
+      env: { COMPANION_URL: fake.url },
+      platform: "win32",
+      processControl: control,
+      socketTimeoutMs: 2000,
+      ...extra,
+    });
+  }
+
+  it(
+    "reads <install>\\resources\\BUILD of the running server",
+    { skip: WINDOWS_HOST_ONLY },
+    async () => {
+      const processes = fakeProcessControl({
+        running: true,
+        install: install(),
+      });
+      const result = await onWindows(processes.control);
+      assert.equal(result.code, 0, result.stdout.join("\n"));
+      assert.equal(parseJson(result)["build"], BUILD);
+      assert.deepEqual(processes.calls, ["check"]);
+    },
+  );
+
+  it(
+    "refuses another build of the running install without connecting",
+    { skip: WINDOWS_HOST_ONLY },
+    async () => {
+      const processes = fakeProcessControl({
+        running: true,
+        install: install("5.1.1+10000-stable-abcdef\n"),
+      });
+      const result = await onWindows(processes.control);
+      assert.equal(result.code, 1);
+      const error = parseJson(result)["error"] as Json;
+      assert.equal(error["code"], "unsupported_companion_build");
+      assert.equal(fake.upgrades.length, 0);
+    },
+  );
+
+  it("names <install>\\resources\\BUILD when it cannot read it", async () => {
+    const dir = install(null);
+    const processes = fakeProcessControl({ running: true, install: dir });
+    const result = await onWindows(processes.control);
+    assert.equal(result.code, 1);
+    const error = parseJson(result)["error"] as Json;
+    assert.equal(error["code"], "companion_build_unknown");
+    assert.ok(
+      String(error["message"]).startsWith(
+        `cannot read Companion's build from ${win32.join(dir, "resources", "BUILD")}: `,
+      ),
+      String(error["message"]),
+    );
+    assert.equal(
+      error["hint"],
+      "this command needs the installed Companion 5.1",
+    );
+    assert.equal(fake.upgrades.length, 0);
+  });
+
+  it("refuses with companion_not_running when no server runs, reading no build", async () => {
+    const processes = fakeProcessControl({ running: false });
+    const result = await onWindows(processes.control);
+    assert.equal(result.code, 1);
+    assert.deepEqual(parseJson(result)["error"], {
+      code: "companion_not_running",
+      message: "Companion is not running: no Companion server process found",
+      hint: "start Companion",
+    });
+    assert.deepEqual(processes.calls, ["check"]);
+    assert.equal(fake.upgrades.length, 0);
+  });
+
+  it("fails clearly when the process listing fails", async () => {
+    const processes = fakeProcessControl({ running: true, failCheck: true });
+    const result = await onWindows(processes.control);
+    assert.equal(result.code, 1);
+    const error = parseJson(result)["error"] as Json;
+    assert.equal(error["code"], "companion_build_unknown");
+    assert.equal(
+      error["message"],
+      "cannot tell which Companion is running (ps exploded), so its build is unknown",
+    );
+    assert.equal(fake.upgrades.length, 0);
+  });
+
+  it("refuses to choose between servers of several installs", async () => {
+    const server = (pid: number, dir: string): CompanionServer => ({
+      pid,
+      commandLine: `"${dir}\\resources\\node-runtimes\\node26\\node.exe" "${dir}\\resources\\main.js"`,
+      install: dir,
+      sessionId: 1,
+      launcher: null,
+    });
+    const servers = [
+      server(1, "C:\\A"),
+      server(2, "D:\\B"),
+      server(3, "c:\\a"),
+    ];
+    const result = await onWindows({
+      ...STOPPED_PROCESS_CONTROL,
+      servers: async () => servers,
+    });
+    assert.equal(result.code, 1);
+    const error = parseJson(result)["error"] as Json;
+    assert.equal(error["code"], "companion_build_unknown");
+    assert.equal(
+      error["message"],
+      "Companion servers from several installs are running (C:\\A, D:\\B); refusing to choose one",
+    );
+  });
+
+  it("checks COMPANION_URL before listing processes", async () => {
+    const processes = fakeProcessControl({ running: false });
+    const result = await runCli(["schema", "--connection", "mixer"], {
+      platform: "win32",
+      processControl: processes.control,
+    });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr.join("\n"), /COMPANION_URL/);
+    assert.deepEqual(processes.calls, []);
+  });
+
+  it("still lets the build-file option override, without listing", async () => {
+    const processes = fakeProcessControl({ running: false });
+    const result = await onWindows(processes.control, {
+      companionBuildFile: buildFile(),
+    });
+    assert.equal(result.code, 0, result.stdout.join("\n"));
+    assert.deepEqual(processes.calls, []);
   });
 });
 

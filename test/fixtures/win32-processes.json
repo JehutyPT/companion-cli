@@ -1,0 +1,100 @@
+[
+  {
+    "ProcessId": 0,
+    "ParentProcessId": 0,
+    "SessionId": 0,
+    "ExecutablePath": null,
+    "CommandLine": null
+  },
+  {
+    "ProcessId": 5556,
+    "ParentProcessId": 1716,
+    "SessionId": 0,
+    "ExecutablePath": "C:\\Program Files\\LGTV Companion\\LGTVsvc.exe",
+    "CommandLine": "\"C:\\Program Files\\LGTV Companion\\LGTVsvc.exe\""
+  },
+  {
+    "ProcessId": 5596,
+    "ParentProcessId": 1716,
+    "SessionId": 0,
+    "ExecutablePath": "C:\\Program Files (x86)\\MSI\\One Dragon Center\\Game_Summary\\MSI_Companion_Service.exe",
+    "CommandLine": "\"C:\\Program Files (x86)\\MSI\\One Dragon Center\\Game_Summary\\MSI_Companion_Service.exe\""
+  },
+  {
+    "ProcessId": 13608,
+    "ParentProcessId": 13500,
+    "SessionId": 1,
+    "ExecutablePath": "C:\\Windows\\explorer.exe",
+    "CommandLine": "C:\\Windows\\Explorer.EXE"
+  },
+  {
+    "ProcessId": 3832,
+    "ParentProcessId": 13608,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\Companion.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\Companion.exe\" "
+  },
+  {
+    "ProcessId": 10576,
+    "ParentProcessId": 3832,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\Companion.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\Companion.exe\" --type=crashpad-handler --user-data-dir=C:\\Users\\someone\\AppData\\Roaming\\@companion-app/launcher /prefetch:4 --no-rate-limit"
+  },
+  {
+    "ProcessId": 8128,
+    "ParentProcessId": 3832,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\Companion.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\Companion.exe\" --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-US --service-sandbox-type=none --user-data-dir=\"C:\\Users\\someone\\AppData\\Roaming\\@companion-app/launcher\""
+  },
+  {
+    "ProcessId": 7096,
+    "ParentProcessId": 3832,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\Companion.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\Companion.exe\" --type=renderer --user-data-dir=\"C:\\Users\\someone\\AppData\\Roaming\\@companion-app/launcher\" --app-path=\"D:\\Data\\Bitfocus Companion\\resources\\app.asar\""
+  },
+  {
+    "ProcessId": 3176,
+    "ParentProcessId": 3832,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node26\\node.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node26\\node.exe\" --use-system-ca \"D:\\Data\\Bitfocus Companion\\resources\\main.js\" --machine-id=xxxx --config-dir=C:\\Users\\someone\\companion-cli-spike\\cfg --admin-port=8000 --admin-address=127.0.0.1 --log-level=info"
+  },
+  {
+    "ProcessId": 10152,
+    "ParentProcessId": 3832,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\Companion.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\Companion.exe\" --type=gpu-process --user-data-dir=\"C:\\Users\\someone\\AppData\\Roaming\\@companion-app/launcher\""
+  },
+  {
+    "ProcessId": 1924,
+    "ParentProcessId": 3176,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node26\\node.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node26\\node.exe\" --enable-source-maps \"D:\\Data\\Bitfocus Companion\\resources\\SurfaceThread.js\""
+  },
+  {
+    "ProcessId": 5240,
+    "ParentProcessId": 3176,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node22\\node.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node22\\node.exe\" --enable-source-maps \"D:\\Data\\Bitfocus Companion\\resources\\SurfaceThread.js\""
+  },
+  {
+    "ProcessId": 6100,
+    "ParentProcessId": 3176,
+    "SessionId": 1,
+    "ExecutablePath": "D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node22\\node.exe",
+    "CommandLine": "\"D:\\Data\\Bitfocus Companion\\resources\\node-runtimes\\node22\\node.exe\" --use-system-ca --no-warnings=SecurityWarning --permission --allow-fs-read=C:\\Users\\someone\\companion-cli-spike\\cfg\\modules\\studiocoast-vmix-4.1.2 \"--allow-fs-read=D:\\Data\\Bitfocus Companion\\resources\" C:\\Users\\someone\\companion-cli-spike\\cfg\\modules\\studiocoast-vmix-4.1.2\\main.js"
+  },
+  {
+    "ProcessId": 7000,
+    "ParentProcessId": 6900,
+    "SessionId": 0,
+    "ExecutablePath": "C:\\Program Files\\nodejs\\node.exe",
+    "CommandLine": "\"C:\\Program Files\\nodejs\\node.exe\" C:\\Users\\someone\\companion-cli\\dist\\bin\\companion-cli.js schema --connection vmix"
+  }
+]

@@ -6,11 +6,12 @@
  * live test reads definitions from the in-process fake tRPC server.
  */
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { buildFixtureDb } from "./fixtures/companion-db.ts";
+import type { ProcessControl } from "../src/core/process.ts";
 import { type FakeTrpc, startFakeTrpc } from "./fake-trpc.ts";
 import {
   applyTo,
@@ -25,6 +26,8 @@ import {
   runCli,
   setup,
   tempDir,
+  WINDOWS_HOST_ONLY,
+  windowsInstallDir,
   withoutTables,
   writeDescription,
 } from "./helpers.ts";
@@ -643,6 +646,95 @@ plugin: { sleepTimer: 3600, mode: b, free: anything, dim: true, label: x, fancy:
     const doc = (JSON.parse(result.stdout[0] ?? "") as { error: Json }).error;
     assert.match(String(doc["message"]), /COMPANION_URL/);
     assert.deepEqual(fake.upgrades, []);
+  });
+
+  describe("on Windows: the running install's build", () => {
+    /**
+     * A dry run of `yaml` on the Windows install's database (seeded), with
+     * no build-file option: the build comes from `processes`' server.
+     */
+    async function windowsDryRun(
+      yaml: string,
+      processes: ProcessControl,
+    ): Promise<CliRun> {
+      const appData = tempDir();
+      const db = new DatabaseSync(buildFixtureDb(windowsInstallDir(appData)));
+      seedSurfaces(db);
+      db.close();
+      return runCli(
+        ["apply", writeDescription(tempDir(), yaml), "--dry-run", "--json"],
+        {
+          homedir: tempDir(),
+          platform: "win32",
+          env: { APPDATA: appData, COMPANION_URL: fake.url },
+          processControl: processes,
+        },
+      );
+    }
+
+    /** An install folder holding `resources\BUILD`. */
+    function install(build = `${BUILD}\n`): string {
+      const dir = tempDir();
+      mkdirSync(join(dir, "resources"));
+      writeFileSync(join(dir, "resources", "BUILD"), build);
+      return dir;
+    }
+
+    const REFUSED = `kind: surface\nsurface: "${SKAARHOJ}"\nplugin: { mode: c }\n`;
+
+    it(
+      "checks against the definitions after reading the running install's BUILD",
+      { skip: WINDOWS_HOST_ONLY },
+      async () => {
+        const processes = fakeProcessControl({
+          running: true,
+          install: install(),
+        });
+        const result = await windowsDryRun(REFUSED, processes.control);
+        assert.equal(result.code, 1);
+        const doc = (JSON.parse(result.stdout[0] ?? "") as { error: Json })
+          .error;
+        assert.match(String(doc["message"]), /is not one of the choices/);
+        assert.equal(fake.upgrades.length, 1);
+        assert.deepEqual(processes.calls, ["check"]);
+      },
+    );
+
+    for (const [name, processes, reason] of [
+      [
+        "another build",
+        () =>
+          fakeProcessControl({
+            running: true,
+            install: install("5.2.0+1-beta\n"),
+          }),
+        'Companion build "5.2.0+1-beta" is not supported: kind: surface reads a private API',
+      ],
+      [
+        "no running server",
+        () => fakeProcessControl({ running: false }),
+        "Companion is not running: no Companion server process found",
+      ],
+    ] as const) {
+      it(
+        `${name} reads no definitions and names why`,
+        { skip: WINDOWS_HOST_ONLY },
+        async () => {
+          const result = await windowsDryRun(
+            `kind: surface\nsurface: "${SKAARHOJ}"\nplugin: { newSetting: 1 }\n`,
+            processes().control,
+          );
+          assert.equal(result.code, 1);
+          const doc = (JSON.parse(result.stdout[0] ?? "") as { error: Json })
+            .error;
+          assert.ok(
+            String(doc["message"]).includes(reason),
+            String(doc["message"]),
+          );
+          assert.deepEqual(fake.upgrades, []);
+        },
+      );
+    }
   });
 
   it("a live apply reads the definitions before it quits Companion, once", async () => {
