@@ -5,148 +5,26 @@
  * copy leaves the copy equal to the original but for generated ids.
  */
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import { parseDocument } from "yaml";
 import { USAGE } from "../src/cli.ts";
 import { SCHEMA_MODELINE } from "../src/schema.ts";
 import {
+  assertRefused,
+  exportFrom,
+  exportRoundTrip,
+  insert,
+  mutate,
+} from "./export-helpers.ts";
+import {
   applyTo,
-  type CliRun,
   dumpDatabase,
   type FixtureEnv,
-  fileState,
-  forbiddenProcessControl,
   type Json,
-  normaliseIds,
   rows,
   runCli,
   setup,
-  tempDir,
-  writeDescription,
 } from "./helpers.ts";
-import { agreement } from "./schema-check.ts";
-
-/** Runs `export …` on the fixture, proving it read-only. */
-async function exportFrom(env: FixtureEnv, args: string[]): Promise<CliRun> {
-  const before = fileState(env.dbPath);
-  const { control, calls } = forbiddenProcessControl();
-  const result = await runCli(["export", ...args, "--db", env.dbPath], {
-    processControl: control,
-    tmpdir: env.tmpdir,
-  });
-  assert.deepEqual(calls, [], "no process-control call");
-  assert.deepEqual(fileState(env.dbPath), before, "target byte-identical");
-  assert.deepEqual(readdirSync(env.tmpdir), [], "temporary copy removed");
-  return result;
-}
-
-function ok(result: CliRun): string {
-  assert.equal(result.code, 0, result.stderr.join("\n"));
-  assert.deepEqual(result.stderr, []);
-  return result.stdout.map((line) => `${line}\n`).join("");
-}
-
-/** A copy of the fixture database (and its WAL files) in a new directory. */
-function copyEnv(env: FixtureEnv): FixtureEnv {
-  const dir = tempDir();
-  const dbPath = join(dir, "db.sqlite");
-  for (const suffix of ["", "-wal", "-shm"]) {
-    if (existsSync(env.dbPath + suffix))
-      copyFileSync(env.dbPath + suffix, dbPath + suffix);
-  }
-  return { dir, dbPath, backupRoot: join(dir, "backups"), tmpdir: tempDir() };
-}
-
-/** The file round-trips: no dry-run change, and an apply to a copy changes nothing. */
-async function assertRoundTrip(env: FixtureEnv, file: string): Promise<void> {
-  const dry = await runCli(
-    ["apply", file, "--db", env.dbPath, "--dry-run", "--json"],
-    { tmpdir: env.tmpdir },
-  );
-  assert.equal(dry.code, 0, dry.stderr.join("\n"));
-  const report = JSON.parse(dry.stdout.join("\n"));
-  assert.equal(report.changed, false, JSON.stringify(report.tables));
-
-  const copy = copyEnv(env);
-  const applied = await runCli(["apply", file, "--db", copy.dbPath], {
-    backupRoot: copy.backupRoot,
-    tmpdir: copy.tmpdir,
-  });
-  assert.equal(applied.code, 0, applied.stderr.join("\n"));
-  assert.deepEqual(
-    normaliseIds(dumpDatabase(copy.dbPath)),
-    normaliseIds(dumpDatabase(env.dbPath)),
-  );
-}
-
-/**
- * Exports as YAML and as JSON, checks both parse cleanly and repeat
- * byte-identically, and round-trips both. Returns the YAML text.
- */
-async function exportRoundTrip(
-  env: FixtureEnv,
-  args: string[],
-): Promise<string> {
-  const yaml = ok(await exportFrom(env, args));
-  assert.equal(ok(await exportFrom(env, args)), yaml, "byte-identical");
-  const doc = parseDocument(yaml, { uniqueKeys: true });
-  assert.deepEqual(doc.errors, []);
-  assert.deepEqual(doc.warnings, []);
-  assert.deepEqual(agreement(doc.toJS()), { schema: true, parser: true });
-  const json = ok(await exportFrom(env, [...args, "--json"]));
-  assert.deepEqual(JSON.parse(json), doc.toJS());
-  await assertRoundTrip(env, writeDescription(env.dir, yaml, "export.yaml"));
-  await assertRoundTrip(env, writeDescription(env.dir, json, "export.json"));
-  return yaml;
-}
-
-/** Rewrites one stored row's JSON value. */
-function mutate(
-  db: DatabaseSync,
-  table: string,
-  id: string,
-  change: (value: Json) => unknown,
-): void {
-  const row = db.prepare(`SELECT value FROM ${table} WHERE id = ?`).get(id);
-  assert.ok(row, `${table} ${id}`);
-  db.prepare(`UPDATE ${table} SET value = ? WHERE id = ?`).run(
-    JSON.stringify(change(JSON.parse(String(row["value"])))),
-    id,
-  );
-}
-
-function insert(db: DatabaseSync, table: string, id: string, value: unknown) {
-  db.prepare(`INSERT INTO ${table} (id, value) VALUES (?, ?)`).run(
-    id,
-    typeof value === "string" ? value : JSON.stringify(value),
-  );
-}
-
-/** One refusal: exit 1, one stderr line, nothing on stdout; and the JSON envelope. */
-async function assertRefused(
-  env: FixtureEnv,
-  args: string[],
-  line: string,
-  path: string,
-  hint?: string,
-): Promise<Json> {
-  const text = await exportFrom(env, args);
-  assert.equal(text.code, 1);
-  assert.deepEqual(text.stdout, []);
-  assert.deepEqual(text.stderr, [`error: ${line}`]);
-  const json = await exportFrom(env, [...args, "--json"]);
-  assert.equal(json.code, 1);
-  assert.deepEqual(json.stderr, []);
-  assert.equal(json.stdout.length, 1);
-  const { error } = JSON.parse(json.stdout[0] as string);
-  assert.equal(error.message, line);
-  assert.equal(error.path, path);
-  assert.equal(error.hint, hint);
-  return error;
-}
 
 describe("export variables", () => {
   it("exports the fixture's three, with the persisted value and the sortOrder gap", async () => {
@@ -801,10 +679,13 @@ triggers:
 
 describe("export command line", () => {
   const cases: [string[], string][] = [
-    [["export"], "export needs a kind (variables or trigger or triggers)"],
+    [
+      ["export"],
+      "export needs a kind (variables or trigger or triggers or page)",
+    ],
     [
       ["export", "pages"],
-      'unknown export kind "pages" (expected variables or trigger or triggers)',
+      'unknown export kind "pages" (expected variables or trigger or triggers or page)',
     ],
     [["export", "trigger"], "export trigger takes exactly one trigger name"],
     [

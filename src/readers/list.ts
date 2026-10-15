@@ -57,6 +57,8 @@ export interface ListRequest {
   patterns: readonly string[];
   /** The kind-specific boolean options given, without `--`. */
   flags: ReadonlySet<string>;
+  /** The kind-specific valued options given, without `--`, by name. */
+  values: Readonly<Record<string, string>>;
   options: ListOptions;
 }
 
@@ -126,8 +128,13 @@ export function listingJson<Item>(
 export interface ListCommand {
   /** Kind-specific boolean options, without `--`. */
   readonly flags: readonly string[];
-  /** A usage reason when the name arguments are wrong for this command. */
-  checkArgs?(args: readonly string[]): string | undefined;
+  /** Kind-specific options that take a value (`--button <row>/<column>`), without `--`. */
+  readonly valueOptions?: readonly string[];
+  /** A usage reason when the arguments or valued options are wrong for this command. */
+  checkArgs?(
+    args: readonly string[],
+    values: Readonly<Record<string, string>>,
+  ): string | undefined;
   run(request: ListRequest): Promise<{ text(): string[]; json(): string }>;
 }
 

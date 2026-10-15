@@ -23,13 +23,13 @@ import { describeStored, refuse } from "./export.ts";
 /** What apply's `increment` and `decrement` store, with N a safe positive integer. */
 const STEP = /^\$\(this:current\) ([+-]) ([1-9]\d{0,14})$/;
 
-interface StoredOption {
+export interface StoredOption {
   value: unknown;
   isExpression: boolean;
 }
 
 /** A wrapped option exactly as the writers store one. */
-function isOption(value: unknown): value is StoredOption {
+export function isOption(value: unknown): value is StoredOption {
   return (
     isJsonObject(value) &&
     Object.keys(value).length === 2 &&

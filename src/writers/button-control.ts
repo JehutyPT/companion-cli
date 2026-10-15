@@ -498,7 +498,13 @@ export function buttonLayers(
   ];
 }
 
-function buildButtonControl(plan: ButtonContent): Record<string, unknown> {
+/**
+ * The button's `button-layered` control JSON, with fresh action and feedback
+ * ids. Pure: apply stores it, export rebuilds it to prove an exported button.
+ */
+export function buildButtonControl(
+  plan: ButtonContent,
+): Record<string, unknown> {
   return {
     type: "button-layered",
     options: {

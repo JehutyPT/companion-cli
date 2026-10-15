@@ -147,6 +147,14 @@ const VALIDATE_SYNOPSIS =
 const LIST_FLAGS = [
   ...new Set(Object.values(listCommands).flatMap((command) => command.flags)),
 ];
+/** Every kind-specific valued option of any `list` or `export` kind, without `--`. */
+const KIND_VALUE_OPTIONS = [
+  ...new Set(
+    [...Object.values(listCommands), ...Object.values(exportCommands)].flatMap(
+      (command) => command.valueOptions ?? [],
+    ),
+  ),
+];
 /** One line for every kind; HELP says which kind takes which option. */
 const LIST_SYNOPSIS = [
   `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`,
@@ -303,7 +311,31 @@ const VALUED_OPTIONS: ReadonlySet<string> = new Set([
   "--rest-timeout",
   "--variable",
   "--connection",
+  ...KIND_VALUE_OPTIONS.map((option) => `--${option}`),
 ]);
+
+/**
+ * `argv` with each kind-specific valued option joined to its value
+ * (`--button=-1/0`), so a value starting with `-` is not read as an option.
+ */
+function joinKindValues(argv: readonly string[]): string[] {
+  const joined: string[] = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index] as string;
+    if (arg === "--") {
+      joined.push(...argv.slice(index));
+      break;
+    }
+    const next = argv[index + 1];
+    if (KIND_VALUE_OPTIONS.some((option) => arg === `--${option}`)) {
+      if (next === undefined || next.startsWith("--"))
+        throw new UsageError(`${arg} needs a value`);
+      joined.push(`${arg}=${next}`);
+      index++;
+    } else joined.push(arg);
+  }
+  return joined;
+}
 
 /** The first word that is neither an option nor the value of a valued option. */
 function commandWord(argv: readonly string[]): string | undefined {
@@ -384,11 +416,12 @@ async function runRead(
       io.stdout(HELP);
       return EXIT_OK;
     }
-    const { command, patterns, db, flags } = parsed;
+    const { command, patterns, db, flags, values } = parsed;
     const result = await command.run({
       dbPath: db,
       patterns,
       flags,
+      values,
       options: {
         ...options,
         env: options.env ?? process.env,
@@ -422,6 +455,8 @@ interface ReadCommandLine {
   db: string | undefined;
   /** Kind-specific boolean options given, without `--`. */
   flags: ReadonlySet<string>;
+  /** Kind-specific valued options given, without `--`. */
+  values: Readonly<Record<string, string>>;
 }
 
 /** Parses a `list` or `export` command line. Throws a `usage` CliError on a bad one. */
@@ -429,7 +464,7 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
   let parsed;
   try {
     parsed = parseArgs({
-      args: [...argv],
+      args: joinKindValues(argv),
       allowPositionals: true,
       strict: true,
       options: {
@@ -438,6 +473,12 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
         help: { type: "boolean", short: "h" },
         ...Object.fromEntries(
           LIST_FLAGS.map((flag) => [flag, { type: "boolean" as const }]),
+        ),
+        ...Object.fromEntries(
+          KIND_VALUE_OPTIONS.map((option) => [
+            option,
+            { type: "string" as const },
+          ]),
         ),
       },
     });
@@ -459,18 +500,25 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
   if (patterns.includes("")) {
     throw usageFailure("a name pattern must not be empty");
   }
-  const argsProblem = command.checkArgs?.(patterns);
-  if (argsProblem !== undefined) throw usageFailure(argsProblem);
   if (values.db === "") throw usageFailure("--db needs a path");
-  const flags = new Set(
-    LIST_FLAGS.filter((flag) => (values as Record<string, unknown>)[flag]),
-  );
+  const given = values as Record<string, unknown>;
+  const flags = new Set(LIST_FLAGS.filter((flag) => given[flag]));
   for (const flag of flags) {
     if (!command.flags.includes(flag)) {
       throw usageFailure(`--${flag} is not valid with ${verb} ${kind}`);
     }
   }
-  return { command, patterns, db: values.db, flags };
+  const kindValues: Record<string, string> = {};
+  for (const option of KIND_VALUE_OPTIONS) {
+    const value = given[option];
+    if (typeof value !== "string") continue;
+    if (!(command.valueOptions ?? []).includes(option))
+      throw usageFailure(`--${option} is not valid with ${verb} ${kind}`);
+    kindValues[option] = value;
+  }
+  const argsProblem = command.checkArgs?.(patterns, kindValues);
+  if (argsProblem !== undefined) throw usageFailure(argsProblem);
+  return { command, patterns, db: values.db, flags, values: kindValues };
 }
 
 interface ValidateCommandLine {

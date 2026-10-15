@@ -298,7 +298,8 @@ export const prop = (value: unknown, isExpression = false) => ({
 export function normaliseIds(dump: TableDump): TableDump {
   const generated = new Set<string>();
   for (const row of dump["controls"] ?? []) {
-    if (row.id.startsWith("bank:Fixture")) continue;
+    // Fixture controls, and controls already named by their cell (`normaliseControls`).
+    if (/^bank:(Fixture|@)/.test(row.id)) continue;
     generated.add(row.id);
     for (const id of generatedIds(JSON.parse(row.value))) generated.add(id);
   }

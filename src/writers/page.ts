@@ -137,7 +137,7 @@ function parsePage(fields: Fields): PagePlan {
   return { page, name, buttons };
 }
 
-type CellMap = Record<string, Record<string, unknown>>;
+export type CellMap = Record<string, Record<string, unknown>>;
 
 /** The `bank:` ids in a page row's `controls` map; anything malformed is skipped. */
 function referencedIds(value: unknown): string[] {
@@ -259,6 +259,37 @@ function insertPage(db: DatabaseSync, page: number, value: Fields): void {
   );
 }
 
+/**
+ * A page's `controls` map: one cell per button, in row then column order so
+ * the stored map does not depend on the order of the description's entries.
+ * `controlId` gives each button's control id (apply inserts the control
+ * there; export passes the stored id).
+ */
+export function buildPageControls(
+  buttons: ReadonlyArray<ButtonDescription<Cell>>,
+  controlId: (button: ButtonDescription<Cell>) => string,
+): CellMap {
+  const ordered = [...buttons].sort(
+    (a, b) =>
+      a.location.row - b.location.row || a.location.column - b.location.column,
+  );
+  const controls: CellMap = {};
+  for (const button of ordered) {
+    const { row, column } = button.location;
+    (controls[String(row)] ??= {})[String(column)] = controlId(button);
+  }
+  return controls;
+}
+
+/** An existing page row with its name and controls replaced; its `id` and other keys kept. */
+export function buildPageRow(
+  existing: Fields,
+  name: string,
+  controls: CellMap,
+): Fields {
+  return { ...existing, name, controls };
+}
+
 function writePage(db: DatabaseSync, plan: PagePlan): string {
   const target = readTarget(db, plan.page);
   let deleted = 0;
@@ -268,20 +299,9 @@ function writePage(db: DatabaseSync, plan: PagePlan): string {
     );
   }
 
-  // Cells in row then column order, so the stored map does not depend on the
-  // order of the description's entries.
-  const ordered = [...plan.buttons].sort(
-    (a, b) =>
-      a.location.row - b.location.row || a.location.column - b.location.column,
+  const controls = buildPageControls(plan.buttons, (button) =>
+    insertButtonControl(db, button),
   );
-  const controls: CellMap = {};
-  for (const button of ordered) {
-    const { row, column } = button.location;
-    (controls[String(row)] ??= {})[String(column)] = insertButtonControl(
-      db,
-      button,
-    );
-  }
 
   for (const gap of target.gaps) {
     insertPage(db, gap, {
@@ -292,7 +312,7 @@ function writePage(db: DatabaseSync, plan: PagePlan): string {
   }
   if (target.existing) {
     db.prepare("UPDATE pages SET value = ? WHERE id = ?").run(
-      JSON.stringify({ ...target.existing, name: plan.name, controls }),
+      JSON.stringify(buildPageRow(target.existing, plan.name, controls)),
       String(plan.page),
     );
   } else {

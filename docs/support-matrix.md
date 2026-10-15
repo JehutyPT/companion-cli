@@ -4,7 +4,7 @@
 
 What the description format covers of what Companion 5.1 stores. Export and apply cover the same surface ([ADR 0006](adr/0006-export-apply-symmetry.md)), and `npm test` fails when this file disagrees with the writers or omits an item from Companion's own lists.
 
-- **supported**: apply writes it, and export reads it back (custom variables and triggers today; pages and buttons with #19). *Field* is the description field (`action: set.value` is the `value` field of an `action: set` entry); a supported row without one is a value the writers keep or always write.
+- **supported**: apply writes it, and export reads it back (custom variables, triggers, pages and buttons). *Field* is the description field (`action: set.value` is the `value` field of an `action: set` entry); a supported row without one is a value the writers keep or always write.
 - **planned**: not in the format yet; the ticket adds it.
 - **unsupported**: not planned. Apply never writes it, export refuses content that has it, and `list` and `find` still show it.
 
@@ -33,6 +33,8 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `pages.id` | supported | `kind: page`, `page.page` | the page number |
 | `pages.name` | supported | `page.name` | a page beyond the last plus one also creates the pages in between (ADR 0004) |
 | `pages.controls` | supported | `page.buttons` | every cell of the page; each entry is a button with a cell location |
+| `pages.name (empty or missing)` | unsupported |  | a page description needs a name; set one in Companion |
+| `pages.controls (missing, shared, null or non-button cells)` | unsupported |  | a cell whose control has no row, is held by another cell or page, is null, or is not a `bank:` control |
 
 ## Button
 
@@ -46,6 +48,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | Item | Status | Field | Note |
 | --- | --- | --- | --- |
 | `options.rotaryActions` | supported |  | set when any step lists rotate actions |
+| `options.rotaryActions = false with rotate actions` | unsupported |  | rotate actions Companion ignores; apply would turn them on |
 | `options.stepProgression = "auto"` | supported |  | always written |
 | `options.stepProgression = "manual"` | planned (#24) |  |  |
 | `options.stepProgression = "expression"` | planned (#24) |  |  |
@@ -73,6 +76,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `box0.color` | supported | `button.background`, `feedback.style.background` | also as a feedback override |
 | `text0.color` | supported | `button.textColor`, `feedback.style.textColor` | also as a feedback override |
 | `text0.text` | supported | `button.text`, `feedback.style.text` | also as a feedback override |
+| `text0.text (trailing or raw line break)` | unsupported |  | a text ending in `\n`, or holding a line-feed character, does not round-trip |
 | `other layer properties` | unsupported |  |  |
 | `extra layers` | unsupported |  |  |
 | `images` | unsupported |  |  |
@@ -119,6 +123,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `feedback.isInverted` | supported | `feedback.invert` |  |
 | `feedback.isInverted (expression)` | planned (#23) |  |  |
 | `feedback.styleOverrides` | supported | `feedback.style`, `feedback.style.background`, `feedback.style.textColor`, `feedback.style.text` | on `box0.color`, `text0.color` and `text0.text` |
+| `feedback.styleOverrides (empty)` | unsupported |  | a boolean feedback that overrides no style |
 | `feedback.styleOverrides (other element properties)` | planned (#23) |  |  |
 | `feedback.disabled` | planned (#23) |  |  |
 | `feedback.headline` | planned (#23) |  |  |

@@ -51,6 +51,31 @@ export function refuse(path: string, reason: string, area?: Area): never {
   throw new ExportRefusal({ path, reason, ...(area ? { area } : {}) });
 }
 
+/** One refusal of a part of an item, such as a page's cell. */
+export interface PartRefusal {
+  /** The part in its own message: `page 20, row 0, column 1 (bank:…)`. */
+  label: string;
+  /** The part in the one-line summary: `row 0, column 1`. */
+  name: string;
+  refusal: Refusal;
+}
+
+/**
+ * Several refusals of one item, each naming its part, so one run reports
+ * everything that blocks the item.
+ */
+export class ExportRefusals extends Error {
+  override name = "ExportRefusals";
+  readonly label: string;
+  readonly parts: readonly PartRefusal[];
+
+  constructor(label: string, parts: readonly PartRefusal[]) {
+    super(`cannot export ${label}`);
+    this.label = label;
+    this.parts = parts;
+  }
+}
+
 /**
  * One `export <kind>` command. Adding an export means adding an exporter to
  * src/export/index.ts.
@@ -60,21 +85,33 @@ export interface Exporter<Item> {
   readonly kind: string;
   /** The arguments in the usage line: `[<pattern>...]`. */
   readonly arguments: string;
+  /** Options that take a value, without `--`; the usage line names them in `arguments`. */
+  readonly valueOptions?: readonly string[];
   /** The plural noun in "3 triggers cannot be exported". */
   readonly noun: string;
-  /** A usage reason when the arguments (names or patterns) are wrong. */
-  checkArgs?(args: readonly string[]): string | undefined;
+  /** A usage reason when the arguments (names or patterns) or valued options are wrong. */
+  checkArgs?(args: readonly string[], values: OptionValues): string | undefined;
   /** The items to export, in output order. Throws `not_found` when none. */
-  select(db: DatabaseSync, args: readonly string[]): Item[];
+  select(
+    db: DatabaseSync,
+    args: readonly string[],
+    values: OptionValues,
+  ): Item[];
   /** The item's name, as in the aggregated refusal. */
   name(item: Item): string;
   /** The item in messages: `trigger "Reset" (trigger:…)`. */
   label(item: Item): string;
-  /** The item's description entry, self-checked. Throws `ExportRefusal`. */
+  /**
+   * The item's description entry, self-checked. Throws `ExportRefusal`, or
+   * `ExportRefusals` to report several parts of the item.
+   */
   entry(db: DatabaseSync, item: Item): Fields;
   /** The description file holding the entries. */
-  file(entries: Fields[]): Fields;
+  file(entries: Fields[], values: OptionValues): Fields;
 }
+
+/** The valued options given, without `--`, by name. */
+export type OptionValues = Readonly<Record<string, string>>;
 
 /** A stored value's type for messages; `missing` when the key is absent. */
 export function describeStored(value: unknown): string {
@@ -226,32 +263,39 @@ function refusalMessage(label: string, refusal: Refusal): string {
   return `cannot export ${label}: ${refusal.path} ${refusal.reason}${area}`;
 }
 
-/** Every refusal as one error: the item's own message, or a summary of several. */
-function refusalError<Item>(
-  exporter: Exporter<Item>,
-  refused: { item: Item; refusal: Refusal }[],
-): CliError {
+/** At most this many refusals are named in the one-line summary. */
+const MAX_LISTED = 10;
+
+/**
+ * Every refusal as one error: the part's own message when there is one,
+ * otherwise a one-line summary naming each part (at most 10, then
+ * `and N more`), with each part's message in `items`.
+ */
+function refusalError(heading: string, refused: PartRefusal[]): CliError {
   const [first] = refused;
   if (!first) throw new Error("no refusal");
-  const items = refused.map(({ item, refusal }) => ({
-    message: refusalMessage(exporter.label(item), refusal),
-    path: refusal.path,
-  }));
+  const listed = refused
+    .slice(0, MAX_LISTED)
+    .map(({ name, refusal }) => `${name} (${refusal.path})`);
+  if (refused.length > MAX_LISTED)
+    listed.push(`and ${refused.length - MAX_LISTED} more`);
   const message =
     refused.length === 1
-      ? refusalMessage(exporter.label(first.item), first.refusal)
-      : `${refused.length} ${exporter.noun} cannot be exported: ${refused
-          .map(
-            ({ item, refusal }) =>
-              `${JSON.stringify(exporter.name(item))} (${refusal.path})`,
-          )
-          .join("; ")}`;
+      ? refusalMessage(first.label, first.refusal)
+      : `${heading}: ${listed.join("; ")}`;
   const firstHint = hint(first.refusal.area);
   return new CliError(message, {
     code: first.refusal.code ?? "export_unsupported",
     path: first.refusal.path,
     ...(firstHint ? { hint: firstHint } : {}),
-    ...(refused.length > 1 ? { items } : {}),
+    ...(refused.length > 1
+      ? {
+          items: refused.map(({ label, refusal }) => ({
+            message: refusalMessage(label, refusal),
+            path: refusal.path,
+          })),
+        }
+      : {}),
   });
 }
 
@@ -286,27 +330,48 @@ export function renderYaml(
 export function exportCommand<Item>(exporter: Exporter<Item>): ListCommand {
   return {
     flags: [],
+    ...(exporter.valueOptions ? { valueOptions: exporter.valueOptions } : {}),
     ...(exporter.checkArgs
-      ? { checkArgs: (args) => exporter.checkArgs?.(args) }
+      ? { checkArgs: (args, values) => exporter.checkArgs?.(args, values) }
       : {}),
-    run: async ({ dbPath, patterns: args, options }) => {
+    run: async ({ dbPath, patterns: args, values, options }) => {
       const { value: entries } = readDatabase(dbPath, options, (db) => {
-        const refused: { item: Item; refusal: Refusal }[] = [];
+        const items = exporter.select(db, args, values);
+        const refused: PartRefusal[] = [];
+        // Several items: count the refused items. One item refused in
+        // several parts: name the item and count its parts.
+        let heading = (count: number) =>
+          `${count} ${exporter.noun} cannot be exported`;
         const built: Fields[] = [];
-        for (const item of exporter.select(db, args)) {
+        for (const item of items) {
           try {
             built.push(exporter.entry(db, item));
           } catch (error) {
-            if (!(error instanceof ExportRefusal)) throw error;
-            refused.push({ item, refusal: error.refusal });
+            if (error instanceof ExportRefusals) {
+              refused.push(...error.parts);
+              if (items.length === 1)
+                heading = (count) =>
+                  `cannot export ${error.label}, ${count} refusals`;
+            } else if (error instanceof ExportRefusal) {
+              refused.push({
+                label: exporter.label(item),
+                name: JSON.stringify(exporter.name(item)),
+                refusal: error.refusal,
+              });
+            } else throw error;
           }
         }
-        if (refused.length > 0) throw refusalError(exporter, refused);
+        if (refused.length > 0)
+          throw refusalError(heading(refused.length), refused);
         return built;
       });
-      const description = exporter.file(entries);
+      const description = exporter.file(entries, values);
+      const kind =
+        typeof description["kind"] === "string"
+          ? description["kind"]
+          : exporter.kind;
       return {
-        text: () => renderYaml(exporter.kind, entries.length, description),
+        text: () => renderYaml(kind, entries.length, description),
         json: () => JSON.stringify(description),
       };
     },
