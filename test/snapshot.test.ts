@@ -4,9 +4,10 @@ import { basename } from "node:path";
 import { describe, it } from "node:test";
 import {
   type DatabaseCopyOptions,
+  SNAPSHOT_COPY_RETRY_DELAYS_MS,
   withDatabaseCopy,
 } from "../src/core/database.ts";
-import { CliError } from "../src/core/errors.ts";
+import { CliError, UnsupportedVersionError } from "../src/core/errors.ts";
 import { buildFixtureDb, WAL_ONLY_VARIABLE } from "./fixtures/companion-db.ts";
 import { fileState, runCli, tempDir } from "./helpers.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -117,8 +118,8 @@ describe("read snapshot: transient errors", () => {
         },
       );
       // Retried over about one second, then gave up.
+      assert.deepEqual(slept, [...SNAPSHOT_COPY_RETRY_DELAYS_MS]);
       const total = slept.reduce((sum, ms) => sum + ms, 0);
-      assert.ok(slept.length >= 3, `retried ${slept.length} times`);
       assert.ok(total >= 800 && total <= 1500, `slept ${total} ms`);
       assert.deepEqual(readdirSync(tmpdir), []);
     });
@@ -170,9 +171,7 @@ describe("read snapshot: cleanup", () => {
       tmpdir: tempDir(),
       removeDir: failingRemove,
     };
-    const failure = new CliError("from the reader", {
-      code: "unsupported_version",
-    });
+    const failure = new UnsupportedVersionError("from the reader");
     assert.throws(
       () =>
         withDatabaseCopy(dbPath, options, () => {

@@ -105,6 +105,10 @@ _Avoid_: Lint, check (a writer's `check` is one step of validating)
 Counts of how a database uses what the description format does and does not cover (control types, button options, steps, styles, actions, feedbacks, local variables, triggers, custom variables), read from a snapshot. It prints counts and keys, never values, and orders the writer extensions. The user runs it on a copy of their own database; only a summary is shared.
 _Avoid_: Stats, report, audit
 
+**Snapshot**:
+A private temporary copy of the database and its `-wal` (never `-shm`) that read commands and the dry run open instead of the database itself, so the original stays byte-identical and Companion can keep running. Deleted after use.
+_Avoid_: Backup (a backup is kept and copies all three files)
+
 **Backup**:
 A copy of the database and its WAL files taken immediately before an apply.
 

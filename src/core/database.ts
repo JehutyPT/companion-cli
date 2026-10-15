@@ -85,7 +85,7 @@ const UNREADABLE: CliErrorOptions = { code: "database_unreadable" };
  * only in the WAL is still read, and copying `-shm` while Companion runs can
  * fail on Windows' mandatory locks.
  */
-export const SNAPSHOT_FILE_SUFFIXES = ["", "-wal"] as const;
+const SNAPSHOT_FILE_SUFFIXES = ["", "-wal"] as const;
 
 /** Copy errors a running Companion, antivirus or the indexer can cause briefly. */
 const TRANSIENT_COPY_ERRORS = new Set(["EBUSY", "EPERM", "EACCES"]);
