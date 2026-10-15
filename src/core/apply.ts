@@ -49,7 +49,9 @@ import {
  *     commit only if it returns `ok`, otherwise roll back so the database
  *     content is unchanged;
  *  7. start Companion again if step 4 quit it, also after a failure in 4
- *     (except a wait timeout), 5 or 6.
+ *     (except a wait timeout), 5 or 6;
+ *  8. after a successful write and start, run `ApplyOptions.waitForRest`
+ *     (the CLI waits for Companion's REST API) and report its outcome.
  *
  * Process control goes through `ApplyOptions.processControl`; the pipeline
  * never runs commands itself.
@@ -93,6 +95,12 @@ export interface ApplyOptions {
   processControl?: ProcessControl;
   /** How long to wait for the server process to exit after a quit. */
   quitTimeoutMs?: number;
+  /**
+   * Runs after the start that follows a successful write, and only then. The
+   * CLI waits for Companion's REST API here. Must not throw: the write is
+   * committed. `null` means no wait happened.
+   */
+  waitForRest?: () => Promise<RestReadiness | null>;
   /** Directory for the temporary database copies (the read-only snapshot and a dry run's copy). Defaults to the OS temp directory. */
   tmpdir?: string;
 }
@@ -115,7 +123,12 @@ export interface ApplyResult {
   live: boolean;
   /** Live-install mode quit Companion and started it again. */
   restarted: boolean;
+  /** The wait for REST after the restart; `null` when there was none. */
+  rest: RestReadiness | null;
 }
+
+/** How the wait for Companion's REST API after a restart ended. */
+export type RestReadiness = "ready" | "timeout" | "not_configured";
 
 /** A refusal that quitting Companion resolves. */
 const COMPANION_RUNNING = {
@@ -188,7 +201,14 @@ export async function apply(
   const write = async (): Promise<ApplyResult> => {
     if (platform === "darwin") await assertNotInUse(control, dbPath);
     const written = writeStopped(dbPath, writer, plan, options);
-    return { ...written, kind: writer.kind, dbPath, live, restarted: false };
+    return {
+      ...written,
+      kind: writer.kind,
+      dbPath,
+      live,
+      restarted: false,
+      rest: null,
+    };
   };
 
   if (!live) {
@@ -255,7 +275,8 @@ export async function apply(
       },
     );
   }
-  return { ...result, restarted: true };
+  const rest = (await options.waitForRest?.()) ?? null;
+  return { ...result, restarted: true, rest };
 }
 
 /**

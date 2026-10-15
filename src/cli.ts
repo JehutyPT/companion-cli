@@ -1,6 +1,11 @@
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
-import { apply, type ApplyOptions, type ApplyResult } from "./core/apply.ts";
+import {
+  apply,
+  type ApplyOptions,
+  type ApplyResult,
+  type RestReadiness,
+} from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
 import {
   CliError,
@@ -27,11 +32,14 @@ import {
 } from "./rest/commands.ts";
 import {
   type CompanionEndpoint,
+  type ConfigDirs,
   configuredApiKey,
+  EndpointNotSetError,
   type Env,
   loadEndpoint,
   redact,
 } from "./rest/endpoint.ts";
+import { DEFAULT_REST_WAIT_MS, waitForRest } from "./rest/wait.ts";
 import { descriptionSchema } from "./schema.ts";
 import { writers } from "./writers/index.ts";
 
@@ -123,7 +131,7 @@ function synopsis(spec: RestCommandSpec): string {
 }
 
 const APPLY_SYNOPSIS =
-  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run] [--json]";
+  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run] [--json] [--rest-timeout <seconds>]";
 const LIST_KINDS = Object.keys(listCommands);
 const VALIDATE_SYNOPSIS =
   "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json]";
@@ -158,6 +166,11 @@ export const HELP = [
   "backs up and writes the database, then starts Companion again. With --db it",
   "writes that database and never stops or starts Companion; it refuses the",
   "install's database while Companion is running.",
+  "After starting Companion again, apply waits for its REST API to answer",
+  "(GET /api/v2/openapi.json every 0.5 s, using the REST settings below) for up",
+  "to 30 s, or --rest-timeout seconds; 0 skips the wait. If it does not answer",
+  "in time, apply warns on stderr and still exits 0: the write is committed.",
+  "Without REST settings it notes that and does not wait.",
   "apply --dry-run runs the same checks on a temporary copy of the database and",
   "reports the rows an apply would add, replace and remove. It writes nothing,",
   "takes no backup and never stops or starts Companion.",
@@ -217,6 +230,8 @@ export interface CliOptions extends ApplyOptions {
   cwd?: string;
   /** Per-request timeout of `list variables`' current values, in ms. Defaults to 2000. */
   restTimeoutMs?: number;
+  /** Interval between `apply`'s REST probes after a restart, in ms. Defaults to 500. */
+  restPollIntervalMs?: number;
 }
 
 /**
@@ -247,12 +262,15 @@ const READ_COMMANDS: ReadonlySet<string> = new Set([
   "schema",
 ]);
 
-/** The first word that is neither an option nor the value of `--db`. */
+/** Options that take their value as the next argument. */
+const VALUED_OPTIONS: ReadonlySet<string> = new Set(["--db", "--rest-timeout"]);
+
+/** The first word that is neither an option nor the value of a valued option. */
 function commandWord(argv: readonly string[]): string | undefined {
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index] as string;
     if (arg === "--") return argv[index + 1];
-    if (arg === "--db") index++;
+    if (VALUED_OPTIONS.has(arg)) index++;
     else if (!arg.startsWith("-")) return arg;
   }
   return undefined;
@@ -476,11 +494,12 @@ async function runApply(
       io.stdout(HELP);
       return EXIT_OK;
     }
-    const { file, db, dryRun: dry } = parsed;
+    const { file, db, dryRun: dry, restWaitMs } = parsed;
     const {
-      env: _env,
-      cwd: _cwd,
+      env,
+      cwd,
       restTimeoutMs: _timeout,
+      restPollIntervalMs,
       ...applyOptions
     } = options;
     const request = { descriptionPath: file, dbPath: db, writers };
@@ -490,21 +509,68 @@ async function runApply(
       else for (const line of renderDryRun(result)) io.stdout(line);
       return EXIT_OK;
     }
+    const log = applyOptions.log ?? (json ? io.stderr : io.stdout);
     const result = await apply(request, {
       ...applyOptions,
-      log: applyOptions.log ?? (json ? io.stderr : io.stdout),
+      log,
+      waitForRest: () =>
+        waitAfterRestart(restWaitMs, log, restPollIntervalMs, {
+          env: env ?? process.env,
+          dirs: {
+            cwd: cwd ?? process.cwd(),
+            homedir: options.homedir ?? homedir(),
+          },
+        }),
     });
-    io.stdout(json ? applyJson(result) : result.summary);
+    const warnings =
+      result.rest === "timeout"
+        ? [
+            `warning: Companion started; REST not ready after ${restWaitMs / 1000}s`,
+          ]
+        : [];
+    for (const warning of warnings) io.stderr(warning);
+    io.stdout(json ? applyJson(result, warnings) : result.summary);
     return EXIT_OK;
   } catch (error) {
     return failure(io, json, error);
   }
 }
 
+/**
+ * Step 8 of the apply pipeline: waits up to `timeoutMs` for Companion's REST
+ * API after a restart, logging the outcome. Never throws.
+ */
+async function waitAfterRestart(
+  timeoutMs: number,
+  log: (line: string) => void,
+  intervalMs: number | undefined,
+  config: { env: Env; dirs: ConfigDirs },
+): Promise<RestReadiness | null> {
+  if (timeoutMs === 0) return null;
+  let endpoint: CompanionEndpoint;
+  try {
+    endpoint = loadEndpoint(config.env, config.dirs);
+  } catch (error) {
+    const reason =
+      error instanceof EndpointNotSetError
+        ? ""
+        : ` (${redact(errorMessage(error), configuredApiKey(config.env, config.dirs))})`;
+    log(`note: REST not configured; not waiting for Companion's API${reason}`);
+    return "not_configured";
+  }
+  const outcome = await waitForRest(endpoint, timeoutMs, intervalMs);
+  if (outcome.status === "ready") {
+    log(`Companion REST ready after ${(outcome.elapsedMs / 1000).toFixed(1)}s`);
+  }
+  return outcome.status;
+}
+
 interface ApplyCommandLine {
   file: string;
   db: string | undefined;
   dryRun: boolean;
+  /** How long to wait for REST after a restart, in ms; 0 skips the wait. */
+  restWaitMs: number;
 }
 
 /** Parses an `apply` command line. Throws a `usage` CliError on a bad one. */
@@ -519,6 +585,7 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
         db: { type: "string" },
         "dry-run": { type: "boolean" },
         json: { type: "boolean" },
+        "rest-timeout": { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -527,6 +594,12 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
   }
   const { values, positionals } = parsed;
   if (values.help) return "help";
+  const timeout = values["rest-timeout"];
+  if (timeout !== undefined && !/^\d+(\.\d+)?$/.test(timeout)) {
+    throw usageFailure(
+      `--rest-timeout needs a number of seconds, 0 or more, got "${timeout}"`,
+    );
+  }
   const [command, file, ...extra] = positionals;
   if (command !== "apply") {
     throw usageFailure(
@@ -539,11 +612,19 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
     throw usageFailure("apply takes exactly one description file");
   }
   if (values.db === "") throw usageFailure("--db needs a path");
-  return { file, db: values.db, dryRun: values["dry-run"] === true };
+  return {
+    file,
+    db: values.db,
+    dryRun: values["dry-run"] === true,
+    restWaitMs:
+      timeout === undefined
+        ? DEFAULT_REST_WAIT_MS
+        : Math.round(Number(timeout) * 1000),
+  };
 }
 
 /** The `apply --json` document of a real apply. */
-function applyJson(result: ApplyResult): string {
+function applyJson(result: ApplyResult, warnings: readonly string[]): string {
   return JSON.stringify({
     applied: true,
     kind: result.kind,
@@ -552,8 +633,8 @@ function applyJson(result: ApplyResult): string {
     live: result.live,
     backup: result.backupDir,
     restarted: result.restarted,
-    // Filled by the wait for REST after a restart (#30).
-    rest: null,
+    rest: result.rest,
+    warnings,
   });
 }
 

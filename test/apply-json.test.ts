@@ -25,6 +25,8 @@ variables:
 
 const NOW = () => new Date("2026-10-14T12:34:56.789Z");
 const QUIT_HINT = "quit Companion and retry";
+const NOT_CONFIGURED =
+  "note: REST not configured; not waiting for Companion's API";
 
 /** A temporary home with a fixture database at the install path. */
 function fakeHome(yaml = VARIABLES_YAML) {
@@ -301,6 +303,7 @@ describe("apply --json: a real apply prints one result document", () => {
       backup,
       restarted: false,
       rest: null,
+      warnings: [],
     });
     assert.deepEqual(result.stderr, [`backup: ${backup}`]);
     assert.deepEqual(fake.calls, ["check", "holders"]);
@@ -326,12 +329,15 @@ describe("apply --json: a real apply prints one result document", () => {
       live: true,
       backup,
       restarted: true,
-      rest: null,
+      // The test environment has no REST settings.
+      rest: "not_configured",
+      warnings: [],
     });
     assert.deepEqual(result.stderr, [
       "quitting Companion",
       `backup: ${backup}`,
       "starting Companion",
+      NOT_CONFIGURED,
     ]);
     assert.deepEqual(fake.calls, ["check", "quit", "wait", "holders", "start"]);
   });
@@ -364,6 +370,7 @@ describe("apply --json: a real apply prints one result document", () => {
       "quitting Companion",
       `backup: ${backupDir(dbPath)}`,
       "starting Companion",
+      NOT_CONFIGURED,
       "custom variables: 1 created, 0 replaced",
     ]);
     assert.deepEqual(result.stderr, []);

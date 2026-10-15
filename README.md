@@ -43,6 +43,7 @@ node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
 node dist/bin/companion-cli.js apply variables.yaml --dry-run                 # report only, write nothing
 node dist/bin/companion-cli.js apply variables.yaml --dry-run --json          # the same report as JSON
 node dist/bin/companion-cli.js apply variables.yaml --json                    # the result, or any failure, as JSON
+node dist/bin/companion-cli.js apply variables.yaml --rest-timeout 60        # wait up to 60 s for REST after the restart
 ```
 
 `npm link` (after `npm run build`) puts `companion-cli` on your `PATH`, so it runs from any directory. The REST commands then need the user config file; see [Setup](#setup).
@@ -61,6 +62,8 @@ variables:
 `apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Backups always sit next to the database being written, including the install's: `~/Library/Application Support/companion/v5.1/companion-cli-backups/<timestamp>/`.
 
 Without `--db`, `apply` targets the install's database, `~/Library/Application Support/companion/v5.1/db.sqlite` (macOS only; other platforms are refused). After the file and the snapshot checks pass, it quits Companion if its server is running (`osascript -e 'quit app "Companion"'`), waits up to 30 seconds for the server process to exit, backs up and writes, then starts Companion again (`open -a Companion`), also after a failed write. If Companion was not running, it is neither quit nor started. If the server does not exit in time, nothing is written and Companion may be partly stopped. If the write succeeds but Companion does not start, the apply fails with a reason saying the change was written and Companion must be started manually.
+
+After starting Companion again following a successful write, `apply` waits for Companion's REST API so that the next runtime command does not race its startup. It reads the endpoint as the [runtime commands](#runtime-commands-rest-helper) do and polls `GET /api/v2/openapi.json` every 0.5 s. A 2xx, 401 or 403 counts as ready (the route answers 403 while REST API v2 is disabled, Companion's default); any other status, a refused connection or a probe that does not answer keeps polling. When it answers, apply logs `Companion REST ready after <N>s`. After 30 s, or `--rest-timeout <seconds>` (a number, fractions allowed; 0 skips the wait), it prints `warning: Companion started; REST not ready after <N>s` on stderr and still exits 0, because the write is committed. Without `COMPANION_URL` and `COMPANION_API_KEY`, or with invalid ones, it logs `note: REST not configured; not waiting for Companion's API` (with the reason for an invalid setting) and does not wait. There is no wait with `--db`, in a dry run, when Companion was not running beforehand, or when it did not start again.
 
 With `--db`, `apply` never quits or starts Companion. It refuses to write the install's database (through `~`, symlinks or hard links too) while Companion is running, or when it cannot tell whether Companion is running.
 
@@ -83,10 +86,10 @@ When nothing would change it prints `no changes`. Generated ids do not count as 
 `apply --json`, with or without `--dry-run`, makes stdout machine-readable: exactly one JSON document, success or failure. A real apply prints, when it finishes:
 
 ```json
-{"applied": true, "kind": "variables", "summary": "<the summary line>", "database": "/path/to/db.sqlite", "live": true, "backup": "/path/to/companion-cli-backups/<timestamp>", "restarted": true, "rest": null}
+{"applied": true, "kind": "variables", "summary": "<the summary line>", "database": "/path/to/db.sqlite", "live": true, "backup": "/path/to/companion-cli-backups/<timestamp>", "restarted": true, "rest": "ready", "warnings": []}
 ```
 
-`live` is false with `--db`. `restarted` is true only when live-install mode quit Companion and started it again. `rest` is reserved and always `null` for now. The progress lines (`quitting Companion`, `backup: …`, `starting Companion`) go to stderr instead of stdout. Any failure, a bad command line included, is one [JSON error document](#read-commands) on stdout with nothing on stderr apart from progress lines already printed, and the exit code is unchanged. Nothing is streamed: the document comes once, at the end.
+`live` is false with `--db`. `restarted` is true only when live-install mode quit Companion and started it again. `rest` is the outcome of the wait for REST after the restart: `"ready"`, `"timeout"` or `"not_configured"`, and `null` when there was no wait (no restart, or `--rest-timeout 0`). `warnings` lists the warning lines, which also go to stderr: the REST timeout warning, or none. The progress lines (`quitting Companion`, `backup: …`, `starting Companion`, and the REST ready line or note) go to stderr instead of stdout. Any failure, a bad command line included, is one [JSON error document](#read-commands) on stdout with nothing on stderr apart from progress lines already printed, and the exit code is unchanged. Nothing is streamed: the document comes once, at the end.
 
 `button.yaml` replaces the button at one location:
 

@@ -16,6 +16,9 @@ export type Env = Readonly<Record<string, string | undefined>>;
 
 export const ENV_FILE = ".env.local";
 
+/** `COMPANION_URL` or `COMPANION_API_KEY` is not set anywhere. */
+export class EndpointNotSetError extends CliError {}
+
 /** Hostnames (in `URL.hostname` form) that count as the local machine. */
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -48,7 +51,7 @@ export function loadEndpoint(env: Env, dirs: ConfigDirs): CompanionEndpoint {
   const value = (name: string): string => {
     const text = env[name] ?? file[name];
     if (!text) {
-      throw new CliError(
+      throw new EndpointNotSetError(
         `${name} is not set: set it in ${ENV_FILE}, ${userEnvFile(env, dirs.homedir)} or the environment`,
       );
     }

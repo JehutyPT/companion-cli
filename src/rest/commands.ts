@@ -146,6 +146,30 @@ export function variableBody(value: string, forceString: boolean): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Whether Companion's web server answers: `GET /api/v2/openapi.json`, served
+ * before auth. A 2xx, 401 or 403 (REST API v2 disabled, its default) shows the
+ * server is up. Any other status or any request failure is `false`; this
+ * never throws.
+ */
+export async function probeRest(
+  endpoint: CompanionEndpoint,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    const { status } = await send(
+      endpoint,
+      "GET",
+      "/api/v2/openapi.json",
+      undefined,
+      timeoutMs,
+    );
+    return (status >= 200 && status < 300) || status === 401 || status === 403;
+  } catch {
+    return false;
+  }
+}
+
 export async function listSurfaces(
   endpoint: CompanionEndpoint,
 ): Promise<string[]> {
