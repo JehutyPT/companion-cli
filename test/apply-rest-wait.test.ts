@@ -255,6 +255,15 @@ describe("apply waits for REST after starting Companion", () => {
     assert.deepEqual(paths, []);
   });
 
+  it("a tiny positive --rest-timeout still waits", async () => {
+    responder = () => {};
+    const result = await applyWithWait({
+      args: ["--rest-timeout", "0.0001", "--json"],
+    });
+    assert.equal(jsonDoc(result)["rest"], "timeout");
+    assert.ok(paths.length <= 1);
+  });
+
   it("--rest-timeout 0 makes no request and leaves rest null", async () => {
     const result = await applyWithWait({
       args: ["--rest-timeout", "0", "--json"],

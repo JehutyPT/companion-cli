@@ -4,6 +4,11 @@ import type { CompanionEndpoint } from "./endpoint.ts";
 
 export const DEFAULT_REST_WAIT_MS = 30_000;
 export const DEFAULT_REST_POLL_MS = 500;
+/**
+ * The longest one probe may take. Keeps each probe's abort timer short and
+ * within the range timers accept, however long the whole wait is.
+ */
+const MAX_PROBE_MS = 5_000;
 
 export type RestWait =
   { status: "ready"; elapsedMs: number } | { status: "timeout" };
@@ -24,7 +29,8 @@ export async function waitForRest(
   for (;;) {
     let remaining = left();
     if (remaining <= 0) return { status: "timeout" };
-    if (await probeRest(endpoint, Math.max(1, Math.ceil(remaining)))) {
+    const probeMs = Math.min(MAX_PROBE_MS, Math.max(1, Math.ceil(remaining)));
+    if (await probeRest(endpoint, probeMs)) {
       return { status: "ready", elapsedMs: performance.now() - started };
     }
     remaining = left();

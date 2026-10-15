@@ -619,7 +619,8 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
     restWaitMs:
       timeout === undefined
         ? DEFAULT_REST_WAIT_MS
-        : Math.round(Number(timeout) * 1000),
+        : // Up: only 0 itself skips the wait.
+          Math.ceil(Number(timeout) * 1000),
   };
 }
 
