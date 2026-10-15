@@ -3,6 +3,7 @@
  * name. A row whose value is not a JSON object is not a variable Companion
  * can load and is skipped. `defaultValue` is shown as stored: for a persisted
  * variable it is Companion's current value (docs/companion-internals.md).
+ * `currentValue` comes from the running Companion (./current-values.ts).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
@@ -13,6 +14,8 @@ export interface ListedVariable {
   name: string;
   /** The stored `defaultValue`; `null` when the row has none. */
   defaultValue: unknown;
+  /** The value Companion holds now, as REST returns it; `null` when not read. */
+  currentValue: string | null;
   persistCurrentValue: boolean;
   description: string;
   sortOrder: number | null;
@@ -29,6 +32,7 @@ function readVariables(db: DatabaseSync): ListedVariable[] {
     variables.push({
       name: String(row["id"]),
       defaultValue: defaultValue ?? null,
+      currentValue: null,
       persistCurrentValue: persistCurrentValue === true,
       description: typeof description === "string" ? description : "",
       sortOrder: typeof sortOrder === "number" ? sortOrder : null,
@@ -53,6 +57,13 @@ export const variablesLister: Lister<ListedVariable> = {
       cell: (variable) => JSON.stringify(variable.defaultValue),
     },
     {
+      header: "CURRENT",
+      cell: (variable) =>
+        variable.currentValue === null
+          ? "-"
+          : JSON.stringify(variable.currentValue),
+    },
+    {
       header: "PERSIST",
       cell: (variable) => yesNo(variable.persistCurrentValue),
     },
@@ -61,6 +72,7 @@ export const variablesLister: Lister<ListedVariable> = {
   json: (variable) => ({
     name: variable.name,
     defaultValue: variable.defaultValue,
+    currentValue: variable.currentValue,
     persistCurrentValue: variable.persistCurrentValue,
     description: variable.description,
     sortOrder: variable.sortOrder,

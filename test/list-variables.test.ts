@@ -39,17 +39,27 @@ function ok(result: CliRun): string[] {
   return result.stdout;
 }
 
+/**
+ * `--db` skips current values (test/list-variables-current.test.ts covers
+ * them), so every value is `-`/`null` and the output says why.
+ */
+const DB_NOTE = "current values are only read for the install's database";
+const DB_NOTE_LINE = `note: ${DB_NOTE}`;
+const SKIPPED = { values: "skipped", note: DB_NOTE };
+
 const STANDARD_TEXT = [
-  "NAME        DEFAULT  PERSIST  DESCRIPTION",
-  "fx_counter  0        no       Counter",
-  'fx_label    "idle"   yes      Label',
-  'fx_gap      ""       no       A custom variable',
+  "NAME        DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+  "fx_counter  0        -        no       Counter",
+  'fx_label    "idle"   -        yes      Label',
+  'fx_gap      ""       -        no       A custom variable',
+  DB_NOTE_LINE,
 ];
 
 const STANDARD_JSON = [
   {
     name: "fx_counter",
     defaultValue: 0,
+    currentValue: null,
     persistCurrentValue: false,
     description: "Counter",
     sortOrder: 0,
@@ -57,6 +67,7 @@ const STANDARD_JSON = [
   {
     name: "fx_label",
     defaultValue: "idle",
+    currentValue: null,
     persistCurrentValue: true,
     description: "Label",
     sortOrder: 1,
@@ -64,6 +75,7 @@ const STANDARD_JSON = [
   {
     name: "fx_gap",
     defaultValue: "",
+    currentValue: null,
     persistCurrentValue: false,
     description: "A custom variable",
     sortOrder: 5,
@@ -90,6 +102,7 @@ describe("list variables", () => {
     assert.deepEqual(JSON.parse(stdout[0] ?? ""), {
       database: env.dbPath,
       variables: STANDARD_JSON,
+      ...SKIPPED,
     });
   });
 
@@ -105,33 +118,39 @@ describe("list variables", () => {
     const env = setup();
     assert.deepEqual(ok(await listVariables(env, ["fx_*"])), STANDARD_TEXT);
     assert.deepEqual(ok(await listVariables(env, ["fx_label"])), [
-      "NAME      DEFAULT  PERSIST  DESCRIPTION",
-      'fx_label  "idle"   yes      Label',
+      "NAME      DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      'fx_label  "idle"   -        yes      Label',
+      DB_NOTE_LINE,
     ]);
     assert.deepEqual(ok(await listVariables(env, ["fx_gap", "*counter"])), [
-      "NAME        DEFAULT  PERSIST  DESCRIPTION",
-      "fx_counter  0        no       Counter",
-      'fx_gap      ""       no       A custom variable',
+      "NAME        DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      "fx_counter  0        -        no       Counter",
+      'fx_gap      ""       -        no       A custom variable',
+      DB_NOTE_LINE,
     ]);
     assert.deepEqual(ok(await listVariables(env, ["nomatch*"])), [
-      "NAME  DEFAULT  PERSIST  DESCRIPTION",
+      "NAME  DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      DB_NOTE_LINE,
     ]);
     const json = ok(await listVariables(env, ["nomatch*", "--json"]));
     assert.deepEqual(JSON.parse(json[0] ?? ""), {
       database: env.dbPath,
       variables: [],
+      ...SKIPPED,
     });
   });
 
   it("an empty table prints only the header, or an empty list", async () => {
     const env = setup({}, (db) => db.exec("DELETE FROM custom_variables"));
     assert.deepEqual(ok(await listVariables(env)), [
-      "NAME  DEFAULT  PERSIST  DESCRIPTION",
+      "NAME  DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      DB_NOTE_LINE,
     ]);
     const json = ok(await listVariables(env, ["--json"]));
     assert.deepEqual(JSON.parse(json[0] ?? ""), {
       database: env.dbPath,
       variables: [],
+      ...SKIPPED,
     });
   });
 
@@ -142,6 +161,7 @@ describe("list variables", () => {
       seed(db, "zero_number", { defaultValue: 0, sortOrder: 1 });
       seed(db, "zero_string", {
         defaultValue: "0",
+        currentValue: null,
         description: "two\nlines",
         sortOrder: 1,
       });
@@ -150,17 +170,19 @@ describe("list variables", () => {
       seed(db, "not_an_object", "just text");
     });
     assert.deepEqual(ok(await listVariables(env)), [
-      "NAME         DEFAULT                                   PERSIST  DESCRIPTION",
-      'long         "A description that is much longer than…  no       A description that is much longer than …',
-      "zero_number  0                                         no",
-      'zero_string  "0"                                       no       two\\nlines',
-      "unordered    true                                      no",
+      "NAME         DEFAULT                                   CURRENT  PERSIST  DESCRIPTION",
+      'long         "A description that is much longer than…  -        no       A description that is much longer than …',
+      "zero_number  0                                         -        no",
+      'zero_string  "0"                                       -        no       two\\nlines',
+      "unordered    true                                      -        no",
+      DB_NOTE_LINE,
     ]);
     const json = JSON.parse(ok(await listVariables(env, ["--json"]))[0] ?? "");
     assert.deepEqual(json.variables, [
       {
         name: "long",
         defaultValue: long,
+        currentValue: null,
         persistCurrentValue: false,
         description: long,
         sortOrder: 0,
@@ -168,6 +190,7 @@ describe("list variables", () => {
       {
         name: "zero_number",
         defaultValue: 0,
+        currentValue: null,
         persistCurrentValue: false,
         description: "",
         sortOrder: 1,
@@ -175,6 +198,7 @@ describe("list variables", () => {
       {
         name: "zero_string",
         defaultValue: "0",
+        currentValue: null,
         persistCurrentValue: false,
         description: "two\nlines",
         sortOrder: 1,
@@ -182,6 +206,7 @@ describe("list variables", () => {
       {
         name: "unordered",
         defaultValue: true,
+        currentValue: null,
         persistCurrentValue: false,
         description: "",
         sortOrder: null,
@@ -193,13 +218,15 @@ describe("list variables", () => {
     const env = setup({ wal: true });
     const stdout = ok(await listVariables(env, ["fx_wal*"]));
     assert.deepEqual(stdout, [
-      "NAME         DEFAULT  PERSIST  DESCRIPTION",
-      "fx_wal_only  1        no       WAL only",
+      "NAME         DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      "fx_wal_only  1        -        no       WAL only",
+      DB_NOTE_LINE,
     ]);
     const json = JSON.parse(ok(await listVariables(env, ["--json"]))[0] ?? "");
     assert.deepEqual(json.variables.at(-1), {
       name: WAL_ONLY_VARIABLE.name,
       ...WAL_ONLY_VARIABLE.value,
+      currentValue: null,
     });
   });
 });

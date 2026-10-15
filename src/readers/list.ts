@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { matchesNamePatterns } from "../core/patterns.ts";
 import { type ReadOptions, readDatabase } from "../core/read.ts";
+import type { Env } from "../rest/endpoint.ts";
 
 /**
  * A lister reads one kind of stored item for `list <kind>`. It plugs into the
@@ -35,8 +36,46 @@ export interface Column<Item> {
 export interface Listing<Item> {
   database: string;
   items: Item[];
-  /** The lister's document-level JSON fields. */
+  /** The document-level JSON fields: the lister's, then any extension's. */
   document: Record<string, unknown>;
+  /** Lines after the text table. */
+  notes?: readonly string[];
+}
+
+/** What a `list` command reads with, beyond the database read options. */
+export interface ListOptions extends ReadOptions {
+  /** Environment for the REST endpoint. */
+  env: Env;
+  /** Directory holding `.env.local`. */
+  cwd: string;
+  /** The user's home directory, for the user config file. */
+  homedir: string;
+  /** Per-request REST timeout in milliseconds. */
+  restTimeoutMs?: number;
+}
+
+/** One `list <kind>` command line, parsed. */
+export interface ListRequest {
+  /** `--db`, when given. */
+  dbPath: string | undefined;
+  patterns: readonly string[];
+  /** The kind-specific boolean options given, without `--`. */
+  flags: ReadonlySet<string>;
+  options: ListOptions;
+}
+
+/**
+ * A step after the database read that adds to the listing (`list variables`'
+ * current values). It must not throw for anything but a bug: the database
+ * read already succeeded.
+ */
+export interface ListExtension<Item> {
+  /** Kind-specific boolean options it reads, without `--`. */
+  readonly flags: readonly string[];
+  complete(
+    listing: Listing<Item>,
+    request: ListRequest,
+  ): Promise<Listing<Item>>;
 }
 
 /** Reads the items whose name matches `patterns` (all items when none). */
@@ -60,13 +99,16 @@ export function renderListing<Item>(
   lister: Lister<Item>,
   listing: Listing<Item>,
 ): string[] {
-  return renderTable(
-    lister.columns.map((column) => column.header),
-    listing.items.map((item) =>
-      lister.columns.map((column) => column.cell(item)),
+  return [
+    ...renderTable(
+      lister.columns.map((column) => column.header),
+      listing.items.map((item) =>
+        lister.columns.map((column) => column.cell(item)),
+      ),
+      lister.columns.map((column) => column.maxLength ?? MAX_CELL_LENGTH),
     ),
-    lister.columns.map((column) => column.maxLength ?? MAX_CELL_LENGTH),
-  );
+    ...(listing.notes ?? []),
+  ];
 }
 
 /** The `--json` document. */
@@ -83,17 +125,25 @@ export function listingJson<Item>(
 
 /** A `list <kind>` command: reads once, then renders as text or JSON. */
 export interface ListCommand {
-  run(
-    dbPath: string | undefined,
-    patterns: readonly string[],
-    options: ReadOptions,
-  ): { text(): string[]; json(): string };
+  /** Kind-specific boolean options, without `--`. */
+  readonly flags: readonly string[];
+  run(request: ListRequest): Promise<{ text(): string[]; json(): string }>;
 }
 
-export function listCommand<Item>(lister: Lister<Item>): ListCommand {
+export function listCommand<Item>(
+  lister: Lister<Item>,
+  extension?: ListExtension<Item>,
+): ListCommand {
   return {
-    run: (dbPath, patterns, options) => {
-      const listing = list(lister, dbPath, patterns, options);
+    flags: extension?.flags ?? [],
+    run: async (request) => {
+      let listing = list(
+        lister,
+        request.dbPath,
+        request.patterns,
+        request.options,
+      );
+      if (extension) listing = await extension.complete(listing, request);
       return {
         text: () => renderListing(lister, listing),
         json: () => listingJson(lister, listing),

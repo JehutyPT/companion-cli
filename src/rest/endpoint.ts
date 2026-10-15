@@ -121,3 +121,13 @@ function readEnvFile(
   }
   return parseEnv(text);
 }
+
+/** Removes the API key, and each line of a multi-line key, from `text`. */
+export function redact(text: string, key: string | undefined): string {
+  if (!key) return text;
+  let out = text.replaceAll(key, "[redacted]");
+  for (const part of key.split(/[\r\n]+/)) {
+    if (part.length >= 4) out = out.replaceAll(part, "[redacted]");
+  }
+  return out;
+}

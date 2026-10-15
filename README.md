@@ -191,7 +191,8 @@ valid: page 99 "SKAARHOJ TEST" (47 buttons) (structure only; not checked against
 These read the database and print what is stored, one line per item:
 
 ```sh
-companion-cli list variables                      # the local install (macOS)
+companion-cli list variables                      # the local install (macOS), with current values
+companion-cli list variables --no-current         # database values only, no REST request
 companion-cli list variables 'fx_*' --db /path/to/copy/db.sqlite
 companion-cli list triggers 'Reset*' 'Tick' --json
 companion-cli list connections
@@ -199,20 +200,30 @@ companion-cli list pages 'SKAARHOJ*'
 ```
 
 ```
-$ companion-cli list variables --db fixture.sqlite
-NAME        DEFAULT  PERSIST  DESCRIPTION
-fx_counter  0        no       Counter
-fx_label    "idle"   yes      Label
-fx_gap      ""       no       A custom variable
+$ companion-cli list variables
+NAME        DEFAULT  CURRENT  PERSIST  DESCRIPTION
+fx_counter  0        "3"      no       Counter
+fx_label    "idle"   "busy"   yes      Label
+fx_gap      ""       ""       no       A custom variable
 ```
 
 A read command copies the database and its WAL files to a temporary directory, checks the copy (`pragma integrity_check`, then the version guard), reads it and deletes it. It writes nothing, never stops or starts Companion and works while Companion runs, including on the install's database. Without `--db` it reads the install's database (macOS only).
 
-- `list variables`: ordered by sort order, then name. `DEFAULT` is the stored value as JSON, so `"0"` and `0` differ; for a persisted variable it is Companion's current value.
+- `list variables`: ordered by sort order, then name. `DEFAULT` is the stored value as JSON, so `"0"` and `0` differ; for a persisted variable it is Companion's current value. `CURRENT` is the value the running Companion holds now (see below).
 - `list triggers`: ordered by sort order, then id. `EVENTS` summarises each event (`startup 0ms`, `interval 5s`, `var fx_counter`, or the bare type for other events), with ` (off)` after a disabled one. `ACTIONS` is the action count, with ` +cond` when the trigger has a condition. The id is shown because trigger names are not unique.
 - `list connections`: Companion's built-in `internal` connection first, then the connections in Companion's order (sort order, then id), matched by label. `BUTTONS` counts the buttons on loaded pages and `TRIGGERS` the triggers that use the connection, through an action, feedback or condition (by id) or a `$(<label>:...)` reference; each control counts once. A connection id that a control uses but no connection has is listed last as `?` with module `(missing)`. Connection configuration and secrets are never printed. Surface instances are not listed.
 - `list pages`: the pages Companion loads (1, 2, … up to the first missing one), matched by name. `BUTTONS` counts the occupied cells, `CONNECTIONS` names the connections the page's controls use, and `LABELS` shows the first three cells in row, then column order: a button's text quoted and cut to 20 characters, `<pageup>` and the like for other control types, `<missing>` for a cell whose control is gone. With `--json` every cell is listed, and `unloadedRows` names the numbered page rows Companion does not load.
 - Text cells longer than 40 characters are cut to 39 and end with `…` (`LABELS` is not cut, its entries already are); line breaks show as `\n`. `--json` prints one document with full values: `{"database": ..., "<kind>": [...]}`, such as `{"database": ..., "variables": [...]}`.
+
+**Current values.** After the database read, `list variables` asks the running Companion for each listed variable's value (`GET /api/custom-variable/<name>/value`), one request at a time with a 2 s timeout each and no retries, using the settings described under [Runtime commands](#runtime-commands-rest-helper). Only the variables the patterns match are asked for. REST returns text, so `CURRENT` is a quoted string and `currentValue` in JSON a string; a variable Companion does not know shows `-` (`null`). The REST part never fails the command and never touches Companion's process:
+
+- **Read** (`"values": "live"`): every listed variable was asked for.
+- **Unavailable** (`"values": "unavailable"`): the settings are missing or invalid (`"reason": "not_configured"`); Companion refused the connection, timed out or answered unexpectedly (`not_reachable`); or it refused the request with 401 or 403 (`unauthorised`; a 403 means its HTTP API is disabled). Every value is then `-` (`null`), even ones read before the failure. JSON adds `note` (why, in one line) and `reason`; text output adds `note: current values unavailable (<why>); showing database values only` after the table.
+- **Skipped** (`"values": "skipped"`): `--no-current` makes no request and adds no note. `--db` makes no request either, because the running Companion's values do not belong to another database file; it adds the note `current values are only read for the install's database` (a `note:` line in text, `note` in JSON).
+
+```json
+{"database": "...", "variables": [{"name": "fx_counter", "defaultValue": 0, "currentValue": "3", "persistCurrentValue": false, "description": "Counter", "sortOrder": 0}], "values": "live"}
+```
 
 **Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
 

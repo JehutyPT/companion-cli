@@ -29,6 +29,7 @@ import {
   configuredApiKey,
   type Env,
   loadEndpoint,
+  redact,
 } from "./rest/endpoint.ts";
 import { writers } from "./writers/index.ts";
 
@@ -122,9 +123,17 @@ function synopsis(spec: RestCommandSpec): string {
 const APPLY_SYNOPSIS =
   "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run [--json]]";
 const LIST_KINDS = Object.keys(listCommands);
-const LIST_SYNOPSIS = `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`;
 const VALIDATE_SYNOPSIS =
   "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json]";
+/** Every kind-specific boolean option of any `list` kind, without `--`. */
+const LIST_FLAGS = [
+  ...new Set(Object.values(listCommands).flatMap((command) => command.flags)),
+];
+/** One line for every kind; HELP says which kind takes which option. */
+const LIST_SYNOPSIS = [
+  `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`,
+  ...LIST_FLAGS.map((flag) => `[--${flag}]`),
+].join(" ");
 const SYNOPSES = [
   APPLY_SYNOPSIS,
   VALIDATE_SYNOPSIS,
@@ -160,6 +169,10 @@ export const HELP = [
   "Read commands read a temporary copy of the database: they write nothing,",
   "never stop or start Companion and work while it runs. --json prints one",
   "JSON document, and any failure as one JSON error document on stdout.",
+  "list variables also asks the running Companion for each listed variable's",
+  "current value (CURRENT, currentValue), one request at a time. If it cannot,",
+  "it still succeeds from the database and adds a note saying why. --no-current",
+  "skips this, and so does --db: another database's values are not Companion's.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory or, if there is none, from ~/.config/companion-cli/.env.local",
@@ -189,6 +202,8 @@ export interface CliOptions extends ApplyOptions {
   env?: Env;
   /** Directory holding `.env.local`. Defaults to `process.cwd()`. */
   cwd?: string;
+  /** Per-request timeout of `list variables`' current values, in ms. Defaults to 2000. */
+  restTimeoutMs?: number;
 }
 
 /**
@@ -252,8 +267,18 @@ async function runRead(
       io.stdout(HELP);
       return EXIT_OK;
     }
-    const { command, patterns, db } = parsed;
-    const result = command.run(db, patterns, options);
+    const { command, patterns, db, flags } = parsed;
+    const result = await command.run({
+      dbPath: db,
+      patterns,
+      flags,
+      options: {
+        ...options,
+        env: options.env ?? process.env,
+        cwd: options.cwd ?? process.cwd(),
+        homedir: options.homedir ?? homedir(),
+      },
+    });
     if (json) io.stdout(result.json());
     else for (const line of result.text()) io.stdout(line);
     return EXIT_OK;
@@ -270,6 +295,8 @@ interface ReadCommandLine {
   command: ListCommand;
   patterns: string[];
   db: string | undefined;
+  /** Kind-specific boolean options given, without `--`. */
+  flags: ReadonlySet<string>;
 }
 
 /** Parses a `list` command line. Throws a `usage` CliError on a bad one. */
@@ -284,6 +311,9 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
         db: { type: "string" },
         json: { type: "boolean" },
         help: { type: "boolean", short: "h" },
+        ...Object.fromEntries(
+          LIST_FLAGS.map((flag) => [flag, { type: "boolean" as const }]),
+        ),
       },
     });
   } catch (error) {
@@ -306,7 +336,15 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
     throw usageFailure("a name pattern must not be empty");
   }
   if (values.db === "") throw usageFailure("--db needs a path");
-  return { command, patterns, db: values.db };
+  const flags = new Set(
+    LIST_FLAGS.filter((flag) => (values as Record<string, unknown>)[flag]),
+  );
+  for (const flag of flags) {
+    if (!command.flags.includes(flag)) {
+      throw usageFailure(`--${flag} is not valid with list ${kind}`);
+    }
+  }
+  return { command, patterns, db: values.db, flags };
 }
 
 interface ValidateCommandLine {
@@ -401,7 +439,12 @@ async function runApply(
     return usageError(io, "--json is only valid with --dry-run");
   }
 
-  const { env: _env, cwd: _cwd, ...applyOptions } = options;
+  const {
+    env: _env,
+    cwd: _cwd,
+    restTimeoutMs: _timeout,
+    ...applyOptions
+  } = options;
   try {
     if (values["dry-run"]) {
       const result = dryRun(
@@ -543,14 +586,4 @@ function segment(field: string, text: string): string {
 function usageError(io: CliIo, reason: string): number {
   io.stderr(`error: ${reason}. ${USAGE}`);
   return EXIT_USAGE;
-}
-
-/** Removes the API key, and each line of a multi-line key, from `text`. */
-function redact(text: string, key: string | undefined): string {
-  if (!key) return text;
-  let out = text.replaceAll(key, "[redacted]");
-  for (const part of key.split(/[\r\n]+/)) {
-    if (part.length >= 4) out = out.replaceAll(part, "[redacted]");
-  }
-  return out;
 }

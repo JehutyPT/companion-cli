@@ -64,6 +64,52 @@ export async function getVariable(
   throw variableError(reply, name);
 }
 
+/** What `readVariableValue` found. */
+export type VariableRead =
+  | { outcome: "value"; value: string }
+  /** Companion answered 404: it has no such custom variable. */
+  | { outcome: "missing" }
+  /** Companion refused the request: 401, or 403 (its HTTP API is disabled). */
+  | { outcome: "unauthorised"; message: string }
+  /** No usable answer: refused, timed out, redirected or another status. */
+  | { outcome: "not_reachable"; message: string };
+
+/**
+ * `getVariable`'s request with a timeout, returning the outcome instead of
+ * throwing, for callers that must not fail when Companion does not answer.
+ */
+export async function readVariableValue(
+  endpoint: CompanionEndpoint,
+  name: string,
+  timeoutMs: number,
+): Promise<VariableRead> {
+  let reply: Reply;
+  try {
+    reply = await send(
+      endpoint,
+      "GET",
+      variablePath(name),
+      undefined,
+      timeoutMs,
+    );
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+    return { outcome: "not_reachable", message: error.message };
+  }
+  if (reply.status === 200) return { outcome: "value", value: reply.body };
+  if (reply.status === 404) return { outcome: "missing" };
+  if (reply.status === 401) {
+    return {
+      outcome: "unauthorised",
+      message: `Companion refused the API key (HTTP 401)${reason(reply.body)}`,
+    };
+  }
+  const { message } = variableError(reply, name);
+  return reply.status === 403
+    ? { outcome: "unauthorised", message }
+    : { outcome: "not_reachable", message };
+}
+
 export async function setVariable(
   endpoint: CompanionEndpoint,
   name: string,
@@ -248,6 +294,8 @@ async function send(
   path: string,
   /** Sent with `Content-Type` exactly `application/json`. */
   jsonBody?: string,
+  /** Gives up after `timeoutMs`, reading the body included. None by default. */
+  timeoutMs?: number,
 ): Promise<Reply> {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${endpoint.apiKey}`,
@@ -260,14 +308,20 @@ async function send(
       headers,
       // A redirect could send the key off the local machine.
       redirect: "error",
+      ...(timeoutMs !== undefined
+        ? { signal: AbortSignal.timeout(timeoutMs) }
+        : {}),
       ...(jsonBody !== undefined ? { body: jsonBody } : {}),
     });
   } catch (error) {
-    throw requestError(endpoint, error);
+    throw requestError(endpoint, error, timeoutMs);
   }
   try {
     return { status: response.status, body: await response.text() };
   } catch (error) {
+    if (timeoutMs !== undefined && isTimeout(error)) {
+      throw timeoutError(endpoint, timeoutMs);
+    }
     throw new CliError(
       `reading Companion's response failed: ${errorMessage(error)}`,
     );
@@ -284,7 +338,14 @@ const UNREACHABLE_CODES = new Set([
   "ECONNRESET",
 ]);
 
-function requestError(endpoint: CompanionEndpoint, error: unknown): CliError {
+function requestError(
+  endpoint: CompanionEndpoint,
+  error: unknown,
+  timeoutMs: number | undefined,
+): CliError {
+  if (timeoutMs !== undefined && isTimeout(error)) {
+    return timeoutError(endpoint, timeoutMs);
+  }
   if (codes(error).some((code) => UNREACHABLE_CODES.has(code))) {
     return new CliError(`Companion is not reachable at ${endpoint.origin}`);
   }
@@ -295,6 +356,20 @@ function requestError(endpoint: CompanionEndpoint, error: unknown): CliError {
   }
   return new CliError(
     `request to ${endpoint.origin} failed: ${errorMessage(error)}`,
+  );
+}
+
+/** `AbortSignal.timeout` fired: fetch rejects with a `TimeoutError`. */
+function isTimeout(error: unknown): boolean {
+  return chain(error).some((record) => record["name"] === "TimeoutError");
+}
+
+function timeoutError(
+  endpoint: CompanionEndpoint,
+  timeoutMs: number,
+): CliError {
+  return new CliError(
+    `Companion did not answer at ${endpoint.origin} within ${timeoutMs / 1000} s`,
   );
 }
 

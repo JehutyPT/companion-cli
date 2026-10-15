@@ -217,7 +217,10 @@ describe("read path: Companion's process", () => {
       tmpdir,
     });
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.equal(result.stdout[1], "fx_wal_only  1        no       WAL only");
+    assert.equal(
+      result.stdout[1],
+      "fx_wal_only  1        -        no       WAL only",
+    );
     assert.deepEqual(calls, []);
     assert.deepEqual(fileState(dbPath), before);
     assert.deepEqual(readdirSync(tmpdir), []);
@@ -320,12 +323,13 @@ describe("read commands: command line", () => {
     }
     assert.match(
       USAGE,
-      /list variables\|triggers\|connections\|pages \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\]/,
+      /list variables\|triggers\|connections\|pages \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\] \[--no-current\] \|/,
     );
     assert.match(
       HELP,
       /companion-cli list variables\|triggers\|connections\|pages/,
     );
+    assert.match(HELP, /--no-current\s+skips this/);
     assert.match(HELP, /write nothing,\s+never stop or start Companion/);
   });
 
@@ -354,7 +358,10 @@ describe("read commands: command line", () => {
       "--json",
     ]);
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(result.stdout, ["NAME  DEFAULT  PERSIST  DESCRIPTION"]);
+    assert.deepEqual(result.stdout, [
+      "NAME  DEFAULT  CURRENT  PERSIST  DESCRIPTION",
+      "note: current values are only read for the install's database",
+    ]);
   });
 
   it("apply keeps its own usage errors, never as JSON", async () => {
