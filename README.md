@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `validate` checks a description file without writing, `list variables` and `list triggers` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -194,6 +194,8 @@ These read the database and print what is stored, one line per item:
 companion-cli list variables                      # the local install (macOS)
 companion-cli list variables 'fx_*' --db /path/to/copy/db.sqlite
 companion-cli list triggers 'Reset*' 'Tick' --json
+companion-cli list connections
+companion-cli list pages 'SKAARHOJ*'
 ```
 
 ```
@@ -208,7 +210,9 @@ A read command copies the database and its WAL files to a temporary directory, c
 
 - `list variables`: ordered by sort order, then name. `DEFAULT` is the stored value as JSON, so `"0"` and `0` differ; for a persisted variable it is Companion's current value.
 - `list triggers`: ordered by sort order, then id. `EVENTS` summarises each event (`startup 0ms`, `interval 5s`, `var fx_counter`, or the bare type for other events), with ` (off)` after a disabled one. `ACTIONS` is the action count, with ` +cond` when the trigger has a condition. The id is shown because trigger names are not unique.
-- Text cells longer than 40 characters are cut to 39 and end with `…`; line breaks show as `\n`. `--json` prints one document with full values: `{"database": ..., "variables": [...]}` or `{"database": ..., "triggers": [...]}`.
+- `list connections`: Companion's built-in `internal` connection first, then the connections in Companion's order (sort order, then id), matched by label. `BUTTONS` counts the buttons on loaded pages and `TRIGGERS` the triggers that use the connection, through an action, feedback or condition (by id) or a `$(<label>:...)` reference; each control counts once. A connection id that a control uses but no connection has is listed last as `?` with module `(missing)`. Connection configuration and secrets are never printed. Surface instances are not listed.
+- `list pages`: the pages Companion loads (1, 2, … up to the first missing one), matched by name. `BUTTONS` counts the occupied cells, `CONNECTIONS` names the connections the page's controls use, and `LABELS` shows the first three cells in row, then column order: a button's text quoted and cut to 20 characters, `<pageup>` and the like for other control types, `<missing>` for a cell whose control is gone. With `--json` every cell is listed, and `unloadedRows` names the numbered page rows Companion does not load.
+- Text cells longer than 40 characters are cut to 39 and end with `…` (`LABELS` is not cut, its entries already are); line breaks show as `\n`. `--json` prints one document with full values: `{"database": ..., "<kind>": [...]}`, such as `{"database": ..., "variables": [...]}`.
 
 **Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
 

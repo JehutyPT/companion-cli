@@ -76,7 +76,7 @@ async function assertFailure(
   return document;
 }
 
-const KINDS = ["variables", "triggers"];
+const KINDS = ["variables", "triggers", "connections", "pages"];
 
 describe("read path: failures", () => {
   const failures: Array<
@@ -267,11 +267,15 @@ describe("read path: Companion's process", () => {
 
 describe("read commands: command line", () => {
   const usageCases: Array<[string, string[], RegExp]> = [
-    ["no kind", ["list"], /^list needs a kind \(variables or triggers\)/],
+    [
+      "no kind",
+      ["list"],
+      /^list needs a kind \(variables or triggers or connections or pages\)/,
+    ],
     [
       "an unknown kind",
-      ["list", "pages"],
-      /^unknown list kind "pages" \(expected variables or triggers\)/,
+      ["list", "surfaces"],
+      /^unknown list kind "surfaces" \(expected variables or triggers or connections or pages\)/,
     ],
     [
       "an empty pattern",
@@ -316,9 +320,12 @@ describe("read commands: command line", () => {
     }
     assert.match(
       USAGE,
-      /list variables\|triggers \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\]/,
+      /list variables\|triggers\|connections\|pages \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\]/,
     );
-    assert.match(HELP, /companion-cli list variables\|triggers/);
+    assert.match(
+      HELP,
+      /companion-cli list variables\|triggers\|connections\|pages/,
+    );
     assert.match(HELP, /write nothing,\s+never stop or start Companion/);
   });
 

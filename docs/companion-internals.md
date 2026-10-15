@@ -37,7 +37,8 @@ Verified by DB and main.js: the upgrade list `mee` has 16 steps and the target i
 | `pages` | page number as a string (`"20"`) | `{"name", "controls": {row: {col: "bank:<controlId>"}}, "id": <pageId>}` |
 | `controls` | `bank:<controlId>` (button) or `trigger:<controlId>` | control JSON, below |
 | `custom_variables` | variable name | `{description, defaultValue, persistCurrentValue, sortOrder}` |
-| `surfaces`, `surface_groups`, `surfaces_remote`, `instances`, others | | not used by the tool yet |
+| `instances` | instance id | `InstanceConfig`: connections and surface instances, see [Connections](#connections); read, never written |
+| `surfaces`, `surface_groups`, `surfaces_remote`, others | | not used by the tool yet |
 
 Verified by DB; `trigger:` prefix also by main.js (controls are upgraded with `id.startsWith("trigger:")` deciding trigger vs button).
 
@@ -166,6 +167,25 @@ Stored control, from the trigger class's `toJSON` (the class with `type="trigger
 - Loading: at startup the controls store's `init()` reads every `controls` row and calls `createClassForControl(id, "all", value, …)`, which builds a trigger for `value.type === "trigger"` (the stored type decides, not the id prefix). It then calls `setCollectionEnabled(isCollectionEnabled(options.collectionId))`, and `isCollectionEnabled` returns `true` for a missing `collectionId`, so a trigger outside any collection runs whenever `options.enabled` is true. A kept `collectionId` has two cases. If it names an existing collection that is disabled, `isCollectionEnabled` returns false and the replaced trigger never runs, however `enabled` is set. If it names a collection that no longer exists, `isCollectionEnabled` also returns false at first, but `init()` then calls `checkCollectionIdIsValid` with `collectAllCollectionIds()` on every trigger. That clears the unknown `collectionId`, calls `setCollectionEnabled(!0)` and saves, so the trigger moves out of any collection and runs.
 - Sort order: the UI's create adds the new trigger, then sets `sortOrder` to `Math.max(0, ...all triggers' sortOrder)`. The tool appends instead: 1 + the highest existing trigger `sortOrder`, or 0 for the first trigger. A replace keeps the `sortOrder` and `collectionId` of the trigger it replaces.
 - Identity: Companion has no unique trigger name; the tool identifies a trigger by `options.name` and refuses when several share it.
+
+## Connections
+
+Companion 5.1 keeps one `instances` row per module instance, keyed by instance id. The value is `InstanceConfig`, from `shared-lib/lib/Model/Instance.ts` in the bundled main.js source map (5.1.0), loaded and saved by `Instance/ConfigStore.ts`:
+
+```
+{ moduleInstanceType: "connection" | "surface", moduleId, moduleVersionId: string | null,
+  label, config, secrets, isFirstInit, lastUpgradeIndex, enabled, sortOrder,
+  updatePolicy: "manual" | "stable" | "beta", collectionId? }
+```
+
+- Only rows with `moduleInstanceType: "connection"` are connections. Surface instances (surface modules) share the table. Verified by main.js (`Instance/ConfigStore.ts`).
+- Companion orders connections by `sortOrder`, then id (confirmed on the PRD review). Labels are not guaranteed unique in a stored database, so the tool keys a connection by id.
+- Actions, feedbacks and trigger conditions reference a connection by its id, in the entity's `connectionId`. Companion's built-in entities use `connectionId: "internal"`, which has no `instances` row. Verified by main.js (the literal `connectionId:"internal"` on built-in entities; the entity shape is in `shared-lib/lib/Model/EntityModel.ts`).
+- Variable references use the connection's label: `$(<label>:<name>)`. Built-in variables use `internal`, custom variables `custom`. Verified by main.js (`Variables/Util.ts`: `VARIABLE_REGEX = /\$\((([^:$)]+):([^)$]+))\)/`, so a label is the text up to the first `:`).
+- `config` and `secrets` can hold device credentials (passwords, tokens). No command reads them into output: the readers keep only `label`, `moduleId`, `moduleVersionId`, `enabled` and `sortOrder`. Both are part of `InstanceConfig` (`shared-lib/lib/Model/Instance.ts`).
+- The live equivalent is the tRPC subscription `instances.connections.watch`. Verified by main.js (the connections tRPC router's `watch: …subscription`, created in `Instance/Controller.ts`). The tool does not use it yet.
+
+How the tool decides that a stored control uses a connection (`list connections`, `list pages`): any string `connectionId` anywhere in the control (every step and action set, a trigger's `actions` and `condition`, nested `children`, `localVariables`), or any string value containing `$(<label>:`. A `connectionId` that matches no row and is not `internal` is a dangling reference.
 
 ## REST API
 

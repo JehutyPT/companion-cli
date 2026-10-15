@@ -231,7 +231,21 @@ function seedRows(version: number | null): Array<[string, string, unknown]> {
     [
       "instances",
       "FixtureConnectionAAAA",
-      { label: "fixture", moduleId: "fixture-module", enabled: false },
+      // `InstanceConfig` from shared-lib/lib/Model/Instance.ts in Companion
+      // 5.1.0's main.js source map. `config` and `secrets` are placeholders.
+      {
+        moduleInstanceType: "connection",
+        moduleId: "fixture-module",
+        moduleVersionId: "1.0.0",
+        label: "fixture",
+        config: {},
+        secrets: {},
+        isFirstInit: false,
+        lastUpgradeIndex: -1,
+        enabled: false,
+        sortOrder: 0,
+        updatePolicy: "stable",
+      },
     ],
   );
   for (const [name, value] of Object.entries(FIXTURE_VARIABLES))

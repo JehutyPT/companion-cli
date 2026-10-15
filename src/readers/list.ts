@@ -18,16 +18,25 @@ export interface Lister<Item> {
   readonly columns: readonly Column<Item>[];
   /** The item in the JSON document. */
   json(item: Item): unknown;
+  /**
+   * Fields of the JSON document beside `database` and the items, read from
+   * the same snapshot. Patterns do not filter them.
+   */
+  document?(db: DatabaseSync): Record<string, unknown>;
 }
 
 export interface Column<Item> {
   header: string;
   cell(item: Item): string;
+  /** Longest cell before it is cut. Defaults to `MAX_CELL_LENGTH`. */
+  maxLength?: number;
 }
 
 export interface Listing<Item> {
   database: string;
   items: Item[];
+  /** The lister's document-level JSON fields. */
+  document: Record<string, unknown>;
 }
 
 /** Reads the items whose name matches `patterns` (all items when none). */
@@ -37,12 +46,13 @@ export function list<Item>(
   patterns: readonly string[],
   options: ReadOptions,
 ): Listing<Item> {
-  const { database, value } = readDatabase(dbPath, options, (db) =>
-    lister
+  const { database, value } = readDatabase(dbPath, options, (db) => ({
+    items: lister
       .read(db)
       .filter((item) => matchesNamePatterns(lister.name(item), patterns)),
-  );
-  return { database, items: value };
+    document: lister.document?.(db) ?? {},
+  }));
+  return { database, ...value };
 }
 
 /** The text table: a header row, then one row per item. */
@@ -55,6 +65,7 @@ export function renderListing<Item>(
     listing.items.map((item) =>
       lister.columns.map((column) => column.cell(item)),
     ),
+    lister.columns.map((column) => column.maxLength ?? MAX_CELL_LENGTH),
   );
 }
 
@@ -66,6 +77,7 @@ export function listingJson<Item>(
   return JSON.stringify({
     database: listing.database,
     [lister.kind]: listing.items.map((item) => lister.json(item)),
+    ...listing.document,
   });
 }
 
@@ -93,24 +105,27 @@ export function listCommand<Item>(lister: Lister<Item>): ListCommand {
 /** Longest cell in a text table; longer values are cut and end with `…`. */
 export const MAX_CELL_LENGTH = 40;
 
-/** One line per cell: line breaks show as `\n`, long values are cut. */
-export function cellText(value: string): string {
+/** One line per cell: line breaks show as `\n`, values over `maxLength` are cut. */
+export function cellText(value: string, maxLength = MAX_CELL_LENGTH): string {
   const text = value.replace(/\r\n|\r|\n/g, "\\n");
   const chars = [...text];
-  return chars.length > MAX_CELL_LENGTH
-    ? `${chars.slice(0, MAX_CELL_LENGTH - 1).join("")}…`
+  return chars.length > maxLength
+    ? `${chars.slice(0, maxLength - 1).join("")}…`
     : text;
 }
 
 /**
  * Columns separated by two spaces and padded to the widest value, with no
- * padding after the last column.
+ * padding after the last column. `maxLengths` gives each column's cut.
  */
 export function renderTable(
   headers: readonly string[],
   rows: readonly (readonly string[])[],
+  maxLengths: readonly number[] = [],
 ): string[] {
-  const lines = [headers, ...rows].map((row) => row.map(cellText));
+  const lines = [headers, ...rows].map((row) =>
+    row.map((cell, index) => cellText(cell, maxLengths[index])),
+  );
   const widths = headers.map((_, index) =>
     Math.max(...lines.map((line) => [...(line[index] ?? "")].length)),
   );
@@ -141,6 +156,11 @@ export function bySortOrderThen<Item>(
     const kb = key(b);
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   };
+}
+
+/** Orders strings by UTF-16 code unit, independent of locale. */
+export function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** `yes` or `no`. */
