@@ -10,11 +10,12 @@ import {
 import type { DescriptionKind } from "./core/writer.ts";
 import { ACTION_KINDS } from "./writers/actions.ts";
 import {
-  ACTION_SET_SCHEMAS,
-  ACTION_SETS,
   buttonFieldSchemas,
   CELL_FIELD_SCHEMAS,
+  HOLD_FIELD_SCHEMAS,
   LOCATION_FIELD_SCHEMAS,
+  STEP_FIELD_SCHEMAS,
+  STEP_FIELDS,
 } from "./writers/button-control.ts";
 import * as button from "./writers/button.ts";
 import * as connection from "./writers/connection.ts";
@@ -71,14 +72,37 @@ export interface KindSchema {
 }
 
 /**
- * `steps` replaces the top-level action lists, so a button with `steps` must
- * have none of them.
+ * A button's cross-field rules: `steps` replaces the top-level action lists,
+ * so a button with `steps` must have none of them; `stepExpression` goes
+ * with `progression: expression` and nothing else.
  */
-const STEPS_EXCLUDE_ACTION_SETS: SchemaFragment = {
+const BUTTON_RULES: SchemaFragment = {
   dependentSchemas: {
     steps: {
       $comment: "With `steps`, the top-level action lists are refused.",
-      properties: Object.fromEntries(ACTION_SETS.map((set) => [set, false])),
+      properties: Object.fromEntries(STEP_FIELDS.map((set) => [set, false])),
+    },
+    stepExpression: {
+      $comment: "`stepExpression` needs `progression: expression`.",
+      required: ["progression"],
+      properties: { progression: { const: "expression" } },
+    },
+  },
+  if: {
+    required: ["progression"],
+    properties: {
+      progression: {
+        description: "`progression: expression` needs `stepExpression`.",
+        const: "expression",
+      },
+    },
+  },
+  then: {
+    required: ["stepExpression"],
+    properties: {
+      stepExpression: {
+        description: "Required with `progression: expression`.",
+      },
     },
   },
 };
@@ -96,7 +120,7 @@ export const KIND_SCHEMAS: Record<DescriptionKind, KindSchema> = {
     fields: buttonFieldSchemas(
       requiredField("Where the button goes.", ref("location")),
     ),
-    extra: STEPS_EXCLUDE_ACTION_SETS,
+    extra: BUTTON_RULES,
   },
   page: {
     doc: page.DOC,
@@ -200,11 +224,15 @@ function defs(): Record<string, unknown> {
       {
         description:
           "A button on the page: every `kind: button` field, with a location of row and column only.",
-        ...STEPS_EXCLUDE_ACTION_SETS,
+        ...BUTTON_RULES,
       },
     ),
-    step: objectSchema(ACTION_SET_SCHEMAS, {
+    step: objectSchema(STEP_FIELD_SCHEMAS, {
       description: "One step of a button: its own action lists.",
+    }),
+    hold: objectSchema(HOLD_FIELD_SCHEMAS, {
+      description:
+        "A hold action set: actions run once the button has been held `after` milliseconds.",
     }),
     action: taggedSchema(
       "action",

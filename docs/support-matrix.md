@@ -49,12 +49,13 @@ An export refusal names the stored field it cannot express; this file says wheth
 | --- | --- | --- | --- |
 | `options.rotaryActions` | supported |  | set when any step lists rotate actions |
 | `options.rotaryActions = false with rotate actions` | unsupported |  | rotate actions Companion ignores; apply would turn them on |
-| `options.stepProgression = "auto"` | supported |  | always written |
-| `options.stepProgression = "manual"` | planned (#24) |  |  |
-| `options.stepProgression = "expression"` | planned (#24) |  |  |
-| `options.stepExpression` | planned (#24) |  |  |
-| `options.canModifyStyleInApis` | planned (#24) |  | the writer stores `true` today; #24 adds opt-in `apiStyle` and Companion's default `false`; the CLI never uses the style API |
-| `options.notes` | planned (#24) |  |  |
+| `options.stepProgression = "auto"` | supported | `button.progression` | the default |
+| `options.stepProgression = "manual"` | supported | `button.progression` |  |
+| `options.stepProgression = "expression"` | supported | `button.progression` |  |
+| `options.stepExpression` | supported | `button.stepExpression` | with `progression: expression`; `""` otherwise |
+| `options.stepExpression (without expression progression)` | unsupported |  | Companion keeps a stale expression after the progression changes; apply would clear it |
+| `options.canModifyStyleInApis` | supported | `button.apiStyle` | Companion's default `false` unless `apiStyle: true`; the CLI never uses the style API |
+| `options.notes` | supported | `button.notes` |  |
 
 ## Step
 
@@ -64,9 +65,11 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `action_sets.up` | supported | `button.up`, `steps[].up` |  |
 | `action_sets.rotate_left` | supported | `button.rotate_left`, `steps[].rotate_left` |  |
 | `action_sets.rotate_right` | supported | `button.rotate_right`, `steps[].rotate_right` |  |
-| `action_sets.<duration>` | planned (#24) |  | hold-duration action sets |
-| `options.runWhileHeld` | planned (#24) |  |  |
-| `options (other keys)` | unsupported |  |  |
+| `action_sets.<duration>` | supported | `button.hold`, `steps[].hold`, `hold[].after`, `hold[].actions` | hold action sets, keyed by a positive whole number of milliseconds |
+| `action_sets.<duration> (other keys)` | unsupported |  | a key Companion reads as a number but not a positive whole number, such as `1.5` or `1e3` |
+| `options.runWhileHeld` | supported | `hold[].whileHeld` | the while-held durations, in hold-entry order |
+| `options.runWhileHeld (without its hold set)` | unsupported |  | a duration with no hold set in the step, or listed twice |
+| `options (other keys)` | unsupported |  | such as a step `name` |
 
 ## Style
 

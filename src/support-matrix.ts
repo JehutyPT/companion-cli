@@ -180,19 +180,33 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
   supported(
     "button option",
     'options.stepProgression = "auto"',
-    [],
-    "always written",
+    ["button.progression"],
+    "the default",
   ),
-  planned("button option", 'options.stepProgression = "manual"', "#24"),
-  planned("button option", 'options.stepProgression = "expression"', "#24"),
-  planned("button option", "options.stepExpression", "#24"),
-  planned(
+  supported("button option", 'options.stepProgression = "manual"', [
+    "button.progression",
+  ]),
+  supported("button option", 'options.stepProgression = "expression"', [
+    "button.progression",
+  ]),
+  supported(
+    "button option",
+    "options.stepExpression",
+    ["button.stepExpression"],
+    'with `progression: expression`; `""` otherwise',
+  ),
+  unsupported(
+    "button option",
+    "options.stepExpression (without expression progression)",
+    "Companion keeps a stale expression after the progression changes; apply would clear it",
+  ),
+  supported(
     "button option",
     "options.canModifyStyleInApis",
-    "#24",
-    "the writer stores `true` today; #24 adds opt-in `apiStyle` and Companion's default `false`; the CLI never uses the style API",
+    ["button.apiStyle"],
+    "Companion's default `false` unless `apiStyle: true`; the CLI never uses the style API",
   ),
-  planned("button option", "options.notes", "#24"),
+  supported("button option", "options.notes", ["button.notes"]),
 
   // Steps
   supported("step", "action_sets.down", ["button.down", "steps[].down"]),
@@ -205,9 +219,29 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     "button.rotate_right",
     "steps[].rotate_right",
   ]),
-  planned("step", "action_sets.<duration>", "#24", "hold-duration action sets"),
-  planned("step", "options.runWhileHeld", "#24"),
-  unsupported("step", "options (other keys)"),
+  supported(
+    "step",
+    "action_sets.<duration>",
+    ["button.hold", "steps[].hold", "hold[].after", "hold[].actions"],
+    "hold action sets, keyed by a positive whole number of milliseconds",
+  ),
+  unsupported(
+    "step",
+    "action_sets.<duration> (other keys)",
+    "a key Companion reads as a number but not a positive whole number, such as `1.5` or `1e3`",
+  ),
+  supported(
+    "step",
+    "options.runWhileHeld",
+    ["hold[].whileHeld"],
+    "the while-held durations, in hold-entry order",
+  ),
+  unsupported(
+    "step",
+    "options.runWhileHeld (without its hold set)",
+    "a duration with no hold set in the step, or listed twice",
+  ),
+  unsupported("step", "options (other keys)", "such as a step `name`"),
 
   // Style
   supported(

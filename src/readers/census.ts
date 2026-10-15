@@ -174,7 +174,7 @@ const OPTION_DEFAULTS: Readonly<Record<string, unknown>> = {
   stepProgression: "auto",
   stepExpression: "",
   rotaryActions: false,
-  canModifyStyleInApis: true,
+  canModifyStyleInApis: false,
   notes: "",
 };
 

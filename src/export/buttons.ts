@@ -4,16 +4,21 @@
  * Shared by `export page` (each cell) and `export page --button`.
  *
  * Only the free parts of the writer's template are read: the control type,
- * `options.rotaryActions`, `box0.color`, `text0.color` and `text0.text`, the
- * four action sets of each step, and the feedbacks. Everything else is left
- * to the caller's self-check, which rebuilds the control with the writer's
+ * the button options, `box0.color`, `text0.color` and `text0.text`, each
+ * step's action sets (the four named ones and the hold sets) and
+ * `runWhileHeld`, and the feedbacks. Everything else is left to the caller's
+ * self-check, which rebuilds the control with the writer's
  * `buildButtonControl` and refuses any difference (a changed `fontsize`, a
- * fifth layer, `stepProgression: "manual"`, an action's `disabled`).
+ * fifth layer, an action's `disabled`).
  *
- * Emission: `text`, `background` and always `textColor`. One step gives
- * top-level `down`, `up`, `rotate_left` and `rotate_right`; several give
- * `steps`. Empty lists are left out, except `rotate_left: []` (top level, or
- * on the first step) when rotary actions are on and no rotate list has any.
+ * Emission: `text`, `background` and always `textColor`; `progression`,
+ * `stepExpression`, `notes` and `apiStyle` only when they differ from the
+ * description defaults. One step gives top-level `down`, `up`,
+ * `rotate_left`, `rotate_right` and `hold`; several give `steps`. Empty lists
+ * are left out, except `rotate_left: []` (top level, or on the first step)
+ * when rotary actions are on and no rotate list has any. Hold entries come
+ * in ascending `after`, except that the while-held ones keep the stored
+ * `runWhileHeld` order among themselves, so the build reproduces it.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { type Fields, isJsonObject } from "../core/validate.ts";
@@ -26,11 +31,17 @@ import {
   type Location,
   parseButtonDescription,
   parseCell,
+  PROGRESSIONS,
 } from "../writers/button-control.ts";
 import { buttonWriter } from "../writers/button.ts";
 import { STYLE_FIELDS } from "../writers/feedbacks.ts";
 import { exportAction, isOption } from "./actions.ts";
-import { describeStored, refuse, selfCheck } from "./export.ts";
+import {
+  describeStored,
+  REASON_UNSUPPORTED,
+  refuse,
+  selfCheck,
+} from "./export.ts";
 
 /** The support-matrix area of a path inside a stored button control. */
 export function buttonArea(path: string): Area {
@@ -38,7 +49,9 @@ export function buttonArea(path: string): Area {
   if (path.startsWith("options")) return "button option";
   if (path.startsWith("localVariables")) return "local variable";
   if (
-    /^steps\.\d+\.action_sets\.(down|up|rotate_left|rotate_right)\[/.test(path)
+    /^steps\.\d+\.action_sets\.(down|up|rotate_left|rotate_right|\d+)\[/.test(
+      path,
+    )
   )
     return "action";
   if (path.startsWith("steps")) return "step";
@@ -56,17 +69,78 @@ function entityField(path: string): string {
     .replace(/\.definition$/, ".definitionId");
 }
 
-/** Where the writer's four-layer template stores each style field. */
+/**
+ * Where the writer's four-layer template stores each style field, and where
+ * each button option goes.
+ */
 const STYLE_PATHS: Readonly<Record<string, string>> = {
   text: "style.layers[3].text.value",
   background: "style.layers[1].color.value",
   textColor: "style.layers[3].color.value",
+  progression: "options.stepProgression",
+  stepExpression: "options.stepExpression",
+  notes: "options.notes",
+  apiStyle: "options.canModifyStyleInApis",
 };
 
-/** A button description field path (no prefix) as a stored control path. */
-export function buttonStoredPath(field: string): string {
+/**
+ * A hold entry's field as a stored path: the entry names the action set of
+ * its duration (`after`); without one, the step's action sets.
+ */
+function holdStoredPath(
+  step: number,
+  hold: Fields | undefined,
+  rest: string,
+): string {
+  const after = hold?.["after"];
+  const sets = `steps.${step}.action_sets`;
+  if (typeof after !== "number") return sets;
+  if (rest === ".whileHeld") return `steps.${step}.options.runWhileHeld`;
+  const actions = /^\.actions(\[\d+\].*)?$/.exec(rest);
+  if (actions?.[1])
+    return entityField(`${sets}.${after}${actions[1]}`).replace(
+      /(action_sets\.\d+\[\d+\])\.expression$/,
+      "$1.options.value",
+    );
+  return `${sets}.${after}`;
+}
+
+/** The hold entry at `index` of a step's or the button's fields, if any. */
+function holdEntry(fields: unknown, index: number): Fields | undefined {
+  const list = isJsonObject(fields) ? fields["hold"] : undefined;
+  const entry = Array.isArray(list) ? (list[index] as unknown) : undefined;
+  return isJsonObject(entry) ? entry : undefined;
+}
+
+/**
+ * A button description field path (no prefix) as a stored control path.
+ * `fields`, the description, resolves a hold entry to its duration.
+ */
+export function buttonStoredPath(field: string, fields: Fields = {}): string {
   const style = STYLE_PATHS[field];
   if (style !== undefined) return style;
+  const topHold = /^hold\[(\d+)\](.*)$/.exec(field);
+  if (topHold)
+    return holdStoredPath(
+      0,
+      holdEntry(fields, Number(topHold[1])),
+      topHold[2] ?? "",
+    );
+  const stepHold = /^steps\[(\d+)\]\.hold\[(\d+)\](.*)$/.exec(field);
+  if (stepHold) {
+    const steps = fields["steps"];
+    const step = Array.isArray(steps)
+      ? (steps[Number(stepHold[1])] as unknown)
+      : undefined;
+    return holdStoredPath(
+      Number(stepHold[1]),
+      holdEntry(step, Number(stepHold[2])),
+      stepHold[3] ?? "",
+    );
+  }
+  if (field === "hold") return "steps.0.action_sets";
+  const stepHoldList = /^steps\[(\d+)\]\.hold$/.exec(field);
+  if (stepHoldList) return `steps.${stepHoldList[1]}.action_sets`;
   const top = /^(down|up|rotate_left|rotate_right)(.*)$/.exec(field);
   if (top) return entityField(`steps.0.action_sets.${top[1]}${top[2]}`);
   const step =
@@ -299,8 +373,72 @@ function exportFeedback(stored: unknown, path: string): Fields {
 
 type ActionSet = (typeof ACTION_SETS)[number];
 
-/** Each step's four action lists, as action entries. */
-function exportSteps(steps: unknown): Array<Record<ActionSet, Fields[]>> {
+/** One stored step: its four named action lists and its hold entries. */
+interface ExportedStep {
+  sets: Record<ActionSet, Fields[]>;
+  hold: Fields[];
+}
+
+/** A stored hold set key: a positive whole number of milliseconds. */
+const HOLD_KEY = /^[1-9]\d*$/;
+
+/**
+ * The step's hold entries, from its numeric action sets and `runWhileHeld`:
+ * ascending `after`, with the while-held entries in `runWhileHeld` order.
+ */
+function exportHold(key: string, sets: Fields, options: Fields): Fields[] {
+  const durations = Object.keys(sets)
+    .filter((set) => !(ACTION_SETS as readonly string[]).includes(set))
+    .map((set) => {
+      const value = Number(set);
+      if (!HOLD_KEY.test(set) || !Number.isSafeInteger(value))
+        refuse(
+          `steps.${key}.action_sets.${set}`,
+          "is not a hold set keyed by a positive whole number of milliseconds",
+          "step",
+        );
+      return value;
+    })
+    .sort((a, b) => a - b);
+  const held = options["runWhileHeld"];
+  const heldPath = `steps.${key}.options.runWhileHeld`;
+  if (!Array.isArray(held))
+    refuse(heldPath, `is ${describeStored(held)}, not a list`, "step");
+  held.forEach((duration, index) => {
+    if (
+      typeof duration !== "number" ||
+      !durations.includes(duration) ||
+      held.indexOf(duration) !== index
+    )
+      refuse(
+        `${heldPath}[${index}]`,
+        `is ${JSON.stringify(duration)}, which names no hold set of the step or repeats one`,
+        "step",
+      );
+  });
+  const whileHeld = held as number[];
+  let next = 0;
+  return durations
+    .map((duration) =>
+      whileHeld.includes(duration) ? (whileHeld[next++] as number) : duration,
+    )
+    .map((after) => {
+      const path = `steps.${key}.action_sets.${after}`;
+      const list = sets[String(after)];
+      if (!Array.isArray(list))
+        refuse(path, `is ${describeStored(list)}, not a list`, "step");
+      return {
+        after,
+        ...(whileHeld.includes(after) ? { whileHeld: true } : {}),
+        actions: list.map((action, index) =>
+          exportAction(action, `${path}[${index}]`),
+        ),
+      };
+    });
+}
+
+/** Each step's four action lists and hold entries, as description entries. */
+function exportSteps(steps: unknown): ExportedStep[] {
   if (!isJsonObject(steps))
     refuse("steps", `is ${describeStored(steps)}, not a mapping`, "step");
   const keys = Object.keys(steps);
@@ -319,31 +457,81 @@ function exportSteps(steps: unknown): Array<Record<ActionSet, Fields[]>> {
         `is ${describeStored(sets)}, not a mapping`,
         "step",
       );
-    return Object.fromEntries(
-      ACTION_SETS.map((set) => {
-        const path = `steps.${key}.action_sets.${set}`;
-        const list = sets[set] ?? [];
-        if (!Array.isArray(list))
-          refuse(path, `is ${describeStored(list)}, not a list`, "step");
-        return [
-          set,
-          list.map((action, index) =>
-            exportAction(action, `${path}[${index}]`),
-          ),
-        ];
-      }),
-    ) as Record<ActionSet, Fields[]>;
+    const options = isJsonObject(step) ? step["options"] : undefined;
+    if (!isJsonObject(options))
+      refuse(
+        `steps.${key}.options`,
+        `is ${describeStored(options)}, not a mapping`,
+        "step",
+      );
+    const other = Object.keys(options).find((name) => name !== "runWhileHeld");
+    if (other !== undefined)
+      refuse(`steps.${key}.options.${other}`, REASON_UNSUPPORTED, "step");
+    return {
+      sets: Object.fromEntries(
+        ACTION_SETS.map((set) => {
+          const path = `steps.${key}.action_sets.${set}`;
+          const list = sets[set] ?? [];
+          if (!Array.isArray(list))
+            refuse(path, `is ${describeStored(list)}, not a list`, "step");
+          return [
+            set,
+            list.map((action, index) =>
+              exportAction(action, `${path}[${index}]`),
+            ),
+          ];
+        }),
+      ) as Record<ActionSet, Fields[]>,
+      hold: exportHold(key, sets, options),
+    };
   });
 }
 
-/** One step's non-empty lists, in the writer's order. */
-function nonEmpty(sets: Record<ActionSet, Fields[]>): Fields {
-  return Object.fromEntries(
-    ACTION_SETS.filter((set) => sets[set].length > 0).map((set) => [
-      set,
-      sets[set],
-    ]),
-  );
+/** One step's non-empty lists, in the writer's order, then its hold entries. */
+function nonEmpty({ sets, hold }: ExportedStep): Fields {
+  return {
+    ...Object.fromEntries(
+      ACTION_SETS.filter((set) => sets[set].length > 0).map((set) => [
+        set,
+        sets[set],
+      ]),
+    ),
+    ...(hold.length > 0 ? { hold } : {}),
+  };
+}
+
+/**
+ * The options' description fields, each only when it differs from the
+ * default. A stale `stepExpression` (kept by Companion after the
+ * progression changed) is refused; other differences are left to the
+ * self-check.
+ */
+function exportOptions(options: Fields): Fields {
+  const progression = options["stepProgression"];
+  if (!(PROGRESSIONS as readonly unknown[]).includes(progression))
+    refuse(
+      "options.stepProgression",
+      `is ${JSON.stringify(progression ?? null)}, not one of ${PROGRESSIONS.join(", ")}`,
+      "button option",
+    );
+  const expression = options["stepExpression"];
+  if (
+    progression !== "expression" &&
+    typeof expression === "string" &&
+    expression !== ""
+  )
+    refuse(
+      "options.stepExpression",
+      `is set while options.stepProgression is ${JSON.stringify(progression)}, which a description cannot express`,
+      "button option",
+    );
+  const notes = options["notes"];
+  return {
+    ...(progression !== "auto" ? { progression } : {}),
+    ...(progression === "expression" ? { stepExpression: expression } : {}),
+    ...(typeof notes === "string" && notes !== "" ? { notes } : {}),
+    ...(options["canModifyStyleInApis"] === true ? { apiStyle: true } : {}),
+  };
 }
 
 /**
@@ -385,7 +573,7 @@ export function buttonFields(control: unknown): Fields {
 
   const steps = exportSteps(control["steps"]);
   const rotateList = steps
-    .flatMap((sets, index) =>
+    .flatMap(({ sets }, index) =>
       (["rotate_left", "rotate_right"] as const)
         .filter((set) => sets[set].length > 0)
         .map((set) => `steps.${index}.action_sets.${set}`),
@@ -413,6 +601,7 @@ export function buttonFields(control: unknown): Fields {
     text: text(label.value, `${label.path}.value`, "style"),
     background: color(background.value, `${background.path}.value`, "style"),
     textColor: color(textColor.value, `${textColor.path}.value`, "style"),
+    ...exportOptions(options),
     ...(lists.length === 1 ? lists[0] : { steps: lists }),
     ...(feedbacks.length > 0
       ? {
@@ -437,7 +626,7 @@ export function cellButton(control: unknown, cell: Cell): Fields {
     stored: control,
     parse: () => parseButtonDescription(fields, "", parseCell),
     build: buildButtonControl,
-    storedPath: buttonStoredPath,
+    storedPath: (field) => buttonStoredPath(field, fields),
     area: buttonArea,
   });
   return fields;
@@ -461,7 +650,7 @@ export function locatedButton(
     parse: () => buttonWriter.parse(fields),
     check: (plan) => buttonWriter.check?.(db, plan),
     build: buildButtonControl,
-    storedPath: buttonStoredPath,
+    storedPath: (field) => buttonStoredPath(field, fields),
     area: buttonArea,
   });
   return fields;

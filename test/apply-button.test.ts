@@ -187,7 +187,7 @@ describe("apply button: success", () => {
         stepProgression: "auto",
         stepExpression: "",
         rotaryActions: false,
-        canModifyStyleInApis: true,
+        canModifyStyleInApis: false,
         notes: "",
       },
       localVariables: [],
@@ -1018,7 +1018,7 @@ rotate_right: [ { action: increment, variable: fx_counter } ]
         stepProgression: "auto",
         stepExpression: "",
         rotaryActions: true,
-        canModifyStyleInApis: true,
+        canModifyStyleInApis: false,
         notes: "",
       },
       localVariables: [],
@@ -1080,7 +1080,7 @@ feedbacks:
         stepProgression: "auto",
         stepExpression: "",
         rotaryActions: false,
-        canModifyStyleInApis: true,
+        canModifyStyleInApis: false,
         notes: "",
       },
       localVariables: [],
@@ -1186,6 +1186,157 @@ ${fields}`)
     const control = await appliedControl(SIMPLE_YAML + "feedbacks: []\n");
     assert.deepEqual(control["feedbacks"], []);
     assert.deepEqual(control["steps"], { "0": emptyStep });
+  });
+});
+
+describe("apply button: options and hold actions (#24)", () => {
+  const options = async (fields: string) =>
+    (
+      await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: o
+background: "#000000"
+${fields}`)
+    )["options"] as Json;
+
+  it("stores Companion's defaults when the description leaves the options out", async () => {
+    assert.deepEqual(await options(""), {
+      stepProgression: "auto",
+      stepExpression: "",
+      rotaryActions: false,
+      canModifyStyleInApis: false,
+      notes: "",
+    });
+  });
+
+  it("stores manual and expression progression, notes and apiStyle", async () => {
+    assert.deepEqual(
+      await options(
+        'progression: manual\nnotes: "a\\nb"\napiStyle: true\nsteps: [{}, {}]\n',
+      ),
+      {
+        stepProgression: "manual",
+        stepExpression: "",
+        rotaryActions: false,
+        canModifyStyleInApis: true,
+        notes: "a\nb",
+      },
+    );
+    assert.deepEqual(
+      await options(
+        'progression: expression\nstepExpression: "$(custom:fx_counter) % 2 + 1"\napiStyle: false\n',
+      ),
+      {
+        stepProgression: "expression",
+        stepExpression: "$(custom:fx_counter) % 2 + 1",
+        rotaryActions: false,
+        canModifyStyleInApis: false,
+        notes: "",
+      },
+    );
+  });
+
+  it("stores hold actions keyed by duration, and while-held durations in hold-entry order", async () => {
+    const control = await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: h
+background: "#000000"
+down: [ { action: set, variable: fx_label, value: tap } ]
+hold:
+  - { after: 3000, whileHeld: true, actions: [ { action: set, variable: fx_label, value: c } ] }
+  - { after: 500 }
+  - { after: 1000, whileHeld: true, actions: [ { action: set, variable: fx_label, value: a } ] }
+`);
+    assert.deepEqual(stripIds(control["steps"]), {
+      "0": {
+        action_sets: {
+          down: [setVar("fx_label", "tap")],
+          up: [],
+          rotate_left: [],
+          rotate_right: [],
+          "3000": [setVar("fx_label", "c")],
+          "500": [],
+          "1000": [setVar("fx_label", "a")],
+        },
+        options: { runWhileHeld: [3000, 1000] },
+      },
+    });
+  });
+
+  it("stores hold actions on the step that names them", async () => {
+    const control = await appliedControl(`kind: button
+location: { page: 1, row: 0, column: 2 }
+text: h
+background: "#000000"
+steps:
+  - { down: [ { action: set, variable: fx_label, value: one } ] }
+  - hold:
+      - { after: 1000, whileHeld: true, actions: [ { action: increment, variable: fx_counter } ] }
+`);
+    const steps = stripIds(control["steps"]) as Json;
+    assert.deepEqual(steps["1"], {
+      action_sets: {
+        down: [],
+        up: [],
+        rotate_left: [],
+        rotate_right: [],
+        "1000": [setVar("fx_counter", "$(this:current) + 1", true)],
+      },
+      options: { runWhileHeld: [1000] },
+    });
+    assert.deepEqual(
+      ((steps["0"] as Json)["options"] as Json)["runWhileHeld"],
+      [],
+    );
+  });
+
+  it("stores the same options and hold actions through a page description", async () => {
+    const { dir, dbPath, backupRoot } = setup();
+    const result = await runCli(
+      [
+        "apply",
+        writeDescription(
+          dir,
+          `kind: page
+page: 1
+name: Options
+buttons:
+  - location: { row: 0, column: 2 }
+    text: p
+    background: "#000000"
+    progression: manual
+    notes: n
+    apiStyle: true
+    steps:
+      - {}
+      - hold:
+          - { after: 700, whileHeld: true }
+`,
+        ),
+        "--db",
+        dbPath,
+      ],
+      { backupRoot },
+    );
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    const { control } = controlAt(dumpDatabase(dbPath), 0, 2);
+    assert.deepEqual(control["options"], {
+      stepProgression: "manual",
+      stepExpression: "",
+      rotaryActions: false,
+      canModifyStyleInApis: true,
+      notes: "n",
+    });
+    assert.deepEqual((stripIds(control["steps"]) as Json)["1"], {
+      action_sets: {
+        down: [],
+        up: [],
+        rotate_left: [],
+        rotate_right: [],
+        "700": [],
+      },
+      options: { runWhileHeld: [700] },
+    });
   });
 });
 
@@ -1609,7 +1760,79 @@ ${fields}`;
       feedback("{ feedback: step, step: 1, style: { text: a }, invert: yes }"),
       /: feedbacks\[0\]\.invert: must be true or false/,
     ],
+    // Options and hold actions (#24).
+    [
+      "unknown progression",
+      button("progression: random\n"),
+      /: progression: unknown progression "random" \(expected one of: auto, manual, expression\)$/,
+    ],
+    [
+      "step expression without expression progression",
+      button('progression: manual\nstepExpression: "1"\n'),
+      /: stepExpression: is only allowed with progression: expression$/,
+    ],
+    [
+      "step expression without any progression",
+      button('stepExpression: "1"\n'),
+      /: stepExpression: is only allowed with progression: expression$/,
+    ],
+    [
+      "expression progression without a step expression",
+      button("progression: expression\n"),
+      /: stepExpression: is required$/,
+    ],
+    ["non-string notes", button("notes: 5\n"), /: notes: must be a string/],
+    [
+      "non-boolean apiStyle",
+      button("apiStyle: yes\n"),
+      /: apiStyle: must be true or false/,
+    ],
+    ["hold not a list", button("hold: {}\n"), /: hold: must be a list/],
+    [
+      "hold entry without after",
+      button("hold:\n  - { actions: [] }\n"),
+      /: hold\[0\]\.after: is required$/,
+    ],
+    [
+      "hold after zero",
+      button("hold:\n  - { after: 0 }\n"),
+      /: hold\[0\]\.after: must be a positive integer/,
+    ],
+    [
+      "fractional hold after",
+      button("hold:\n  - { after: 1.5 }\n"),
+      /: hold\[0\]\.after: must be a positive integer/,
+    ],
+    [
+      "duplicate hold after in a step",
+      button(
+        "steps:\n  - {}\n  - hold:\n      - { after: 500 }\n      - { after: 500 }\n",
+      ),
+      /: steps\[1\]\.hold\[1\]\.after: 500 is already used by another hold entry of this step$/,
+    ],
+    [
+      "unknown hold entry field",
+      button("hold:\n  - { after: 500, repeat: true }\n"),
+      /: hold\[0\]\.repeat: unknown field$/,
+    ],
+    [
+      "non-boolean whileHeld",
+      button("hold:\n  - { after: 500, whileHeld: 1 }\n"),
+      /: hold\[0\]\.whileHeld: must be true or false/,
+    ],
+    [
+      "top-level hold with steps",
+      button("hold: []\nsteps:\n  - {}\n"),
+      /: hold: cannot be combined with steps/,
+    ],
     // Database checks.
+    [
+      "unknown variable in a hold action",
+      button(
+        "steps:\n  - {}\n  - hold:\n      - { after: 800, actions: [ { action: increment, variable: nope } ] }\n",
+      ),
+      /^error: steps\[1\]\.hold\[0\]\.actions\[0\]\.variable: unknown custom variable "nope"$/,
+    ],
     [
       "unknown variable in a single-entry steps list",
       button("steps:\n  - { up: [ { action: increment, variable: nope } ] }\n"),

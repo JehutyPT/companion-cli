@@ -227,14 +227,14 @@ describe("support matrix", () => {
         ...SUPPORT_MATRIX,
         {
           area: "button",
-          item: "notes",
+          item: "color",
           status: "supported",
-          field: ["button.notes"],
+          field: ["button.color"],
           note: "",
         },
       ];
       assert.deepEqual(matrixProblems(rows, WRITER_TABLES, REFERENCE_LISTS), [
-        "supported field button.notes is not in any writer table",
+        "supported field button.color is not in any writer table",
       ]);
     });
 

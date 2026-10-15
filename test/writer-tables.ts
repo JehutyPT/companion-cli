@@ -6,8 +6,9 @@
 import { tagged as taggedFields } from "../src/support-matrix.ts";
 import { ACTION_KINDS } from "../src/writers/actions.ts";
 import {
-  ACTION_SETS,
   TOP_LEVEL_FIELDS as BUTTON_FIELDS,
+  HOLD_FIELDS,
+  STEP_FIELDS,
 } from "../src/writers/button-control.ts";
 import {
   FEEDBACK_FIELDS,
@@ -40,6 +41,7 @@ export interface WriterTables {
   feedbackFields: readonly string[];
   buttonFields: readonly string[];
   stepFields: readonly string[];
+  holdFields: readonly string[];
   pageFields: readonly string[];
   triggerFields: readonly string[];
   triggersFields: readonly string[];
@@ -58,7 +60,8 @@ export const WRITER_TABLES: WriterTables = {
   styleFields: Object.keys(STYLE_FIELDS),
   feedbackFields: FEEDBACK_FIELDS,
   buttonFields: BUTTON_FIELDS,
-  stepFields: ACTION_SETS,
+  stepFields: STEP_FIELDS,
+  holdFields: HOLD_FIELDS,
   pageFields: PAGE_FIELDS,
   triggerFields: TRIGGER_FIELDS,
   triggersFields: TRIGGERS_FIELDS,
@@ -83,6 +86,7 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...tables.kinds.map((kind) => `kind: ${kind}`),
     ...under("button", tables.buttonFields),
     ...under("steps[]", tables.stepFields),
+    ...under("hold[]", tables.holdFields),
     ...under("page", tables.pageFields),
     ...under("trigger", tables.triggerFields),
     ...under("triggers", tables.triggersFields),

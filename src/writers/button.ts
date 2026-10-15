@@ -31,8 +31,14 @@ import {
  *   up: [ ...actions ]                         # optional
  *   rotate_left: [ ...actions ]                # optional; any rotate key turns on rotaryActions
  *   rotate_right: [ ...actions ]               # optional
- *   steps:                                     # optional; replaces the four lists above
- *     - { down: [ ...actions ], up: [], rotate_left: [], rotate_right: [] }
+ *   hold:                                      # optional; action sets keyed by a hold duration
+ *     - { after: 1000, whileHeld: true, actions: [ ...actions ] }   # after: ms, distinct per step
+ *   steps:                                     # optional; replaces the five lists above
+ *     - { down: [ ...actions ], up: [], rotate_left: [], rotate_right: [], hold: [] }
+ *   progression: auto                          # optional: auto (default), manual, expression
+ *   stepExpression: "$(custom:fx_counter)"     # only with, and required by, progression: expression
+ *   notes: ""                                  # optional
+ *   apiStyle: false                            # optional; stored as options.canModifyStyleInApis
  *   feedbacks: [ ...feedbacks ]                # optional, see feedbacks.ts
  *
  * The page must already exist and be one Companion loads (pages 1, 2, … up

@@ -111,6 +111,14 @@ down:                                      # optional action list, run on press
 up: []                                     # optional action list, run on release
 rotate_left:  [ { action: decrement, variable: fx_counter } ]   # optional, encoder turned left
 rotate_right: [ { action: increment, variable: fx_counter } ]   # optional, encoder turned right
+hold:                                      # optional; actions run once the button has been held this long
+  - after: 1000                            # milliseconds, a positive whole number, distinct within a step
+    whileHeld: true                        # optional, default false: run once `after` ms in, still held; else on release
+    actions: [ { action: increment, variable: fx_counter } ]   # optional, default []
+progression: expression                    # optional: auto (default), manual or expression
+stepExpression: "$(custom:fx_counter)"     # only with progression: expression, and then required
+notes: "Shown in Companion's editor"       # optional, default ""
+apiStyle: true                             # optional, default false; lets Companion's API change the style
 feedbacks:                                 # optional list; each overrides parts of the style while it holds
   - feedback: expression                   # Companion's "Variable: Check boolean expression"
     expression: "$(custom:fx_label) == 'pressed'"
@@ -130,7 +138,7 @@ kind: button
 location: { page: 1, row: 0, column: 3 }
 text: "OFF"
 background: "#FF0000"
-steps:                                     # non-empty; each step accepts down, up, rotate_left, rotate_right
+steps:                                     # non-empty; each step accepts down, up, rotate_left, rotate_right, hold
   - { down: [ { action: set, variable: fx_label, value: "on" } ] }
   - { down: [ { action: set, variable: fx_label, value: "off" } ] }
 feedbacks:
@@ -140,6 +148,8 @@ feedbacks:
 ```
 
 The page must already exist and be one Companion loads (pages 1, 2, … up to the first missing one), and every custom variable an action targets or a `$(custom:<name>)` reference names (in `text`, `set` values, action and feedback expressions, and feedback style `text`) must already exist; apply a `kind: variables` file first. The control previously at that location is deleted and a new `button-layered` control with fresh ids takes its place; the page's other cells are untouched. Giving `rotate_left` or `rotate_right` (even as an empty list, at top level or in a step) turns on the control's rotary actions. A feedback's `style` overrides only the fields it gives; a feedback `background` does not pick a text color. Pass-through actions and feedbacks are not checked against the database. Other feedback kinds, style fields and unknown fields are refused. A `|` block scalar works for multi-line text; its trailing newline is dropped.
+
+`progression`, `stepExpression`, `notes` and `apiStyle` are the button's options in Companion's editor (step progression, its expression, notes, and "Allow API to modify style"). Left out, each takes Companion's own default. `apiStyle` defaults to false, like a button made in Companion; the CLI never uses the style API itself. Before #24 every button was written with it on, so re-applying an older description turns it off, and the dry run reports that button as changed; add `apiStyle: true` to keep it. A `hold` entry stores an action set keyed by its `after` duration; `whileHeld: true` adds that duration to the step's `runWhileHeld` list, in hold-entry order.
 
 `page.yaml` replaces a whole page, its name and every button on it:
 

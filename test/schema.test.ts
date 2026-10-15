@@ -78,6 +78,21 @@ steps:
 feedbacks:
   - { feedback: step, step: 2, style: { textColor: "#FFFFFF" }, invert: false }
 `,
+  "a button with every option and hold actions": `${BUTTON}progression: expression
+stepExpression: "$(custom:v) + 1"
+notes: "Line one\\nline two"
+apiStyle: true
+hold:
+  - { after: 1000, whileHeld: true, actions: [{ action: increment, variable: v }] }
+  - { after: 3000 }
+`,
+  "a manual button with hold actions in a step": `${BUTTON}progression: manual
+apiStyle: false
+notes: ""
+steps:
+  - {}
+  - hold: [{ after: 500, whileHeld: false, actions: [] }]
+`,
   "a page with no buttons": `kind: page
 page: 3
 name: Empty
@@ -146,7 +161,20 @@ const INVALID: Record<string, string> = {
     "kind: surface\nsurface: s\nconfig: { groupId: g }\n",
   "an unknown surface field": "kind: surface\nsurface: s\ngroupConfig: {}\n",
   "a kind that is not a string": "kind: 1\n",
-  "unknown top-level field": `${BUTTON}notes: hi\n`,
+  "unknown top-level field": `${BUTTON}comment: hi\n`,
+  "an unknown progression": `${BUTTON}progression: random\n`,
+  "stepExpression without progression": `${BUTTON}stepExpression: "1"\n`,
+  "stepExpression with manual progression": `${BUTTON}progression: manual\nstepExpression: "1"\n`,
+  "expression progression without stepExpression": `${BUTTON}progression: expression\n`,
+  "an empty stepExpression": `${BUTTON}progression: expression\nstepExpression: ""\n`,
+  "a non-string notes": `${BUTTON}notes: 1\n`,
+  "a string apiStyle": `${BUTTON}apiStyle: "true"\n`,
+  "hold after 0": `${BUTTON}hold: [{ after: 0 }]\n`,
+  "a fractional hold after": `${BUTTON}hold: [{ after: 1.5 }]\n`,
+  "hold without after": `${BUTTON}hold: [{ actions: [] }]\n`,
+  "unknown hold field": `${BUTTON}hold: [{ after: 1, down: [] }]\n`,
+  "a string whileHeld": `${BUTTON}hold: [{ after: 1, whileHeld: "yes" }]\n`,
+  "steps with top-level hold": `${BUTTON}hold: []\nsteps: [{}]\n`,
   "unknown feedback field": `${BUTTON}feedbacks:
   - { feedback: expression, expression: "1", style: { text: B }, x: 1 }
 `,
@@ -292,6 +320,7 @@ const EXCEPTIONS: Record<string, string> = {
   "a date that is not on the calendar":
     "kind: trigger\nname: t\nevents: [{ event: specificDate, date: '2026-02-30', time: '10:00' }]\n",
   "a step feedback beyond the button's steps": `${BUTTON}feedbacks: [{ feedback: step, step: 2, style: { text: x } }]\n`,
+  "duplicate hold durations in a step": `${BUTTON}steps: [{ hold: [{ after: 1 }, { after: 1 }] }]\n`,
   "duplicate variable names":
     "kind: variables\nvariables: [{ name: a, default: 1 }, { name: a, default: 2 }]\n",
   "duplicate page locations": `kind: page
@@ -351,6 +380,7 @@ function schemaFields(schema: Json): Set<string> {
     }),
     ...under("variables[]", props(defs["variable"] as Json)),
     ...under("steps[]", props(defs["step"] as Json)),
+    ...under("hold[]", props(defs["hold"] as Json)),
     ...tagged("action"),
     ...tagged("feedback", feedbackCommon),
     ...under("feedback", feedbackCommon),
@@ -551,6 +581,7 @@ describe("schema and parser agree", () => {
     assert.match(comments ?? "", /number of the button's steps/);
     assert.match(comments ?? "", /names must be distinct/);
     assert.match(comments ?? "", /locations must be distinct/);
+    assert.match(comments ?? "", /durations must be distinct/);
   });
 });
 

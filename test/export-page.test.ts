@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { parse } from "yaml";
 import { USAGE } from "../src/cli.ts";
@@ -16,16 +16,26 @@ import { newId } from "../src/writers/ids.ts";
 import { pageWriter } from "../src/writers/page.ts";
 import {
   assertRefused,
+  copyEnv,
   exportFrom,
   exportRoundTrip,
   insert,
   mutate,
+  normaliseControls,
+  ok,
 } from "./export-helpers.ts";
 import {
   FIXTURE_CONTROL_A,
   FIXTURE_CONTROL_B,
 } from "./fixtures/companion-db.ts";
-import { applyTo, type Json, runCli, setup } from "./helpers.ts";
+import {
+  applyTo,
+  dumpDatabase,
+  type Json,
+  runCli,
+  setup,
+  writeDescription,
+} from "./helpers.ts";
 import {
   type Cells,
   type PageContent,
@@ -52,6 +62,7 @@ buttons:
     text: "Count\\n$(custom:fx_counter)"
     background: "#000080"
     textColor: "#FFFFFF"
+    apiStyle: true
     down:
       - action: increment
         variable: fx_counter
@@ -61,6 +72,7 @@ buttons:
     text: $(custom:fx_label)
     background: "#202020"
     textColor: "#FFFFFF"
+    apiStyle: true
 `,
     );
   });
@@ -80,6 +92,7 @@ location:
 text: $(custom:fx_label)
 background: "#202020"
 textColor: "#FFFFFF"
+apiStyle: true
 `,
     );
     await exportRoundTrip(env, ["page", "1", "--button", "0/0"]);
@@ -269,10 +282,9 @@ const A = FIXTURE_CONTROL_A;
 const B = FIXTURE_CONTROL_B;
 const layerList = (control: Json) =>
   (control["style"] as Json)["layers"] as Json[];
+const stepOf = (control: Json) => (control["steps"] as Json)["0"] as Json;
 const downList = (control: Json) =>
-  (((control["steps"] as Json)["0"] as Json)["action_sets"] as Json)[
-    "down"
-  ] as Json[];
+  (stepOf(control)["action_sets"] as Json)["down"] as Json[];
 const literal = (value: unknown) => ({ value, isExpression: false });
 
 /** Changes control `id`'s stored value in place. */
@@ -367,42 +379,58 @@ const REFUSALS: RefusalCase[] = [
     item: "images",
   },
   {
-    label: "manual step progression",
+    label: "a step expression kept after the progression changed",
     change: control(A, (value) => {
-      (value["options"] as Json)["stepProgression"] = "manual";
+      const options = value["options"] as Json;
+      options["stepProgression"] = "manual";
+      options["stepExpression"] = "$(custom:fx_counter)";
     }),
     cell: "0/0",
     id: A,
     reason:
-      'options.stepProgression is "manual", which apply would store as "auto"',
-    path: "options.stepProgression",
+      'options.stepExpression is set while options.stepProgression is "manual", which a description cannot express',
+    path: "options.stepExpression",
     area: "button option",
-    item: 'options.stepProgression = "manual"',
+    item: "options.stepExpression (without expression progression)",
   },
   {
-    label: "notes",
+    label: "a step name",
     change: control(A, (value) => {
-      (value["options"] as Json)["notes"] = "hi";
-    }),
-    cell: "0/0",
-    id: A,
-    reason: 'options.notes is "hi", which apply would store as ""',
-    path: "options.notes",
-    area: "button option",
-    item: "options.notes",
-  },
-  {
-    label: "canModifyStyleInApis false",
-    change: control(A, (value) => {
-      (value["options"] as Json)["canModifyStyleInApis"] = false;
+      (stepOf(value)["options"] as Json)["name"] = "First";
     }),
     cell: "0/0",
     id: A,
     reason:
-      "options.canModifyStyleInApis is false, which apply would store as true",
-    path: "options.canModifyStyleInApis",
-    area: "button option",
-    item: "options.canModifyStyleInApis",
+      "steps.0.options.name is set, which the description format does not support yet",
+    path: "steps.0.options.name",
+    area: "step",
+    item: "options (other keys)",
+  },
+  {
+    label: "a while-held duration without its hold set",
+    change: control(A, (value) => {
+      (stepOf(value)["options"] as Json)["runWhileHeld"] = [1000];
+    }),
+    cell: "0/0",
+    id: A,
+    reason:
+      "steps.0.options.runWhileHeld[0] is 1000, which names no hold set of the step or repeats one",
+    path: "steps.0.options.runWhileHeld[0]",
+    area: "step",
+    item: "options.runWhileHeld (without its hold set)",
+  },
+  {
+    label: "a hold set keyed by a fraction",
+    change: control(A, (value) => {
+      (stepOf(value)["action_sets"] as Json)["1.5"] = [];
+    }),
+    cell: "0/0",
+    id: A,
+    reason:
+      "steps.0.action_sets.1.5 is not a hold set keyed by a positive whole number of milliseconds",
+    path: "steps.0.action_sets.1.5",
+    area: "step",
+    item: "action_sets.<duration> (other keys)",
   },
   {
     label: "rotate actions with rotaryActions false",
@@ -613,11 +641,11 @@ describe("export page: refusals", () => {
       mutate(db, "pages", "1", (value) => ({ ...value, name: "" }));
       db.prepare("DELETE FROM controls WHERE id = ?").run(A);
       control(B, (value) => {
-        (value["options"] as Json)["notes"] = "n";
+        (stepOf(value)["options"] as Json)["name"] = "n";
       })(db);
     });
     const line =
-      "cannot export page 1, 3 refusals: name (name); row 0, column 0 (controls.0.0); row 0, column 1 (options.notes)";
+      "cannot export page 1, 3 refusals: name (name); row 0, column 0 (controls.0.0); row 0, column 1 (steps.0.options.name)";
     const text = await exportFrom(env, ["page", "1"]);
     assert.equal(text.code, 1);
     assert.deepEqual(text.stdout, []);
@@ -640,8 +668,8 @@ describe("export page: refusals", () => {
           path: "controls.0.0",
         },
         {
-          message: `cannot export page 1, row 0, column 1 (${B}): options.notes is "n", which apply would store as "" (see docs/support-matrix.md, button option)`,
-          path: "options.notes",
+          message: `cannot export page 1, row 0, column 1 (${B}): steps.0.options.name is set, which the description format does not support yet (see docs/support-matrix.md, step)`,
+          path: "steps.0.options.name",
         },
       ],
     });
@@ -773,6 +801,197 @@ describe("export page command line", () => {
     assert.match(
       result.stdout.join("\n"),
       /export page <n> \[--button <row>\/<column>\]/,
+    );
+  });
+});
+
+const OPTIONS = `kind: page
+page: 2
+name: Options
+buttons:
+  - location: { row: 0, column: 0 }
+    text: Auto
+    background: "#000000"
+    progression: auto
+    apiStyle: false
+  - location: { row: 0, column: 1 }
+    text: Manual
+    background: "#000000"
+    progression: manual
+    notes: "Line one\\nline two"
+    apiStyle: true
+    steps: [{}, {}]
+  - location: { row: 0, column: 2 }
+    text: Expr
+    background: "#000000"
+    progression: expression
+    stepExpression: "$(custom:fx_counter) % 2 + 1"
+    steps: [{}, {}]
+  - location: { row: 1, column: 0 }
+    text: Hold
+    background: "#000000"
+    down: [{ action: set, variable: fx_label, value: tap }]
+    hold:
+      - { after: 500, whileHeld: true, actions: [{ action: increment, variable: fx_counter }] }
+      - { after: 2000, actions: [{ action: set, variable: fx_label, value: long }] }
+  - location: { row: 1, column: 1 }
+    text: Two
+    background: "#000000"
+    steps:
+      - down: [{ action: set, variable: fx_label, value: one }]
+      - hold:
+          - { after: 1000, whileHeld: true, actions: [{ action: decrement, variable: fx_counter }] }
+          - { after: 3000 }
+`;
+
+describe("export page: button options and hold actions (#24)", () => {
+  async function written() {
+    const env = widened();
+    const applied = await applyTo(env, OPTIONS);
+    assert.equal(applied.code, 0, applied.stderr.join("\n"));
+    return env;
+  }
+
+  it("round-trips every progression, notes, apiStyle and hold actions, and parses as the file", async () => {
+    const env = await written();
+    const yaml = await exportRoundTrip(env, ["page", "2"]);
+    assert.deepEqual(parsePageText(yaml), parsePageText(OPTIONS));
+    const buttons = (parse(yaml) as Json)["buttons"] as Json[];
+    // Defaults are left out: the first button exports as a template button.
+    assert.deepEqual(Object.keys(buttons[0] as Json), [
+      "location",
+      "text",
+      "background",
+      "textColor",
+    ]);
+    assert.equal((buttons[1] as Json)["apiStyle"], true);
+    assert.equal((buttons[1] as Json)["notes"], "Line one\nline two");
+    assert.deepEqual((buttons[3] as Json)["hold"], [
+      {
+        after: 500,
+        whileHeld: true,
+        actions: [{ action: "increment", variable: "fx_counter" }],
+      },
+      {
+        after: 2000,
+        actions: [{ action: "set", variable: "fx_label", value: "long" }],
+      },
+    ]);
+  });
+
+  it("round-trips each button as kind: button", async () => {
+    const env = await written();
+    for (const cell of ["0/0", "0/1", "0/2", "1/0", "1/1"])
+      await exportRoundTrip(env, ["page", "2", "--button", cell]);
+  });
+
+  it("round-trips a Companion-shaped button, keeping a runWhileHeld order that is not ascending", async () => {
+    const env = setup(
+      {},
+      control(A, (value) => {
+        value["options"] = {
+          stepProgression: "expression",
+          stepExpression: "$(custom:fx_counter)",
+          rotaryActions: false,
+          canModifyStyleInApis: false,
+          notes: "Made in Companion",
+        };
+        const step = stepOf(value);
+        const sets = step["action_sets"] as Json;
+        const press = (sets["down"] as Json[])[0] as Json;
+        sets["1000"] = [{ ...press, id: "FixtureActionHold1000" }];
+        sets["2000"] = [];
+        sets["3000"] = [{ ...press, id: "FixtureActionHold3000" }];
+        step["options"] = { runWhileHeld: [3000, 1000] };
+      }),
+    );
+    const yaml = await exportRoundTrip(env, ["page", "1", "--button", "0/0"]);
+    const fields = parse(yaml) as Json;
+    assert.equal(fields["progression"], "expression");
+    assert.equal(fields["stepExpression"], "$(custom:fx_counter)");
+    assert.equal(fields["notes"], "Made in Companion");
+    assert.equal(fields["apiStyle"], undefined);
+    assert.deepEqual(
+      (fields["hold"] as Json[]).map(({ after, whileHeld }) => [
+        after,
+        whileHeld ?? false,
+      ]),
+      [
+        [3000, true],
+        [2000, false],
+        [1000, true],
+      ],
+    );
+    await exportRoundTrip(env, ["page", "1"]);
+  });
+
+  it("names a hold action's stored path when apply's check refuses it", async () => {
+    const env = setup(
+      {},
+      control(A, (value) => {
+        const sets = stepOf(value)["action_sets"] as Json;
+        sets["1500"] = [
+          {
+            type: "action",
+            id: "FixtureActionHold1500",
+            definitionId: "custom_variable_set_value",
+            connectionId: "internal",
+            options: { name: literal("missing_var"), value: literal("x") },
+          },
+        ];
+      }),
+    );
+    const result = await exportFrom(env, [
+      "page",
+      "1",
+      "--button",
+      "0/0",
+      "--json",
+    ]);
+    assert.equal(result.code, 1);
+    const { error } = JSON.parse(result.stdout[0] as string);
+    assert.equal(error.path, "steps.0.action_sets.1500[0].options.name");
+    assert.match(error.message, /missing_var/);
+  });
+
+  it("re-applying a file written before #24 stores canModifyStyleInApis false, and nothing else changes", async () => {
+    // The fixture's control A is a pre-#24 button: canModifyStyleInApis true.
+    const env = setup();
+    const exported = ok(
+      await exportFrom(env, ["page", "1", "--button", "0/0"]),
+    );
+    assert.match(exported, /\napiStyle: true\n/);
+    const old = writeDescription(
+      env.dir,
+      exported.replace("\napiStyle: true\n", "\n"),
+      "old.yaml",
+    );
+
+    const dry = await runCli(
+      ["apply", old, "--db", env.dbPath, "--dry-run", "--json"],
+      { tmpdir: env.tmpdir },
+    );
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(JSON.parse(dry.stdout.join("\n")).changed, true);
+
+    const copy = copyEnv(env);
+    const applied = await runCli(["apply", old, "--db", copy.dbPath], {
+      backupRoot: copy.backupRoot,
+      tmpdir: copy.tmpdir,
+    });
+    assert.equal(applied.code, 0, applied.stderr.join("\n"));
+    const expected = copyEnv(env);
+    const db = new DatabaseSync(expected.dbPath);
+    try {
+      control(A, (value) => {
+        (value["options"] as Json)["canModifyStyleInApis"] = false;
+      })(db);
+    } finally {
+      db.close();
+    }
+    assert.deepEqual(
+      normaliseControls(dumpDatabase(copy.dbPath)),
+      normaliseControls(dumpDatabase(expected.dbPath)),
     );
   });
 });

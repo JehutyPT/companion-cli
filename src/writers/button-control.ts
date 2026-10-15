@@ -2,17 +2,24 @@ import type { DatabaseSync } from "node:sqlite";
 import { readJsonValue } from "../core/database.ts";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
   field,
   type FieldSchema,
   integer,
   list,
+  NON_EMPTY_STRING,
   ref,
   requiredField,
+  STRING,
 } from "../core/field-schema.ts";
 import {
+  expectBoolean,
   expectInteger,
   expectList,
   expectMapping,
+  expectNonEmptyString,
+  expectPositiveInteger,
+  expectString,
   fieldPath,
   type Fields,
   isJsonObject,
@@ -62,6 +69,18 @@ export interface Location extends Cell {
   page: number;
 }
 
+/**
+ * One hold action set: actions run once the button has been held `after`
+ * milliseconds, stored under the action set key `"<after>"`. `whileHeld`
+ * runs them while the button is still held (`options.runWhileHeld`);
+ * otherwise they run on release after that long.
+ */
+export interface HoldPlan {
+  after: number;
+  whileHeld: boolean;
+  actions: ActionSpec[];
+}
+
 /** One step: its action sets, keyed as Companion stores them. */
 export interface StepPlan {
   /**
@@ -70,7 +89,13 @@ export interface StepPlan {
    */
   path: string;
   sets: Record<ActionSetName, ActionSpec[]>;
+  /** In file order; `runWhileHeld` keeps this order. */
+  hold: HoldPlan[];
 }
+
+/** Companion's `options.stepProgression` values. */
+export const PROGRESSIONS = ["auto", "manual", "expression"] as const;
+export type Progression = (typeof PROGRESSIONS)[number];
 
 /** Everything about a button except where it goes. */
 export interface ButtonContent {
@@ -83,6 +108,12 @@ export interface ButtonContent {
   /** Whether any rotate key was given, at top level or in a step. */
   rotaryActions: boolean;
   feedbacks: FeedbackSpec[];
+  progression: Progression;
+  /** `""` unless `progression` is `expression`. */
+  stepExpression: string;
+  notes: string;
+  /** `options.canModifyStyleInApis`. */
+  apiStyle: boolean;
 }
 
 /** A parsed button description whose location has the shape `L`. */
@@ -99,12 +130,22 @@ export const ACTION_SETS = [
 type ActionSetName = (typeof ACTION_SETS)[number];
 const ROTATE_SETS: readonly ActionSetName[] = ["rotate_left", "rotate_right"];
 
+/** A step's fields: the four action lists and the hold action sets. */
+export const STEP_FIELDS = [...ACTION_SETS, "hold"] as const;
+
+/** A hold entry's fields. */
+export const HOLD_FIELDS = ["after", "whileHeld", "actions"] as const;
+
 export const TOP_LEVEL_FIELDS = [
   "location",
   "text",
   "background",
   "textColor",
-  ...ACTION_SETS,
+  "progression",
+  "stepExpression",
+  "notes",
+  "apiStyle",
+  ...STEP_FIELDS,
   "steps",
   "feedbacks",
 ] as const;
@@ -140,13 +181,45 @@ export const LOCATION_FIELD_SCHEMAS: Record<keyof Location, FieldSchema> = {
 };
 
 /** One step's action lists: the fields of a `steps` entry. */
-export const ACTION_SET_SCHEMAS: Record<ActionSetName, FieldSchema> =
-  Object.fromEntries(
+export const STEP_FIELD_SCHEMAS: Record<
+  (typeof STEP_FIELDS)[number],
+  FieldSchema
+> = {
+  ...(Object.fromEntries(
     ACTION_SETS.map((set) => [
       set,
       field(ACTION_SET_DOCS[set], { ...list(ref("action")), default: [] }),
     ]),
-  ) as Record<ActionSetName, FieldSchema>;
+  ) as Record<ActionSetName, FieldSchema>),
+  hold: field(
+    "Hold action sets: actions run once the button has been held a number of milliseconds. Each duration at most once per step.",
+    {
+      ...list(ref("hold"), {
+        $comment: "Not expressible here: durations must be distinct.",
+      }),
+      default: [],
+    },
+  ),
+};
+
+/** A hold entry, `{ after, whileHeld, actions }`. */
+export const HOLD_FIELD_SCHEMAS: Record<
+  (typeof HOLD_FIELDS)[number],
+  FieldSchema
+> = {
+  after: requiredField(
+    "How long the button must be held, in milliseconds; a positive integer, unique within the step.",
+    integer(1),
+  ),
+  whileHeld: field(
+    "Run the actions while the button is still held. Without it, they run on release, if the button was held at least this long.",
+    { ...BOOLEAN, default: false },
+  ),
+  actions: field("The actions to run.", {
+    ...list(ref("action")),
+    default: [],
+  }),
+};
 
 /**
  * The button fields, documented. `location` is the caller's: a full location
@@ -164,17 +237,33 @@ export function buttonFieldSchemas(
       "The text color. Without it, black on a bright background and white otherwise.",
       ref("color"),
     ),
+    progression: field(
+      "How the button moves between steps: `auto` advances on each press, `manual` only through actions, `expression` follows `stepExpression`.",
+      { type: "string", enum: [...PROGRESSIONS], default: "auto" },
+    ),
+    stepExpression: field(
+      "A Companion expression giving the step to show. Required with `progression: expression`, refused otherwise.",
+      NON_EMPTY_STRING,
+    ),
+    notes: field("Notes on the button, shown in Companion's editor.", {
+      ...STRING,
+      default: "",
+    }),
+    apiStyle: field(
+      "Let Companion's HTTP and other APIs change the button's style (`canModifyStyleInApis`). Companion's default, false, refuses that.",
+      { ...BOOLEAN, default: false },
+    ),
     ...(Object.fromEntries(
-      ACTION_SETS.map((set) => [
+      STEP_FIELDS.map((set) => [
         set,
         {
-          ...ACTION_SET_SCHEMAS[set],
-          doc: `${ACTION_SET_SCHEMAS[set].doc} ${EXCLUDED_BY_STEPS}`,
+          ...STEP_FIELD_SCHEMAS[set],
+          doc: `${STEP_FIELD_SCHEMAS[set].doc} ${EXCLUDED_BY_STEPS}`,
         },
       ]),
-    ) as Record<ActionSetName, FieldSchema>),
+    ) as Record<(typeof STEP_FIELDS)[number], FieldSchema>),
     steps: field(
-      "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+      "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left, rotate_right or hold.",
       list(ref("step"), { minItems: 1 }),
     ),
     feedbacks: field(
@@ -234,6 +323,35 @@ function defaultTextColor(background: number): number {
   return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? 0x000000 : 0xffffff;
 }
 
+/** A step's `hold` list: positive, unique durations. `parent` is the step's path. */
+function parseHold(fields: Fields, parent: string): HoldPlan[] {
+  if (!Object.hasOwn(fields, "hold")) return [];
+  const path = fieldPath(parent, "hold");
+  const seen = new Set<number>();
+  return expectList(fields["hold"], path).map((item, index) => {
+    const at = fieldPath(path, index);
+    const entry = expectMapping(item, at);
+    rejectUnknownFields(entry, HOLD_FIELDS, at);
+    const after = expectPositiveInteger(
+      requireField(entry, "after", at),
+      fieldPath(at, "after"),
+    );
+    if (seen.has(after))
+      throw new ValidationError(
+        fieldPath(at, "after"),
+        `${after} is already used by another hold entry of this step`,
+      );
+    seen.add(after);
+    return {
+      after,
+      whileHeld: Object.hasOwn(entry, "whileHeld")
+        ? expectBoolean(entry["whileHeld"], fieldPath(at, "whileHeld"))
+        : false,
+      actions: parseActionList(entry, "actions", at),
+    };
+  });
+}
+
 /** One step's action sets from `fields` (the description, or one `steps` entry). */
 function parseStep(fields: Fields, path: string, prefix: string): StepPlan {
   return {
@@ -244,6 +362,7 @@ function parseStep(fields: Fields, path: string, prefix: string): StepPlan {
         parseActionList(fields, set, under(prefix, path)),
       ]),
     ) as StepPlan["sets"],
+    hold: parseHold(fields, under(prefix, path)),
   };
 }
 
@@ -264,7 +383,7 @@ function parseSteps(
       rotaryActions: hasRotateKey(fields),
     };
   }
-  for (const set of ACTION_SETS) {
+  for (const set of STEP_FIELDS) {
     if (Object.hasOwn(fields, set))
       throw new ValidationError(
         fieldPath(prefix, set),
@@ -278,7 +397,7 @@ function parseSteps(
   const entries = list.map((item, index) => {
     const path = fieldPath(stepsPath, index);
     const entry = expectMapping(item, path);
-    rejectUnknownFields(entry, ACTION_SETS, path);
+    rejectUnknownFields(entry, STEP_FIELDS, path);
     return entry;
   });
   return {
@@ -314,6 +433,7 @@ export function parseButtonDescription<L>(
     ? parseColor(fields["textColor"], path("textColor"))
     : defaultTextColor(background);
   const { steps, rotaryActions } = parseSteps(fields, prefix);
+  const { progression, stepExpression } = parseProgression(fields, prefix);
   return {
     location,
     text,
@@ -326,6 +446,50 @@ export function parseButtonDescription<L>(
       "feedbacks",
       { stepCount: steps.length },
       prefix,
+    ),
+    progression,
+    stepExpression,
+    notes: Object.hasOwn(fields, "notes")
+      ? expectString(fields["notes"], path("notes"))
+      : "",
+    apiStyle: Object.hasOwn(fields, "apiStyle")
+      ? expectBoolean(fields["apiStyle"], path("apiStyle"))
+      : false,
+  };
+}
+
+/**
+ * `progression` and `stepExpression`: the expression is required with
+ * `progression: expression` and refused otherwise.
+ */
+function parseProgression(
+  fields: Fields,
+  prefix: string,
+): { progression: Progression; stepExpression: string } {
+  const path = (key: string) => fieldPath(prefix, key);
+  let progression: Progression = "auto";
+  if (Object.hasOwn(fields, "progression")) {
+    const value = expectString(fields["progression"], path("progression"));
+    if (!(PROGRESSIONS as readonly string[]).includes(value))
+      throw new ValidationError(
+        path("progression"),
+        `unknown progression "${value}" (expected one of: ${PROGRESSIONS.join(", ")})`,
+      );
+    progression = value as Progression;
+  }
+  if (progression !== "expression") {
+    if (Object.hasOwn(fields, "stepExpression"))
+      throw new ValidationError(
+        path("stepExpression"),
+        "is only allowed with progression: expression",
+      );
+    return { progression, stepExpression: "" };
+  }
+  return {
+    progression,
+    stepExpression: expectNonEmptyString(
+      requireField(fields, "stepExpression", prefix),
+      path("stepExpression"),
     ),
   };
 }
@@ -346,14 +510,23 @@ export function buttonVariableReferences(
 ): VariableReference[] {
   return [
     ...customReferences(plan.text, fieldPath(prefix, "text")),
-    ...plan.steps.flatMap((step) =>
-      ACTION_SETS.flatMap((set) =>
+    ...plan.steps.flatMap((step) => [
+      ...ACTION_SETS.flatMap((set) =>
         actionVariableReferences(
           step.sets[set],
           fieldPath(under(prefix, step.path), set),
         ),
       ),
-    ),
+      ...step.hold.flatMap((hold, index) =>
+        actionVariableReferences(
+          hold.actions,
+          fieldPath(
+            fieldPath(fieldPath(under(prefix, step.path), "hold"), index),
+            "actions",
+          ),
+        ),
+      ),
+    ]),
     ...feedbackVariableReferences(
       plan.feedbacks,
       fieldPath(prefix, "feedbacks"),
@@ -508,21 +681,29 @@ export function buildButtonControl(
   return {
     type: "button-layered",
     options: {
-      stepProgression: "auto",
-      stepExpression: "",
+      stepProgression: plan.progression,
+      stepExpression: plan.stepExpression,
       rotaryActions: plan.rotaryActions,
-      canModifyStyleInApis: true,
-      notes: "",
+      canModifyStyleInApis: plan.apiStyle,
+      notes: plan.notes,
     },
     localVariables: [],
     steps: Object.fromEntries(
       plan.steps.map((step, index) => [
         String(index),
         {
-          action_sets: Object.fromEntries(
-            ACTION_SETS.map((set) => [set, step.sets[set].map(buildAction)]),
-          ),
-          options: { runWhileHeld: [] },
+          action_sets: Object.fromEntries([
+            ...ACTION_SETS.map((set) => [set, step.sets[set].map(buildAction)]),
+            ...step.hold.map((hold) => [
+              String(hold.after),
+              hold.actions.map(buildAction),
+            ]),
+          ]),
+          options: {
+            runWhileHeld: step.hold
+              .filter((hold) => hold.whileHeld)
+              .map((hold) => hold.after),
+          },
         },
       ]),
     ),

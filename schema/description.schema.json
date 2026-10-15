@@ -136,7 +136,40 @@
             "down": false,
             "up": false,
             "rotate_left": false,
-            "rotate_right": false
+            "rotate_right": false,
+            "hold": false
+          }
+        },
+        "stepExpression": {
+          "$comment": "`stepExpression` needs `progression: expression`.",
+          "required": [
+            "progression"
+          ],
+          "properties": {
+            "progression": {
+              "const": "expression"
+            }
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "progression"
+        ],
+        "properties": {
+          "progression": {
+            "description": "`progression: expression` needs `stepExpression`.",
+            "const": "expression"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "stepExpression"
+        ],
+        "properties": {
+          "stepExpression": {
+            "description": "Required with `progression: expression`."
           }
         }
       },
@@ -160,6 +193,31 @@
         "textColor": {
           "description": "The text color. Without it, black on a bright background and white otherwise.",
           "$ref": "#/$defs/color"
+        },
+        "progression": {
+          "description": "How the button moves between steps: `auto` advances on each press, `manual` only through actions, `expression` follows `stepExpression`.",
+          "type": "string",
+          "enum": [
+            "auto",
+            "manual",
+            "expression"
+          ],
+          "default": "auto"
+        },
+        "stepExpression": {
+          "description": "A Companion expression giving the step to show. Required with `progression: expression`, refused otherwise.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "description": "Notes on the button, shown in Companion's editor.",
+          "type": "string",
+          "default": ""
+        },
+        "apiStyle": {
+          "description": "Let Companion's HTTP and other APIs change the button's style (`canModifyStyleInApis`). Companion's default, false, refuses that.",
+          "type": "boolean",
+          "default": false
         },
         "down": {
           "description": "Actions run when the button is pressed. Cannot be combined with steps.",
@@ -193,8 +251,17 @@
           },
           "default": []
         },
+        "hold": {
+          "description": "Hold action sets: actions run once the button has been held a number of milliseconds. Each duration at most once per step. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hold"
+          },
+          "$comment": "Not expressible here: durations must be distinct.",
+          "default": []
+        },
         "steps": {
-          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left, rotate_right or hold.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/step"
@@ -785,7 +852,40 @@
             "down": false,
             "up": false,
             "rotate_left": false,
-            "rotate_right": false
+            "rotate_right": false,
+            "hold": false
+          }
+        },
+        "stepExpression": {
+          "$comment": "`stepExpression` needs `progression: expression`.",
+          "required": [
+            "progression"
+          ],
+          "properties": {
+            "progression": {
+              "const": "expression"
+            }
+          }
+        }
+      },
+      "if": {
+        "required": [
+          "progression"
+        ],
+        "properties": {
+          "progression": {
+            "description": "`progression: expression` needs `stepExpression`.",
+            "const": "expression"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "stepExpression"
+        ],
+        "properties": {
+          "stepExpression": {
+            "description": "Required with `progression: expression`."
           }
         }
       },
@@ -805,6 +905,31 @@
         "textColor": {
           "description": "The text color. Without it, black on a bright background and white otherwise.",
           "$ref": "#/$defs/color"
+        },
+        "progression": {
+          "description": "How the button moves between steps: `auto` advances on each press, `manual` only through actions, `expression` follows `stepExpression`.",
+          "type": "string",
+          "enum": [
+            "auto",
+            "manual",
+            "expression"
+          ],
+          "default": "auto"
+        },
+        "stepExpression": {
+          "description": "A Companion expression giving the step to show. Required with `progression: expression`, refused otherwise.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "description": "Notes on the button, shown in Companion's editor.",
+          "type": "string",
+          "default": ""
+        },
+        "apiStyle": {
+          "description": "Let Companion's HTTP and other APIs change the button's style (`canModifyStyleInApis`). Companion's default, false, refuses that.",
+          "type": "boolean",
+          "default": false
         },
         "down": {
           "description": "Actions run when the button is pressed. Cannot be combined with steps.",
@@ -838,8 +963,17 @@
           },
           "default": []
         },
+        "hold": {
+          "description": "Hold action sets: actions run once the button has been held a number of milliseconds. Each duration at most once per step. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hold"
+          },
+          "$comment": "Not expressible here: durations must be distinct.",
+          "default": []
+        },
         "steps": {
-          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left, rotate_right or hold.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/step"
@@ -897,8 +1031,46 @@
             "$ref": "#/$defs/action"
           },
           "default": []
+        },
+        "hold": {
+          "description": "Hold action sets: actions run once the button has been held a number of milliseconds. Each duration at most once per step.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hold"
+          },
+          "$comment": "Not expressible here: durations must be distinct.",
+          "default": []
         }
       },
+      "additionalProperties": false
+    },
+    "hold": {
+      "type": "object",
+      "description": "A hold action set: actions run once the button has been held `after` milliseconds.",
+      "properties": {
+        "after": {
+          "description": "How long the button must be held, in milliseconds; a positive integer, unique within the step.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "whileHeld": {
+          "description": "Run the actions while the button is still held. Without it, they run on release, if the button was held at least this long.",
+          "type": "boolean",
+          "default": false
+        },
+        "actions": {
+          "description": "The actions to run.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "after"
+      ],
       "additionalProperties": false
     },
     "action": {

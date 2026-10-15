@@ -24,6 +24,8 @@
 # Encoders count their variable down (rotate left) and up (rotate right), and
 # reset it to 0 on push. S9 is a two-step latch: red OFF on step 1, green ON on
 # step 2. Text colours come from the background's brightness (no textColor).
+# Every button sets apiStyle: true, as the prototype stored
+# canModifyStyleInApis: true; the CLI's default is false, like Companion's.
 kind: page
 page: 99
 name: SKAARHOJ TEST
@@ -31,15 +33,19 @@ buttons:
   - location: { row: 0, column: 0 }
     text: "Last\n$(custom:sk_last)\n$(custom:sk_presses)"
     background: "#000080"
+    apiStyle: true
   - location: { row: 0, column: 1 }
     text: "Iris $(custom:sk_iris)\nFocus $(custom:sk_focus)"
     background: "#202020"
+    apiStyle: true
   - location: { row: 0, column: 2 }
     text: "$(internal:time_hms)"
     background: "#202020"
+    apiStyle: true
   - location: { row: 0, column: 3 }
     text: "E1 #46\n$(custom:sk_enc1)"
     background: "#400000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc1, value: "0" }
       - { action: set, variable: sk_last, value: "E1 push" }
@@ -48,6 +54,7 @@ buttons:
   - location: { row: 0, column: 4 }
     text: "E2 #47\n$(custom:sk_enc2)"
     background: "#004000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc2, value: "0" }
       - { action: set, variable: sk_last, value: "E2 push" }
@@ -56,6 +63,7 @@ buttons:
   - location: { row: 0, column: 5 }
     text: "E3 #48\n$(custom:sk_enc3)"
     background: "#000060"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc3, value: "0" }
       - { action: set, variable: sk_last, value: "E3 push" }
@@ -64,6 +72,7 @@ buttons:
   - location: { row: 0, column: 6 }
     text: "E4 #49\n$(custom:sk_enc4)"
     background: "#404000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc4, value: "0" }
       - { action: set, variable: sk_last, value: "E4 push" }
@@ -72,6 +81,7 @@ buttons:
   - location: { row: 0, column: 7 }
     text: "E5 #50\n$(custom:sk_enc5)"
     background: "#004040"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc5, value: "0" }
       - { action: set, variable: sk_last, value: "E5 push" }
@@ -80,6 +90,7 @@ buttons:
   - location: { row: 0, column: 8 }
     text: "E6 #51\n$(custom:sk_enc6)"
     background: "#400040"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc6, value: "0" }
       - { action: set, variable: sk_last, value: "E6 push" }
@@ -88,6 +99,7 @@ buttons:
   - location: { row: 0, column: 9 }
     text: "E7 #52\n$(custom:sk_enc7)"
     background: "#303030"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc7, value: "0" }
       - { action: set, variable: sk_last, value: "E7 push" }
@@ -96,6 +108,7 @@ buttons:
   - location: { row: 0, column: 10 }
     text: "E8 #53\n$(custom:sk_enc8)"
     background: "#603000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_enc8, value: "0" }
       - { action: set, variable: sk_last, value: "E8 push" }
@@ -104,60 +117,70 @@ buttons:
   - location: { row: 0, column: 16 }
     text: "JB"
     background: "#000000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "JB" }
   - location: { row: 1, column: 5 }
     text: "S1\n#37"
     background: "#FF0000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S1" }
   - location: { row: 1, column: 6 }
     text: "S2\n#38"
     background: "#00FF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S2" }
   - location: { row: 1, column: 7 }
     text: "S3\n#39"
     background: "#0000FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S3" }
   - location: { row: 1, column: 8 }
     text: "S4\n#40"
     background: "#FFFF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S4" }
   - location: { row: 1, column: 9 }
     text: "ABCDEFGHIJKLMNOP"
     background: "#00FFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S5" }
   - location: { row: 1, column: 10 }
     text: "Line one\nLine two"
     background: "#FF00FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S6" }
   - location: { row: 1, column: 11 }
     text: "One\nTwo\nThree"
     background: "#FFFFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S7" }
   - location: { row: 1, column: 12 }
     text: "No colour"
     background: "#000000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "S8" }
   - location: { row: 1, column: 13 }
     text: "OFF"
     background: "#FF0000"
+    apiStyle: true
     steps:
       - down:
           - { action: increment, variable: sk_presses }
@@ -172,6 +195,7 @@ buttons:
   - location: { row: 2, column: 4 }
     text: "IRIS"
     background: "#000000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_iris, value: "0" }
       - { action: set, variable: sk_last, value: "IRIS push" }
@@ -180,78 +204,91 @@ buttons:
   - location: { row: 2, column: 5 }
     text: "X1\n#13"
     background: "#FF0000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X1" }
   - location: { row: 2, column: 6 }
     text: "X2\n#14"
     background: "#00FF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X2" }
   - location: { row: 2, column: 7 }
     text: "X3\n#15"
     background: "#0000FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X3" }
   - location: { row: 2, column: 8 }
     text: "X4\n#16"
     background: "#FFFF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X4" }
   - location: { row: 2, column: 9 }
     text: "X5\n#17"
     background: "#00FFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X5" }
   - location: { row: 2, column: 10 }
     text: "X6\n#18"
     background: "#FF00FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X6" }
   - location: { row: 2, column: 11 }
     text: "X7\n#19"
     background: "#FFFFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X7" }
   - location: { row: 2, column: 12 }
     text: "X8\n#20"
     background: "#FF8000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X8" }
   - location: { row: 2, column: 13 }
     text: "X9\n#21"
     background: "#8000FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X9" }
   - location: { row: 2, column: 14 }
     text: "X10\n#22"
     background: "#FF80C0"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X10" }
   - location: { row: 2, column: 15 }
     text: "X11\n#23"
     background: "#808080"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X11" }
   - location: { row: 2, column: 16 }
     text: "X12\n#24"
     background: "#800000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "X12" }
   - location: { row: 3, column: 3 }
     text: "FOCUS"
     background: "#000000"
+    apiStyle: true
     down:
       - { action: set, variable: sk_focus, value: "0" }
       - { action: set, variable: sk_last, value: "FOCUS push" }
@@ -260,72 +297,84 @@ buttons:
   - location: { row: 3, column: 5 }
     text: "C1\n#1"
     background: "#FF0000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C1" }
   - location: { row: 3, column: 6 }
     text: "C2\n#2"
     background: "#00FF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C2" }
   - location: { row: 3, column: 7 }
     text: "C3\n#3"
     background: "#0000FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C3" }
   - location: { row: 3, column: 8 }
     text: "C4\n#4"
     background: "#FFFF00"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C4" }
   - location: { row: 3, column: 9 }
     text: "C5\n#5"
     background: "#00FFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C5" }
   - location: { row: 3, column: 10 }
     text: "C6\n#6"
     background: "#FF00FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C6" }
   - location: { row: 3, column: 11 }
     text: "C7\n#7"
     background: "#FFFFFF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C7" }
   - location: { row: 3, column: 12 }
     text: "C8\n#8"
     background: "#FF8000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C8" }
   - location: { row: 3, column: 13 }
     text: "C9\n#9"
     background: "#8000FF"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C9" }
   - location: { row: 3, column: 14 }
     text: "C10\n#10"
     background: "#FF80C0"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C10" }
   - location: { row: 3, column: 15 }
     text: "C11\n#11"
     background: "#808080"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C11" }
   - location: { row: 3, column: 16 }
     text: "C12\n#12"
     background: "#800000"
+    apiStyle: true
     down:
       - { action: increment, variable: sk_presses }
       - { action: set, variable: sk_last, value: "C12" }
