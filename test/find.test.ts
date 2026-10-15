@@ -400,7 +400,7 @@ describe("find --connection", () => {
       `unplaced               bank:SeedStrayAAAAAAAAAAAA  ${via("alpha", ALPHA)}  down[0].connection`,
     ]);
     assert.deepEqual(ok(await find(env, ["--connection", "beta"])), [
-      `page 2 row 0 column 1  bank:SeedBetaAAAAAAAAAAAAA  ${via("beta", BETA)}  localVariables[0].connectionId, feedbacks[0].connection`,
+      `page 2 row 0 column 1  bank:SeedBetaAAAAAAAAAAAAA  ${via("beta", BETA)}  localVariables[0].connection, feedbacks[0].connection`,
     ]);
     assert.deepEqual(ok(await find(env, ["--connection", "twin"])), [
       `page 2 row 0 column 2  bank:SeedEchoAAAAAAAAAAAAA  ${via("twin", TWIN_Z)}, ${via("twin", TWIN_A)}  text`,
@@ -569,6 +569,9 @@ describe("find <text>", () => {
       "FixtureConnection",
       CAMERA,
       "internal",
+      // Every wrapper's isExpression flag: not an option value.
+      "false",
+      "true",
     ]) {
       assert.deepEqual(await texts(env, text), [], text);
     }

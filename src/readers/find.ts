@@ -132,22 +132,19 @@ function inEntityOptions({ path, ancestors }: Leaf): boolean {
   );
 }
 
-/** A leaf's value as a string, unwrapped from its wrapper when it ends one. */
-function wrappedString(leaf: Leaf, key: string): string | undefined {
-  const { path, ancestors, value } = leaf;
-  const n = path.length;
-  if (typeof value !== "string") return undefined;
-  if (path[n - 1] === "value" && isWrapper(ancestors[n - 1]))
-    return path[n - 2] === key ? value : undefined;
-  return path[n - 1] === key ? value : undefined;
+/**
+ * The index in the leaf's path of the key its value is stored under: the
+ * wrapper's key for a wrapped option value, else the last segment.
+ * `ancestors[index]` is the object holding that key.
+ */
+function valueKeyIndex({ path, ancestors }: Leaf): number {
+  const last = path.length - 1;
+  return path[last] === "value" && isWrapper(ancestors[last]) ? last - 1 : last;
 }
 
-/** The object holding the (possibly wrapped) value at `key` the leaf ends. */
-function holderOf(leaf: Leaf): unknown {
-  const n = leaf.path.length;
-  return leaf.path[n - 1] === "value" && isWrapper(leaf.ancestors[n - 1])
-    ? leaf.ancestors[n - 2]
-    : leaf.ancestors[n - 1];
+/** Whether the leaf is a wrapper's `isExpression` flag, not a value. */
+function isExpressionFlag({ path, ancestors }: Leaf): boolean {
+  return path.at(-1) === "isExpression" && isWrapper(ancestors.at(-1));
 }
 
 // ---------------------------------------------------------------------------
@@ -263,14 +260,21 @@ function buttonPath(control: unknown, s: Segment[]): string | undefined {
       fieldPath(list, s[4]),
     );
   }
-  if (s[0] === "feedbacks" && typeof s[1] === "number")
+  if (
+    (s[0] === "feedbacks" || s[0] === "localVariables") &&
+    typeof s[1] === "number"
+  )
     return entityPath(
       at(control, s.slice(0, 2)),
       s.slice(2),
-      fieldPath("feedbacks", s[1]),
+      join("", s.slice(0, 2)),
     );
   return undefined;
 }
+
+/** Whether a path inside a trigger is its name, `options.name`. */
+const isTriggerName = (path: readonly Segment[]) =>
+  path.length === 2 && path[0] === "options" && path[1] === "name";
 
 /** Event options with description terms, by event type. */
 const EVENT_TERMS: Record<string, Record<string, string>> = {
@@ -281,7 +285,7 @@ const EVENT_TERMS: Record<string, Record<string, string>> = {
 
 /** Description terms for a path in a trigger control, when it has them. */
 function triggerPath(control: unknown, s: Segment[]): string | undefined {
-  if (s.length === 2 && s[0] === "options" && s[1] === "name") return "name";
+  if (isTriggerName(s)) return "name";
   if (s.length === 4 && s[0] === "events" && s[2] === "options") {
     const type = get(at(control, s.slice(0, 2)), "type");
     const term =
@@ -290,7 +294,10 @@ function triggerPath(control: unknown, s: Segment[]): string | undefined {
         : undefined;
     if (term) return fieldPath(join("", s.slice(0, 2)), term);
   }
-  if ((s[0] === "actions" || s[0] === "condition") && typeof s[1] === "number")
+  if (
+    (s[0] === "actions" || s[0] === "condition" || s[0] === "localVariables") &&
+    typeof s[1] === "number"
+  )
     return entityPath(
       at(control, s.slice(0, 2)),
       s.slice(2),
@@ -325,20 +332,19 @@ function variableNames(control: unknown, leaf: Leaf): string[] {
   const { path, ancestors, value } = leaf;
   if (typeof value !== "string") return [];
   const names = customReferences(value, "").map(({ name }) => name);
-  const n = path.length;
+  const key = valueKeyIndex(leaf);
+  const entity = ancestors[key - 1];
   if (
-    path[n - 1] === "value" &&
-    isWrapper(ancestors[n - 1]) &&
-    path[n - 2] === "name" &&
-    path[n - 3] === "options" &&
-    isEntity(ancestors[n - 3]) &&
-    (ancestors[n - 3] as Record<string, unknown>)["connectionId"] ===
-      INTERNAL_CONNECTION
+    key === path.length - 2 &&
+    path[key] === "name" &&
+    path[key - 1] === "options" &&
+    isEntity(entity) &&
+    entity["connectionId"] === INTERNAL_CONNECTION
   )
     names.push(value);
   if (
     isTrigger(control) &&
-    n === 4 &&
+    path.length === 4 &&
     path[0] === "events" &&
     path[2] === "options" &&
     path[3] === "variableId" &&
@@ -408,14 +414,14 @@ function isLayerText(control: unknown, { path, ancestors }: Leaf): boolean {
 
 /** Whether `leaf` is a feedback style override of `text`. */
 function isOverrideText(leaf: Leaf): boolean {
-  if (wrappedString(leaf, "override") === undefined) return false;
-  const override = holderOf(leaf);
-  const n = leaf.path.length;
-  const index = leaf.path[n - 1] === "value" ? n - 3 : n - 2;
+  const key = valueKeyIndex(leaf);
+  const override = leaf.ancestors[key];
   return (
+    typeof leaf.value === "string" &&
+    leaf.path[key] === "override" &&
     isJsonObject(override) &&
     override["elementProperty"] === "text" &&
-    leaf.path[index - 1] === "styleOverrides"
+    leaf.path[key - 2] === "styleOverrides"
   );
 }
 
@@ -431,14 +437,9 @@ function textMatcher(text: string): Matcher {
         matched = has(asLines(value));
       } else if (typeof value === "string" && isOverrideText(leaf)) {
         matched = has(asLines(value));
-      } else if (
-        isTrigger(control) &&
-        path.length === 2 &&
-        path[0] === "options" &&
-        path[1] === "name"
-      ) {
+      } else if (isTrigger(control) && isTriggerName(path)) {
         matched = typeof value === "string" && has(value);
-      } else if (inEntityOptions(leaf)) {
+      } else if (inEntityOptions(leaf) && !isExpressionFlag(leaf)) {
         matched = has(
           typeof value === "string" ? value : JSON.stringify(value),
         );
