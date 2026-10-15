@@ -26,6 +26,8 @@ export interface FakeTrpcState {
   silent: Set<string>;
   /** Paths answered with a tRPC error reply. */
   failing: Set<string>;
+  /** Paths after whose `data` reply the server closes the socket. */
+  closeAfter: Set<string>;
 }
 
 export interface FakeTrpc {
@@ -97,14 +99,25 @@ export async function startFakeTrpc(): Promise<FakeTrpc> {
           return;
         }
         if (frame.opcode !== 0x1) continue;
-        const message = JSON.parse(frame.payload.toString("utf8")) as Record<
-          string,
-          unknown
-        >;
+        let message: Record<string, unknown>;
+        try {
+          message = JSON.parse(frame.payload.toString("utf8")) as Record<
+            string,
+            unknown
+          >;
+        } catch {
+          fake.messages.push({ unparsable: frame.payload.toString("utf8") });
+          continue;
+        }
         fake.messages.push(message);
         respond(fake.state, message, (reply) =>
           socket.write(encodeFrame(0x1, Buffer.from(JSON.stringify(reply)))),
         );
+        const path = (message["params"] as { path?: string } | undefined)?.path;
+        if (path !== undefined && fake.state.closeAfter.has(path)) {
+          socket.end(encodeFrame(0x8, Buffer.from([0x03, 0xe8])));
+          return;
+        }
       }
     });
     socket.on("error", () => undefined);
@@ -124,6 +137,7 @@ function emptyState(): FakeTrpcState {
     feedbacks: {},
     silent: new Set(),
     failing: new Set(),
+    closeAfter: new Set(),
   };
 }
 

@@ -16,6 +16,10 @@ type Method = "subscription" | "subscription.stop";
 
 const NOT_RUNNING_HINT = "start Companion, or check COMPANION_URL";
 
+/** The hint of an answer Companion 5.1 would not give. */
+export const OTHER_COMPANION_HINT =
+  "the running Companion may not be the 5.1 build installed in /Applications";
+
 /** One awaited subscription: its first `data` payload settles it. */
 interface Pending {
   path: string;
@@ -30,6 +34,7 @@ export class TrpcSubscriber {
   readonly #pending = new Map<number, Pending>();
   #nextId = 1;
   #closed: Promise<void>;
+  #isClosed = false;
 
   private constructor(socket: WebSocket, url: string, timeoutMs: number) {
     this.#socket = socket;
@@ -40,16 +45,20 @@ export class TrpcSubscriber {
     );
     socket.addEventListener("message", (event) => this.#receive(event.data));
     socket.addEventListener("close", () => {
+      this.#isClosed = true;
       for (const [id, pending] of this.#pending) {
         this.#pending.delete(id);
-        pending.reject(
-          new CliError(
-            `Companion closed the socket at ${this.#url} before answering ${pending.path}`,
-            { code: "companion_not_running", hint: NOT_RUNNING_HINT },
-          ),
-        );
+        pending.reject(this.#unanswered(pending.path, "closed the socket"));
       }
     });
+  }
+
+  /** Companion ended the exchange (`how`) before answering `path`. */
+  #unanswered(path: string, how: string): CliError {
+    return new CliError(
+      `Companion ${how} at ${this.#url} before answering ${path}`,
+      { code: "companion_not_running", hint: NOT_RUNNING_HINT },
+    );
   }
 
   /**
@@ -92,6 +101,7 @@ export class TrpcSubscriber {
    * subscription (also on an error or a timeout) and returns the payload.
    */
   async first(path: string): Promise<unknown> {
+    if (this.#isClosed) throw this.#unanswered(path, "closed the socket");
     const id = this.#nextId++;
     const data = new Promise<unknown>((resolve, reject) =>
       this.#pending.set(id, { path, resolve, reject }),
@@ -145,10 +155,7 @@ export class TrpcSubscriber {
       pending.reject(
         new CliError(
           `Companion answered ${pending.path} with an error: ${reason}`,
-          {
-            code: "unsupported_companion_build",
-            hint: "the running Companion may not be the 5.1 build installed in /Applications",
-          },
+          { code: "unsupported_companion_build", hint: OTHER_COMPANION_HINT },
         ),
       );
       return;
@@ -157,6 +164,11 @@ export class TrpcSubscriber {
     if (reply?.["type"] === "data") {
       this.#pending.delete(id as number);
       pending.resolve(reply["data"]);
+    } else if (reply?.["type"] === "stopped") {
+      this.#pending.delete(id as number);
+      pending.reject(
+        this.#unanswered(pending.path, "stopped the subscription"),
+      );
     }
   }
 }

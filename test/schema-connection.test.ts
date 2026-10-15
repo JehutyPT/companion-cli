@@ -357,6 +357,18 @@ describe("schema --connection refusals", () => {
     assertSocketDiscipline(ALL_PATHS);
   });
 
+  it("fails at once when Companion closes the socket mid-way", async () => {
+    fake.state.closeAfter.add("instances.connections.watch");
+    const started = Date.now();
+    const result = await schemaConnection(["--connection", "mixer", "--json"], {
+      timeoutMs: 3000,
+    });
+    assert.equal(result.code, 1);
+    const error = parseJson(result)["error"] as Json;
+    assert.equal(error["code"], "companion_not_running");
+    assert.ok(Date.now() - started < 2000, "waited for the timeout");
+  });
+
   it("reports a tRPC error reply as another Companion", async () => {
     fake.state.failing.add("instances.definitions.actions");
     const result = await schemaConnection(["--connection", "mixer", "--json"]);

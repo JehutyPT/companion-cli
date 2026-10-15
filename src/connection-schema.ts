@@ -17,7 +17,7 @@ import {
   type Env,
   loadCompanionUrl,
 } from "./rest/endpoint.ts";
-import { TrpcSubscriber } from "./rest/trpc-socket.ts";
+import { OTHER_COMPANION_HINT, TrpcSubscriber } from "./rest/trpc-socket.ts";
 
 /** The one Companion build whose private socket API this command knows. */
 export const SUPPORTED_BUILD = "5.1.0+9981-stable-257b325d09";
@@ -265,7 +265,7 @@ function stringOr(value: unknown, fallback: string): string {
 function unexpectedPayload(path: string): CliError {
   return new CliError(`Companion's ${path} payload has an unexpected shape`, {
     code: "unsupported_companion_build",
-    hint: "the running Companion may not be the 5.1 build installed in /Applications",
+    hint: OTHER_COMPANION_HINT,
   });
 }
 
