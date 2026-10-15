@@ -87,4 +87,4 @@ _Avoid_: Lint, check (a writer's `check` is one step of validating)
 A copy of the database and its WAL files taken immediately before an apply.
 
 **REST helper**:
-The part of the tool that talks to a running Companion over its HTTP API, for runtime actions only: press, rotate, read or set a custom variable, read surface status.
+The part of the tool that talks to a running Companion over its HTTP API, for runtime actions only: press, rotate, read or set a custom variable, read surface status. `list variables` also uses it to read each listed variable's current value, and still succeeds from the database when it cannot.

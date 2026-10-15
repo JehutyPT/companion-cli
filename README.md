@@ -188,7 +188,7 @@ valid: page 99 "SKAARHOJ TEST" (47 buttons) (structure only; not checked against
 
 ### Read commands
 
-These read the database and print what is stored, one line per item:
+These read the database and print what is stored, one line per item (`list variables` also asks the running Companion for current values; see below):
 
 ```sh
 companion-cli list variables                      # the local install (macOS), with current values

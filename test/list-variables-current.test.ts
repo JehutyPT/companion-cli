@@ -450,6 +450,24 @@ describe("list variables: current values", () => {
       assert.deepEqual(paths, []);
     });
 
+    it("--no-current with --db gives the --db note", async () => {
+      const target = install();
+      const document = json(
+        await listVariables(target, [
+          "--db",
+          target.dbPath,
+          "--no-current",
+          "--json",
+        ]),
+      );
+      assert.equal(document["values"], "skipped");
+      assert.equal(
+        document["note"],
+        "current values are only read for the install's database",
+      );
+      assert.deepEqual(paths, []);
+    });
+
     it("list triggers refuses --no-current", async () => {
       const target = install();
       const result = await runCli(

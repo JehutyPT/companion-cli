@@ -161,7 +161,6 @@ describe("list variables", () => {
       seed(db, "zero_number", { defaultValue: 0, sortOrder: 1 });
       seed(db, "zero_string", {
         defaultValue: "0",
-        currentValue: null,
         description: "two\nlines",
         sortOrder: 1,
       });

@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { matchesNamePatterns } from "../core/patterns.ts";
 import { type ReadOptions, readDatabase } from "../core/read.ts";
-import type { Env } from "../rest/endpoint.ts";
+import type { ConfigDirs, Env } from "../rest/endpoint.ts";
 
 /**
  * A lister reads one kind of stored item for `list <kind>`. It plugs into the
@@ -43,13 +43,9 @@ export interface Listing<Item> {
 }
 
 /** What a `list` command reads with, beyond the database read options. */
-export interface ListOptions extends ReadOptions {
+export interface ListOptions extends Omit<ReadOptions, "homedir">, ConfigDirs {
   /** Environment for the REST endpoint. */
   env: Env;
-  /** Directory holding `.env.local`. */
-  cwd: string;
-  /** The user's home directory, for the user config file. */
-  homedir: string;
   /** Per-request REST timeout in milliseconds. */
   restTimeoutMs?: number;
 }

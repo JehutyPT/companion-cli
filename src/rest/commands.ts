@@ -83,6 +83,9 @@ export async function readVariableValue(
   name: string,
   timeoutMs: number,
 ): Promise<VariableRead> {
+  // `.` and `..` cannot be requested (see `encodeSegment`); Companion refuses
+  // them as names, so there is no such variable to read.
+  if (name === "." || name === "..") return { outcome: "missing" };
   let reply: Reply;
   try {
     reply = await send(
@@ -98,14 +101,8 @@ export async function readVariableValue(
   }
   if (reply.status === 200) return { outcome: "value", value: reply.body };
   if (reply.status === 404) return { outcome: "missing" };
-  if (reply.status === 401) {
-    return {
-      outcome: "unauthorised",
-      message: `Companion refused the API key (HTTP 401)${reason(reply.body)}`,
-    };
-  }
   const { message } = variableError(reply, name);
-  return reply.status === 403
+  return reply.status === 401 || reply.status === 403
     ? { outcome: "unauthorised", message }
     : { outcome: "not_reachable", message };
 }
