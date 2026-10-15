@@ -79,19 +79,81 @@ export function assertSupportedVersion(db: DatabaseSync): void {
 
 const UNREADABLE: CliErrorOptions = { code: "database_unreadable" };
 
+/**
+ * The files a snapshot copies: the database and its WAL, never `-shm`.
+ * SQLite rebuilds the WAL index from the WAL when it opens the copy, so data
+ * only in the WAL is still read, and copying `-shm` while Companion runs can
+ * fail on Windows' mandatory locks.
+ */
+export const SNAPSHOT_FILE_SUFFIXES = ["", "-wal"] as const;
+
+/** Copy errors a running Companion, antivirus or the indexer can cause briefly. */
+const TRANSIENT_COPY_ERRORS = new Set(["EBUSY", "EPERM", "EACCES"]);
+
+/** Waits between snapshot copy attempts: about one second in all. */
+export const SNAPSHOT_COPY_RETRY_DELAYS_MS = [50, 100, 200, 300, 350] as const;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function removeSnapshotDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
 export interface DatabaseCopyOptions {
   /** Open the copy read-only. */
   readOnly: boolean;
   /** Directory for the temporary copy. Defaults to the OS temp directory. */
   tmpdir?: string | undefined;
+  /** Copies one file. Defaults to `copyFileSync`; a test seam. */
+  copyFile?: ((source: string, target: string) => void) | undefined;
+  /** Removes the temporary directory. Defaults to `rmSync` with retries; a test seam. */
+  removeDir?: ((dir: string) => void) | undefined;
+  /** Blocks between copy retries. Defaults to a synchronous sleep; a test seam. */
+  sleep?: ((ms: number) => void) | undefined;
 }
 
 /**
- * Runs `fn` against a private copy of the database, including its WAL files,
- * in a new temporary directory that is deleted on every path. Opening even
- * read-only creates or rewrites `-shm`, so the original files are only
- * copied, never opened: they stay byte-identical. Errors from `fn` that are
- * not CliErrors become "cannot read database".
+ * Copies one snapshot file, retrying transient lock errors over about one
+ * second. A copy that still fails is `database_unreadable` naming the file.
+ */
+function copySnapshotFile(
+  source: string,
+  target: string,
+  options: DatabaseCopyOptions,
+): void {
+  const copyFile = options.copyFile ?? copyFileSync;
+  const sleep = options.sleep ?? sleepSync;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      copyFile(source, target);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const delay = SNAPSHOT_COPY_RETRY_DELAYS_MS[attempt];
+      if (code && TRANSIENT_COPY_ERRORS.has(code) && delay !== undefined) {
+        sleep(delay);
+        continue;
+      }
+      const message = errorMessage(error);
+      const detail =
+        !code || message.startsWith(code) ? message : `${code}: ${message}`;
+      throw new CliError(`cannot copy ${source}: ${detail}`, {
+        ...UNREADABLE,
+        cause: error,
+      });
+    }
+  }
+}
+
+/**
+ * Runs `fn` against a private copy of the database and its `-wal` (never
+ * `-shm`, see `SNAPSHOT_FILE_SUFFIXES`) in a new temporary directory that is
+ * deleted on every path; a failed deletion never masks the result or error.
+ * Opening even read-only creates or rewrites `-shm`, so the original files
+ * are only copied, never opened: they stay byte-identical. Errors from `fn`
+ * that are not CliErrors become "cannot read database".
  */
 export function withDatabaseCopy<T>(
   dbPath: string,
@@ -103,7 +165,11 @@ export function withDatabaseCopy<T>(
   );
   try {
     const copyPath = join(dir, basename(dbPath));
-    copyDatabaseFiles(dbPath, copyPath);
+    for (const suffix of SNAPSHOT_FILE_SUFFIXES) {
+      if (existsSync(dbPath + suffix)) {
+        copySnapshotFile(dbPath + suffix, copyPath + suffix, options);
+      }
+    }
     let db: DatabaseSync;
     try {
       db = new DatabaseSync(copyPath, { readOnly: options.readOnly });
@@ -125,7 +191,11 @@ export function withDatabaseCopy<T>(
       db.close();
     }
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      (options.removeDir ?? removeSnapshotDir)(dir);
+    } catch {
+      // A leftover temporary directory must not change the command's outcome.
+    }
   }
 }
 

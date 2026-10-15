@@ -5,9 +5,10 @@
  *  1. resolve the target: `--db` with `~` expanded or, without it, the
  *     install's database (macOS only);
  *  2. refuse a missing database;
- *  3. copy the database and whichever WAL files exist into a new temporary
- *     directory and open the copy read-only (the target files are copied,
- *     never opened, so they stay byte-identical);
+ *  3. copy the database and its `-wal` if present (never `-shm`) into a new
+ *     temporary directory, retrying transient lock errors, and open the copy
+ *     read-only (the target files are copied, never opened, so they stay
+ *     byte-identical);
  *  4. run `pragma integrity_check` on the copy;
  *  5. the version guard;
  *  6. run the reader, then delete the temporary directory, on every path.

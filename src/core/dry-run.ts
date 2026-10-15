@@ -18,8 +18,8 @@ import {
  *
  *  1. the same checks as `apply` steps 1 to 3 (`prepareApply`), so every
  *     refusal has the same message. Process-state checks are not repeated;
- *  2. copy the database and whichever WAL files exist into a new temporary
- *     directory (the target files are copied, never opened);
+ *  2. copy the database and its `-wal` if present (never `-shm`) into a new
+ *     temporary directory (the target files are copied, never opened);
  *  3. open the copy for writing and run `pragma integrity_check` on it;
  *  4. in one transaction: the version guard and the writer's checks, read
  *     every table, let the writer write, run `pragma integrity_check`, read
