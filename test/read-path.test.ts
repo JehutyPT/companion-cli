@@ -472,7 +472,7 @@ describe("the JSON error envelope", () => {
     assert.equal(missing.error.code, "invalid_description");
   });
 
-  it("an unknown variable refused by a writer's check is check_failed", () => {
+  it("an unknown variable refused by a writer's check is check_failed", async () => {
     const env = setup();
     const file = writeDescription(
       env.dir,
@@ -480,7 +480,7 @@ describe("the JSON error envelope", () => {
     );
     let thrown: unknown;
     try {
-      dryRun(
+      await dryRun(
         { descriptionPath: file, dbPath: env.dbPath, writers },
         { tmpdir: env.tmpdir },
       );

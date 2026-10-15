@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { Env } from "../rest/endpoint.ts";
 import type { Fields } from "./validate.ts";
 
 /**
@@ -11,8 +12,46 @@ export const DESCRIPTION_KINDS = [
   "page",
   "trigger",
   "triggers",
+  "connection",
 ] as const;
 export type DescriptionKind = (typeof DESCRIPTION_KINDS)[number];
+
+/** A field definition of a connection's module, as REST API v2 returns it. */
+export type ConfigField = Readonly<Record<string, unknown>> & {
+  readonly id: string;
+  readonly type: string;
+};
+
+/**
+ * What asking the running Companion for a connection's config fields gave:
+ * the fields, or why there are none (not configured, not reachable, the
+ * connection not running, refused).
+ */
+export type ConfigFieldsOutcome =
+  | { available: true; fields: readonly ConfigField[] }
+  | { available: false; reason: string };
+
+/**
+ * What a writer's `resolve` may use, once per apply, dry run or validate,
+ * before the database checks.
+ */
+export interface WriterContext {
+  /** Live-install mode: the install's database, no `--db`. */
+  readonly live: boolean;
+  /** `--unchecked`: accept settings no definition can check, with a warning. */
+  readonly unchecked: boolean;
+  /** The environment, for values a description takes from it. */
+  readonly env: Env;
+  /** Runs `reader` on a read-only snapshot, after the version guard. */
+  read<T>(reader: (db: DatabaseSync) => T): T;
+  /**
+   * The connection's config fields from the running Companion (REST API v2).
+   * Outside live-install mode, unavailable without a request. Never throws.
+   */
+  configFields(connectionId: string): Promise<ConfigFieldsOutcome>;
+  /** A warning for stderr and the JSON documents' `warnings`. */
+  warn(line: string): void;
+}
 
 /**
  * A writer turns one kind of description into database rows. It plugs into
@@ -29,6 +68,15 @@ export interface Writer<Plan = unknown> {
    * Runs before the database is touched.
    */
   parse(fields: Fields): Plan;
+
+  /**
+   * Optional: completes the plan with what the description takes from
+   * outside the file (environment variables, the running Companion). Runs
+   * once, after `parse` and before `check`, which then stays pure because
+   * `check` runs twice (on the snapshot and under the write lock, after
+   * Companion is quit). Throws CliError to refuse; never prints secrets.
+   */
+  resolve?(plan: Plan, context: WriterContext): Promise<Plan>;
 
   /**
    * Optional checks against the database, for example locations against the

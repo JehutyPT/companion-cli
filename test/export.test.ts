@@ -1,5 +1,6 @@
 /**
- * `export variables`, `export trigger` and `export triggers` (ADR 0006).
+ * `export variables`, `export trigger`, `export triggers` and
+ * `export connection` (ADR 0006).
  * The oracle is the round trip: every exported file, YAML and JSON, applied
  * to its own database reports no changes in a dry run, and a real apply to a
  * copy leaves the copy equal to the original but for generated ids.
@@ -15,6 +16,7 @@ import {
   exportRoundTrip,
   insert,
   mutate,
+  ok,
 } from "./export-helpers.ts";
 import {
   applyTo,
@@ -677,15 +679,125 @@ triggers:
   });
 });
 
+describe("export connection", () => {
+  const SECRET = "SEEDED-SECRET-VALUE-0d9b";
+  const CAM = "ConnCamAAAAAAAAAAAAAA";
+  const connection = (label: string, extra: Json = {}): Json => ({
+    moduleInstanceType: "connection",
+    moduleId: `${label}-module`,
+    moduleVersionId: "1.2.0",
+    label,
+    config: {},
+    isFirstInit: false,
+    lastUpgradeIndex: 0,
+    enabled: true,
+    sortOrder: 1,
+    updatePolicy: "stable",
+    ...extra,
+  });
+  const insertRow = (db: DatabaseSync, id: string, value: Json) =>
+    db
+      .prepare("INSERT INTO instances (id, value) VALUES (?, ?)")
+      .run(id, JSON.stringify(value));
+
+  it("exports the fixture connection", async () => {
+    const env = setup();
+    const yaml = await exportRoundTrip(env, ["connection", "fixture"]);
+    assert.equal(
+      yaml,
+      `${SCHEMA_MODELINE}\n# companion-cli export: connection (1)\nkind: connection\nconnection: fixture\nenabled: false\nconfig: {}\n`,
+    );
+  });
+
+  it("exports nested config and names secrets only by key", async () => {
+    const env = setup({}, (db) =>
+      insertRow(
+        db,
+        CAM,
+        connection("cam", {
+          config: {
+            host: "10.0.0.1",
+            port: 9910,
+            nested: { list: [1, { deep: null }], on: true },
+          },
+          secrets: { password: SECRET, token: SECRET },
+          collectionId: "abc",
+        }),
+      ),
+    );
+    const yaml = await exportRoundTrip(env, ["connection", "cam"]);
+    assert.ok(!yaml.includes(SECRET));
+    assert.deepEqual(yaml.split("\n").slice(1, 3), [
+      "# companion-cli export: connection (1)",
+      "# secrets not exported: password, token (set each as secrets: {<key>: {env: NAME}})",
+    ]);
+    const json = ok(await exportFrom(env, ["connection", "cam", "--json"]));
+    assert.ok(!json.includes(SECRET) && !json.includes("password"));
+    assert.deepEqual(JSON.parse(json), {
+      kind: "connection",
+      connection: "cam",
+      enabled: true,
+      config: {
+        host: "10.0.0.1",
+        port: 9910,
+        nested: { list: [1, { deep: null }], on: true },
+      },
+    });
+  });
+
+  it("names a connection that shares its label by id", async () => {
+    const env = setup({}, (db) => insertRow(db, CAM, connection("fixture")));
+    const yaml = await exportRoundTrip(env, ["connection", `id:${CAM}`]);
+    assert.match(yaml, new RegExp(`^connection: id:${CAM}$`, "m"));
+    await assertRefused(
+      env,
+      ["connection", "fixture"],
+      `connection: 2 connections are labelled "fixture" (FixtureConnectionAAAA, ${CAM}); name one as id:<id>`,
+      "connection",
+      "run companion-cli list connections",
+    );
+  });
+
+  it("refuses a connection never configured", async () => {
+    const env = setup({}, (db) =>
+      insertRow(db, CAM, connection("cam", { isFirstInit: true })),
+    );
+    const error = await assertRefused(
+      env,
+      ["connection", "cam"],
+      `cannot export connection "cam" (${CAM}): isFirstInit is true: the connection has never been configured, and apply would set it to false (see docs/support-matrix.md, connection)`,
+      "isFirstInit",
+      "see docs/support-matrix.md (connection)",
+    );
+    assert.equal(error.code, "export_unsupported");
+  });
+
+  it("refuses a surface instance and an unknown connection", async () => {
+    const env = setup({}, (db) =>
+      insertRow(db, "SurfaceInstanceAAAAAA", {
+        ...connection("surf"),
+        moduleInstanceType: "surface",
+      }),
+    );
+    await assertRefused(
+      env,
+      ["connection", "surf"],
+      'connection: no connection labelled "surf"',
+      "connection",
+      "run companion-cli list connections",
+    );
+  });
+});
+
 describe("export command line", () => {
   const cases: [string[], string][] = [
     [
       ["export"],
-      "export needs a kind (variables or trigger or triggers or page)",
+      "export needs a kind (variables or trigger or triggers or page or connection)",
     ],
     [
       ["export", "pages"],
-      'unknown export kind "pages" (expected variables or trigger or triggers or page)',
+      'unknown export kind "pages" (expected variables or trigger or triggers or page or connection)',
     ],
     [["export", "trigger"], "export trigger takes exactly one trigger name"],
     [
@@ -693,6 +805,14 @@ describe("export command line", () => {
       "export trigger takes exactly one trigger name",
     ],
     [["export", "variables", ""], "a name pattern must not be empty"],
+    [
+      ["export", "connection"],
+      "export connection takes exactly one connection: its label or id:<id>",
+    ],
+    [
+      ["export", "connection", "a", "b"],
+      "export connection takes exactly one connection: its label or id:<id>",
+    ],
   ];
   for (const [args, reason] of cases) {
     it(`exits 2: ${args.join(" ")}`, async () => {

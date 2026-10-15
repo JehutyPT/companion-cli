@@ -162,6 +162,32 @@ function unchanged(
   return isDeepStrictEqual(before.value, after.value);
 }
 
+/** What every secret value reads as in the report. */
+export const MASKED_SECRET = "<secret>";
+
+/**
+ * An `instances` row with each `secrets` value masked: the report never
+ * carries a secret, so a row whose secrets alone changed is listed as
+ * changed with identical masked values.
+ */
+function maskSecrets(value: unknown): unknown {
+  if (!isObject(value) || !isObject(value["secrets"])) return value;
+  const secrets = Object.fromEntries(
+    Object.keys(value["secrets"]).map((key) => [key, MASKED_SECRET]),
+  );
+  return { ...value, secrets };
+}
+
+/** A row change with its secrets masked, in the one table that holds secrets. */
+function masked(table: string, change: RowChange): RowChange {
+  if (table !== "instances") return change;
+  return {
+    key: change.key,
+    ...("before" in change ? { before: maskSecrets(change.before) } : {}),
+    ...("after" in change ? { after: maskSecrets(change.after) } : {}),
+  };
+}
+
 /** The rows a write added, changed and removed, per table, and the text report. */
 export function diffTables(
   before: DatabaseRows,
@@ -191,15 +217,17 @@ export function diffTables(
       const was = rowsBefore.get(key);
       const is = rowsAfter.get(key);
       if (was === undefined && is !== undefined) {
-        changes.added.push({ key, after: is.value });
+        changes.added.push(masked(name, { key, after: is.value }));
       } else if (was !== undefined && is === undefined) {
-        changes.removed.push({ key, before: was.value });
+        changes.removed.push(masked(name, { key, before: was.value }));
       } else if (
         was !== undefined &&
         is !== undefined &&
         !unchanged(name, was, is, renamed)
       ) {
-        changes.changed.push({ key, before: was.value, after: is.value });
+        changes.changed.push(
+          masked(name, { key, before: was.value, after: is.value }),
+        );
       }
     }
     if (

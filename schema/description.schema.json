@@ -419,6 +419,88 @@
         "triggers"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: connection",
+      "description": "Edits one existing connection: its label, enabled flag, config and secrets (from the environment). Config and secrets merge into what is stored; nothing else changes.",
+      "examples": [
+        {
+          "kind": "connection",
+          "connection": "atem",
+          "enabled": true,
+          "config": {
+            "host": "10.0.0.5",
+            "port": 9910
+          }
+        },
+        {
+          "kind": "connection",
+          "connection": "id:sQ8f2kdPq1",
+          "label": "obs_main",
+          "secrets": {
+            "password": {
+              "env": "OBS_PASSWORD"
+            }
+          }
+        }
+      ],
+      "$comment": "Set at least one of label, enabled, config or secrets. With kind and connection required and no other properties allowed, that is three properties.",
+      "minProperties": 3,
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "connection"
+        },
+        "connection": {
+          "description": "The connection to edit: its label, or `id:<id>` when several share a label.",
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "description": "A new label: letters, digits, _ and -, and not a name Companion reserves (internal, this, local, companion, image, custom, expression, page; in any case). A rename is refused while buttons or triggers reference the old label.",
+          "type": "string",
+          "pattern": "^[\\w-]+$",
+          "not": {
+            "pattern": "^(?:[iI][nN][tT][eE][rR][nN][aA][lL]|[tT][hH][iI][sS]|[lL][oO][cC][aA][lL]|[cC][oO][mM][pP][aA][nN][iI][oO][nN]|[iI][mM][aA][gG][eE]|[cC][uU][sS][tT][oO][mM]|[eE][xX][pP][rR][eE][sS][sS][iI][oO][nN]|[pP][aA][gG][eE])$"
+          }
+        },
+        "enabled": {
+          "description": "Whether Companion runs the connection.",
+          "type": "boolean"
+        },
+        "config": {
+          "description": "Config keys to set, merged into the stored config; other keys are kept. Checked against the module's config fields when Companion is running; otherwise each key must already be stored with the same type (or pass --unchecked).",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "secrets": {
+          "description": "Secret keys to set, merged into the stored secrets, each from an environment variable. Never a literal value.",
+          "type": "object",
+          "additionalProperties": {
+            "description": "The environment variable holding the secret's value.",
+            "type": "object",
+            "properties": {
+              "env": {
+                "description": "An environment variable name.",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+              }
+            },
+            "required": [
+              "env"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "connection"
+      ],
+      "additionalProperties": false
     }
   ],
   "$defs": {

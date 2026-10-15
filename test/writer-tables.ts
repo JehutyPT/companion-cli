@@ -14,6 +14,7 @@ import {
   FEEDBACK_KINDS,
   STYLE_FIELDS,
 } from "../src/writers/feedbacks.ts";
+import { FIELDS as CONNECTION_FIELDS } from "../src/writers/connection.ts";
 import { writers } from "../src/writers/index.ts";
 import { FIELDS as PAGE_FIELDS } from "../src/writers/page.ts";
 import {
@@ -41,6 +42,7 @@ export interface WriterTables {
   triggersFields: readonly string[];
   variablesFields: readonly string[];
   variableFields: readonly string[];
+  connectionFields: readonly string[];
 }
 
 export const WRITER_TABLES: WriterTables = {
@@ -57,6 +59,7 @@ export const WRITER_TABLES: WriterTables = {
   triggersFields: TRIGGERS_FIELDS,
   variablesFields: VARIABLES_FIELDS,
   variableFields: VARIABLE_FIELDS,
+  connectionFields: CONNECTION_FIELDS,
 };
 
 /** Every description field the writers accept, in the matrix's field notation. */
@@ -79,6 +82,7 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("triggers", tables.triggersFields),
     ...under("variables", tables.variablesFields),
     ...under("variables[]", tables.variableFields),
+    ...under("connection", tables.connectionFields),
     ...tagged("action", tables.actionKinds),
     ...tagged("feedback", tables.feedbackKinds),
     ...under("feedback", tables.feedbackFields),

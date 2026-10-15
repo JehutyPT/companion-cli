@@ -37,7 +37,7 @@ Verified by DB and main.js: the upgrade list `mee` has 16 steps and the target i
 | `pages` | page number as a string (`"20"`) | `{"name", "controls": {row: {col: "bank:<controlId>"}}, "id": <pageId>}` |
 | `controls` | `bank:<controlId>` (button) or `trigger:<controlId>` | control JSON, below |
 | `custom_variables` | variable name | `{description, defaultValue, persistCurrentValue, sortOrder}` |
-| `instances` | instance id | `InstanceConfig`: connections and surface instances, see [Connections](#connections); read, never written |
+| `instances` | instance id | `InstanceConfig`: connections and surface instances, see [Connections](#connections); `kind: connection` rewrites one connection row |
 | `surfaces`, `surface_groups`, `surfaces_remote`, others | | not used by the tool yet |
 
 Verified by DB; `trigger:` prefix also by main.js (controls are upgraded with `id.startsWith("trigger:")` deciding trigger vs button).
@@ -187,6 +187,31 @@ Companion 5.1 keeps one `instances` row per module instance, keyed by instance i
 
 How the tool decides that a stored control uses a connection (`list connections`, `list pages`): any string `connectionId` anywhere in the control (every step and action set, a trigger's `actions` and `condition`, nested `children`, `localVariables`), or any string value containing `$(<label>:`. A `connectionId` that matches no row and is not `internal` is a dangling reference.
 
+### Editing a connection
+
+How Companion itself updates a connection, from `Instance/Controller.ts` (`setConnectionLabelAndConfig`, 5.1.0 main.js source map), which `kind: connection` follows:
+
+- **Label rules** (`shared-lib/lib/Label.ts`): `isLabelValid` refuses an empty label, one of `internal`, `this`, `local`, `companion`, `image`, `custom`, `expression` or `page` (compared lowercased), and any label that differs from `makeLabelSafe(label)`, which is `label.trim().replace(/[^\w-]/gi, '_')`. So a valid label holds only ASCII letters, digits, `_` and `-`. A label another connection has is refused (`duplicate label`).
+- **A rename rewrites references.** Companion calls `controlsStore.renameVariables(oldLabel, newLabel)` and renames the connection's variable definitions and values. A database write cannot do that, so the tool refuses a rename while any stored control holds `$(<old>:` in a string or a `variableId` string starting `<old>:`.
+- **Config and secrets.** Writing a config sets `isFirstInit = false`. Patches merge shallowly into the stored `config` and `secrets`; the tool merges the same way and never removes a key.
+- **Companion's own check of a config patch**: an unknown key is refused, a `secret-text` field sent under `config` is refused ("must be sent in secrets"), and a non-secret field sent under `secrets` is refused.
+
+**Config fields.** `GET /api/v2/connections/v1/:id/config-fields` (`Instance/Connection/ConnectionsRestApi.ts`; scopes `connections` or `read`) answers `{"data": [field]}`, each field `{id, type, label, …}`, and `409` when the connection is not running. Field types and the properties the tool checks (`shared-lib/lib/Model/Options.ts`):
+
+| Type | Value | Checked |
+| --- | --- | --- |
+| `textinput` | string | `minLength`, `regex` |
+| `secret-text` | string, stored in `secrets` | `minLength`, `regex` |
+| `number` | number | `min`, `max` (`step` not checked) |
+| `checkbox` | boolean | |
+| `dropdown` | a choice id; with `allowCustom` any string or number | `choices`, `regex` on custom strings |
+| `multidropdown` | a list of choice ids | `choices`, `minSelection`, `maxSelection` |
+| `colorpicker` | number or string | |
+| `bonjour-device` | string or null | |
+| `static-text` | none: refused | |
+
+Field `regex` strings come from `@companion-module/host/validate`, whose source is not in the map. The tool compiles `/body/flags` as such and anything else as a plain pattern, and skips (with a warning) a regex it cannot compile. Unverified against source. A field type not in this table is accepted unchecked.
+
 ## Module definitions
 
 The actions and feedbacks a connection's module offers (the `definitionId`s and options of pass-through entities). `schema --connection` (#22) reads them. Verified by main.js (5.1.0) and its source map, plus a read-only capture of the two definitions subscriptions from the live install on 2026-10-14.
@@ -240,7 +265,7 @@ When none applies, it answers `400 No value`. An unknown variable gives `404 Not
 | Purpose | Endpoint | Verified by |
 | --- | --- | --- |
 | Surfaces | `GET /api/v2/surfaces/v1` (`{"data": [surface], "meta"}`), `GET /api/v2/surfaces/v1/:surfaceId` (`{"data": surface}`); `PATCH` changes brightness only | OpenAPI |
-| Connections | CRUD under `/api/v2/connections/v1` | OpenAPI |
+| Connections | CRUD under `/api/v2/connections/v1`; the tool only reads `GET /api/v2/connections/v1/:id/config-fields` (409 when the connection is not running), never the connection itself, whose `GET` and `PATCH` carry `config` and `secrets` | OpenAPI, main.js |
 | Spec | `GET /api/v2/openapi.json` | OpenAPI, live call |
 
 A surface has `id`, `type`, `integrationType`, `name`, `displayName`, `isConnected`, `size` (`{rows, columns}` or null), `brightness`, `page` (`{id, number, name}` or null; `number` and `name` are each nullable) and `groupId`. Documented error statuses are `400`, `401`, `403` and `404`. Verified by OpenAPI.

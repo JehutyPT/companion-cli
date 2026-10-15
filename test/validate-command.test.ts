@@ -219,7 +219,7 @@ describe("validate: the same refusals as apply --dry-run", () => {
 
       let thrown: unknown;
       try {
-        dryRun({ descriptionPath: file, dbPath, writers }, options);
+        await dryRun({ descriptionPath: file, dbPath, writers }, options);
       } catch (error) {
         thrown = error;
       }
@@ -349,6 +349,7 @@ describe("validate: valid files", () => {
         file,
         database: env.dbPath,
         checks: "database",
+        warnings: [],
       });
 
       const noDb = await runCli(["validate", file, "--no-db"], options);
@@ -366,6 +367,7 @@ describe("validate: valid files", () => {
         file,
         database: null,
         checks: "structure",
+        warnings: [],
       });
 
       assert.deepEqual(calls, []);
@@ -511,7 +513,7 @@ describe("validate: command line", () => {
 });
 
 describe("validate: a writer check's own error", () => {
-  it("is rethrown as it is, as the dry run would", () => {
+  it("is rethrown as it is, as the dry run would", async () => {
     const env = setup();
     const file = writeDescription(env.dir, "kind: variables\n");
     const bug = new Error("check exploded");
@@ -525,17 +527,16 @@ describe("validate: a writer check's own error", () => {
         write: () => "",
       },
     };
-    assert.throws(
-      () =>
-        validate(
-          {
-            descriptionPath: file,
-            dbPath: env.dbPath,
-            noDb: false,
-            writers: registry,
-          },
-          { tmpdir: env.tmpdir },
-        ),
+    await assert.rejects(
+      validate(
+        {
+          descriptionPath: file,
+          dbPath: env.dbPath,
+          noDb: false,
+          writers: registry,
+        },
+        { tmpdir: env.tmpdir },
+      ),
       (error) => error === bug,
     );
     assert.deepEqual(readdirSync(env.tmpdir), []);

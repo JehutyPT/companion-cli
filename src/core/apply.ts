@@ -10,6 +10,7 @@ import {
 
 export { runIntegrityCheck } from "./database.ts";
 import { loadDescription, type WriterRegistry } from "./description.ts";
+import { resolvePlan, type WriterRuntime } from "./resolve.ts";
 import type { DescriptionKind, Writer } from "./writer.ts";
 import {
   CliError,
@@ -33,7 +34,9 @@ import {
  *
  *  1. in live-install mode (no `dbPath`), refuse any platform but macOS;
  *  2. read and validate the whole description file (no database access);
- *  3. on a read-only snapshot copy: the DB version guard and the writer's
+ *  3. the writer's `resolve`, once (environment values; in live-install mode
+ *     what the running Companion knows, so before step 4 quits it); then on
+ *     a read-only snapshot copy: the DB version guard and the writer's
  *     own database checks, so a refusal leaves the original files
  *     byte-identical (they are copied, never opened). Companion may still be
  *     running at this point;
@@ -79,7 +82,7 @@ export interface ApplyHooks {
   integrityCheck?: (db: DatabaseSync) => string[];
 }
 
-export interface ApplyOptions {
+export interface ApplyOptions extends WriterRuntime {
   /** Home directory used for `~` and the install path. Defaults to the OS home. */
   homedir?: string;
   /** Directory that receives timestamped backups. Defaults to `companion-cli-backups` next to the database. */
@@ -110,6 +113,8 @@ export interface ApplyRequest {
   /** The database to write. Omitted: the local install's database (live-install mode). */
   dbPath?: string | undefined;
   writers: WriterRegistry;
+  /** `--unchecked`: settings no definition can check are accepted with a warning. */
+  unchecked?: boolean;
 }
 
 export interface ApplyResult {
@@ -125,6 +130,8 @@ export interface ApplyResult {
   restarted: boolean;
   /** The wait for REST after the restart; `null` when there was none. */
   rest: RestReadiness | null;
+  /** The writer's warnings (settings `--unchecked` let through unchecked). */
+  warnings: string[];
 }
 
 /** How the wait for Companion's REST API after a restart ended. */
@@ -145,17 +152,21 @@ export interface PreparedApply {
   homedir: string;
   writer: Writer;
   plan: unknown;
+  /** The writer's warnings from `resolve`. */
+  warnings: string[];
 }
 
 /**
  * Steps 1 to 3, shared by `apply` and `dryRun` so both refuse with the same
  * messages: the platform guard, the description, the database's existence,
- * and the version guard and the writer's checks on a read-only snapshot.
+ * the writer's `resolve` (once: environment values and, in live-install
+ * mode, what the running Companion knows, before it is quit), and the
+ * version guard and the writer's checks on a read-only snapshot.
  */
-export function prepareApply(
+export async function prepareApply(
   request: ApplyRequest,
   options: ApplyOptions = {},
-): PreparedApply {
+): Promise<PreparedApply> {
   const home = options.homedir ?? osHomedir();
   const platform = options.platform ?? process.platform;
   const { dbPath, live } = resolveDatabaseTarget(
@@ -164,12 +175,27 @@ export function prepareApply(
     platform,
   );
 
-  const { writer, plan } = loadDescription(
+  const { writer, plan: parsed } = loadDescription(
     request.descriptionPath,
     request.writers,
   );
 
   assertDatabaseExists(dbPath);
+
+  const { plan, warnings } = await resolvePlan(writer, parsed, {
+    live,
+    unchecked: request.unchecked ?? false,
+    runtime: options,
+    read: (reader) =>
+      withReadOnlySnapshot(
+        dbPath,
+        (db) => {
+          assertSupportedVersion(db);
+          return reader(db);
+        },
+        options.tmpdir,
+      ),
+  });
 
   withReadOnlySnapshot(
     dbPath,
@@ -179,7 +205,7 @@ export function prepareApply(
     },
     options.tmpdir,
   );
-  return { dbPath, live, platform, homedir: home, writer, plan };
+  return { dbPath, live, platform, homedir: home, writer, plan, warnings };
 }
 
 export async function apply(
@@ -193,7 +219,8 @@ export async function apply(
     homedir: home,
     writer,
     plan,
-  } = prepareApply(request, options);
+    warnings,
+  } = await prepareApply(request, options);
 
   const control = options.processControl ?? macosProcessControl();
   // Steps 5 and 6, after the in-use guard. On non-macOS (`--db` only) there
@@ -208,6 +235,7 @@ export async function apply(
       live,
       restarted: false,
       rest: null,
+      warnings,
     };
   };
 

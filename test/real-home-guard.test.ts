@@ -83,7 +83,7 @@ describe("a missing homedir option in tests", () => {
       log: () => {},
     };
     buildFixtureDb(installDir(TEST_HOME));
-    const prepared = prepareApply(request, options);
+    const prepared = await prepareApply(request, options);
     assert.equal(prepared.homedir, TEST_HOME);
     assert.ok(prepared.dbPath.startsWith(TEST_HOME + "/"));
     const result = await apply(request, options);

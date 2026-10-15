@@ -40,13 +40,18 @@ export interface DryRunResult {
   lines: string[];
   /** The writer's one-line summary: what `apply` would print. */
   summary: string;
+  /** The writer's warnings (settings `--unchecked` let through unchecked). */
+  warnings: string[];
 }
 
-export function dryRun(
+export async function dryRun(
   request: ApplyRequest,
   options: ApplyOptions = {},
-): DryRunResult {
-  const { dbPath, writer, plan } = prepareApply(request, options);
+): Promise<DryRunResult> {
+  const { dbPath, writer, plan, warnings } = await prepareApply(
+    request,
+    options,
+  );
   const copy = { readOnly: false, tmpdir: options.tmpdir };
   return withDatabaseCopy(dbPath, copy, (db) => {
     assertSnapshotConsistent(db, "dry run");
@@ -61,6 +66,7 @@ export function dryRun(
         database: dbPath,
         ...diffTables(before ?? after, after),
         summary,
+        warnings,
       };
     } catch (error) {
       if (error instanceof WriteFailure) {
@@ -95,5 +101,6 @@ export function dryRunJson(result: DryRunResult): string {
     changed: Object.keys(tables).length > 0,
     tables,
     summary: result.summary,
+    warnings: result.warnings,
   });
 }

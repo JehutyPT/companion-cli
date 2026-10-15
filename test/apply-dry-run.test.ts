@@ -385,7 +385,9 @@ function assertSchema(doc: Record<string, unknown>, env: FixtureEnv): void {
     "dryRun",
     "summary",
     "tables",
+    "warnings",
   ]);
+  assert.deepEqual(doc["warnings"], []);
   assert.equal(doc["dryRun"], true);
   assert.equal(doc["database"], env.dbPath);
   assert.equal(typeof doc["summary"], "string");
@@ -623,7 +625,7 @@ describe("apply --dry-run: refusals are apply's", () => {
     }
   });
 
-  it("a kind without a registered writer, through the core", () => {
+  it("a kind without a registered writer, through the core", async () => {
     const env = setup();
     const file = writeDescription(env.dir, TRIGGER_YAML(5));
     const { trigger: _trigger, ...registry } = writers;
@@ -633,7 +635,7 @@ describe("apply --dry-run: refusals are apply's", () => {
       writers: registry,
     };
     const expected = /kind: kind "trigger" is reserved and not supported yet/;
-    assert.throws(() => dryRun(request, { tmpdir: env.tmpdir }), expected);
+    await assert.rejects(dryRun(request, { tmpdir: env.tmpdir }), expected);
     return assert.rejects(
       apply(request, { processControl: STOPPED_PROCESS_CONTROL }),
       expected,

@@ -1,6 +1,7 @@
 import type { ListCommand } from "../readers/list.ts";
 import { exportCommand, type Exporter } from "./export.ts";
 import { pageExporter } from "./pages.ts";
+import { connectionExporter } from "./connection.ts";
 import { triggerExporter, triggersExporter } from "./triggers.ts";
 import { variablesExporter } from "./variables.ts";
 
@@ -28,6 +29,7 @@ const EXPORTS: readonly ExportEntry[] = [
   entry(triggerExporter),
   entry(triggersExporter),
   entry(pageExporter),
+  entry(connectionExporter),
 ];
 
 /** `export` commands by kind. */

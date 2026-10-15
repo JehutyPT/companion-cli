@@ -7,6 +7,7 @@ import {
   type RestReadiness,
 } from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
+import type { WriterRuntime } from "./core/resolve.ts";
 import {
   CliError,
   errorJson,
@@ -30,6 +31,7 @@ import {
   LOCATION_ACTIONS,
   type LocationAction,
   locationAction,
+  readConfigFields,
   setVariable,
 } from "./rest/commands.ts";
 import {
@@ -139,10 +141,10 @@ function synopsis(spec: RestCommandSpec): string {
 }
 
 const APPLY_SYNOPSIS =
-  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run] [--json] [--rest-timeout <seconds>]";
+  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run] [--json] [--unchecked] [--rest-timeout <seconds>]";
 const LIST_KINDS = Object.keys(listCommands);
 const VALIDATE_SYNOPSIS =
-  "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json]";
+  "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json] [--unchecked]";
 /** Every kind-specific boolean option of any `list` kind, without `--`. */
 const LIST_FLAGS = [
   ...new Set(Object.values(listCommands).flatMap((command) => command.flags)),
@@ -202,6 +204,11 @@ export const HELP = [
   "refuses with the same message. With a database (the install's, or --db)",
   "it also runs apply's checks against a read-only copy of it; --no-db checks",
   "the file only. It writes nothing and never stops or starts Companion.",
+  "kind: connection checks config keys against the module's fields, which",
+  "only the running Companion knows: without --db, apply, apply --dry-run and",
+  "validate ask it (REST settings below). Without them a key must already be",
+  "stored with a value of the same type; --unchecked accepts any key with a",
+  "warning. Secrets come only from environment variables and are never printed.",
   "list prints the custom variables, triggers, connections (with the buttons",
   "and triggers using each) or pages stored in the database, one line each.",
   "Connection configuration and secrets are never printed. A pattern is a",
@@ -385,7 +392,11 @@ async function runRead(
         io.stdout(HELP);
         return EXIT_OK;
       }
-      const result = validate({ ...parsed, writers }, options);
+      const result = await validate(
+        { ...parsed, writers },
+        { ...options, ...writerRuntime(options) },
+      );
+      for (const warning of result.warnings) io.stderr(warning);
       io.stdout(json ? validationJson(result) : renderValidation(result));
       return EXIT_OK;
     }
@@ -525,6 +536,7 @@ interface ValidateCommandLine {
   descriptionPath: string;
   dbPath: string | undefined;
   noDb: boolean;
+  unchecked: boolean;
 }
 
 /** Parses a `validate` command line. Throws a `usage` CliError on a bad one. */
@@ -539,6 +551,7 @@ function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
         db: { type: "string" },
         "no-db": { type: "boolean" },
         json: { type: "boolean" },
+        unchecked: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -559,6 +572,7 @@ function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
     descriptionPath: file,
     dbPath: values.db,
     noDb: values["no-db"] ?? false,
+    unchecked: values.unchecked ?? false,
   };
 }
 
@@ -733,7 +747,7 @@ async function runApply(
       io.stdout(HELP);
       return EXIT_OK;
     }
-    const { file, db, dryRun: dry, restWaitMs } = parsed;
+    const { file, db, dryRun: dry, restWaitMs, unchecked } = parsed;
     const {
       env,
       cwd,
@@ -741,11 +755,13 @@ async function runApply(
       restPollIntervalMs,
       companionBuildFile: _buildFile,
       socketTimeoutMs: _socketTimeout,
-      ...applyOptions
+      ...cliApplyOptions
     } = options;
-    const request = { descriptionPath: file, dbPath: db, writers };
+    const applyOptions = { ...cliApplyOptions, ...writerRuntime(options) };
+    const request = { descriptionPath: file, dbPath: db, writers, unchecked };
     if (dry) {
-      const result = dryRun(request, applyOptions);
+      const result = await dryRun(request, applyOptions);
+      for (const warning of result.warnings) io.stderr(warning);
       if (json) io.stdout(dryRunJson(result));
       else for (const line of renderDryRun(result)) io.stdout(line);
       return EXIT_OK;
@@ -763,18 +779,63 @@ async function runApply(
           },
         }),
     });
-    const warnings =
-      result.rest === "timeout"
+    const warnings = [
+      ...result.warnings,
+      ...(result.rest === "timeout"
         ? [
             `warning: Companion started; REST not ready after ${restWaitMs / 1000}s`,
           ]
-        : [];
+        : []),
+    ];
     for (const warning of warnings) io.stderr(warning);
     io.stdout(json ? applyJson(result, warnings) : result.summary);
     return EXIT_OK;
   } catch (error) {
     return failure(io, json, error);
   }
+}
+
+/** Per-request timeout of the config-fields request, in ms, unless `restTimeoutMs` sets one. */
+const CONFIG_FIELDS_TIMEOUT_MS = 2000;
+
+/**
+ * The writers' runtime: the environment, and the running Companion's config
+ * fields through the REST settings. A missing or invalid REST setting makes
+ * the fields unavailable, with the reason (the API key redacted).
+ */
+function writerRuntime(options: CliOptions): WriterRuntime {
+  const env = options.env ?? process.env;
+  const dirs = {
+    cwd: options.cwd ?? process.cwd(),
+    homedir: options.homedir ?? homedir(),
+  };
+  return {
+    env,
+    configFields:
+      options.configFields ??
+      (async (connectionId) => {
+        let endpoint: CompanionEndpoint;
+        try {
+          endpoint = loadEndpoint(env, dirs);
+        } catch (error) {
+          return {
+            available: false,
+            reason: `REST is not configured (${redact(errorMessage(error), configuredApiKey(env, dirs))})`,
+          };
+        }
+        const outcome = await readConfigFields(
+          endpoint,
+          connectionId,
+          options.restTimeoutMs ?? CONFIG_FIELDS_TIMEOUT_MS,
+        );
+        return outcome.available
+          ? outcome
+          : {
+              available: false,
+              reason: redact(outcome.reason, endpoint.apiKey),
+            };
+      }),
+  };
 }
 
 /**
@@ -812,6 +873,8 @@ interface ApplyCommandLine {
   dryRun: boolean;
   /** How long to wait for REST after a restart, in ms; 0 skips the wait. */
   restWaitMs: number;
+  /** `--unchecked`. */
+  unchecked: boolean;
 }
 
 /** Parses an `apply` command line. Throws a `usage` CliError on a bad one. */
@@ -827,6 +890,7 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
         "dry-run": { type: "boolean" },
         json: { type: "boolean" },
         "rest-timeout": { type: "string" },
+        unchecked: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
     });
@@ -857,6 +921,7 @@ function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
     file,
     db: values.db,
     dryRun: values["dry-run"] === true,
+    unchecked: values.unchecked === true,
     restWaitMs:
       timeout === undefined
         ? DEFAULT_REST_WAIT_MS

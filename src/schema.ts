@@ -17,6 +17,7 @@ import {
   LOCATION_FIELD_SCHEMAS,
 } from "./writers/button-control.ts";
 import * as button from "./writers/button.ts";
+import * as connection from "./writers/connection.ts";
 import {
   FEEDBACK_FIELD_SCHEMAS,
   FEEDBACK_KINDS,
@@ -110,6 +111,12 @@ export const KIND_SCHEMAS: Record<DescriptionKind, KindSchema> = {
     doc: trigger.TRIGGERS_DOC,
     examples: trigger.TRIGGERS_EXAMPLES,
     fields: trigger.TRIGGERS_FIELD_SCHEMAS,
+  },
+  connection: {
+    doc: connection.DOC,
+    examples: connection.EXAMPLES,
+    fields: connection.FIELD_SCHEMAS,
+    extra: connection.EXTRA_SCHEMA,
   },
 };
 

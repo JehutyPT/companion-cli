@@ -198,16 +198,20 @@ An export refusal names the stored field it cannot express; this file says wheth
 
 | Item | Status | Field | Note |
 | --- | --- | --- | --- |
-| `label` | planned (#31) |  |  |
-| `enabled` | planned (#31) |  |  |
-| `config keys` | planned (#31) |  | merged |
-| `secrets` | planned (#31) |  | from the environment, write only |
+| `label` | supported | `kind: connection`, `connection.connection`, `connection.label` | a rename is refused while controls reference the old label |
+| `enabled` | supported | `connection.enabled` |  |
+| `config keys` | supported | `connection.config` | merged; checked against the module's fields when Companion runs |
+| `secrets` | supported | `connection.secrets` | from the environment, write only; never exported |
+| `isFirstInit` | supported |  | set to false with a config, as Companion does |
+| `rename while referenced` | unsupported |  | Companion rewrites references on its own rename; a database write cannot. Planned only with an ADR |
 | `create` | unsupported |  |  |
 | `delete` | unsupported |  |  |
 | `module` | unsupported |  |  |
 | `version` | unsupported |  |  |
 | `update policy` | unsupported |  |  |
-| `removing config keys` | unsupported |  |  |
+| `removing config keys` | unsupported |  | planned only with an ADR |
+| `sortOrder` | unsupported |  |  |
+| `collectionId` | unsupported |  |  |
 
 ## Surface
 

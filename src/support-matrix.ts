@@ -428,16 +428,44 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
   unsupported("custom variable", "defaultValue (null, object or list)"),
 
   // Connections
-  planned("connection", "label", "#31"),
-  planned("connection", "enabled", "#31"),
-  planned("connection", "config keys", "#31", "merged"),
-  planned("connection", "secrets", "#31", "from the environment, write only"),
+  supported(
+    "connection",
+    "label",
+    ["kind: connection", "connection.connection", "connection.label"],
+    "a rename is refused while controls reference the old label",
+  ),
+  supported("connection", "enabled", ["connection.enabled"]),
+  supported(
+    "connection",
+    "config keys",
+    ["connection.config"],
+    "merged; checked against the module's fields when Companion runs",
+  ),
+  supported(
+    "connection",
+    "secrets",
+    ["connection.secrets"],
+    "from the environment, write only; never exported",
+  ),
+  supported(
+    "connection",
+    "isFirstInit",
+    [],
+    "set to false with a config, as Companion does",
+  ),
+  unsupported(
+    "connection",
+    "rename while referenced",
+    "Companion rewrites references on its own rename; a database write cannot. Planned only with an ADR",
+  ),
   unsupported("connection", "create"),
   unsupported("connection", "delete"),
   unsupported("connection", "module"),
   unsupported("connection", "version"),
   unsupported("connection", "update policy"),
-  unsupported("connection", "removing config keys"),
+  unsupported("connection", "removing config keys", "planned only with an ADR"),
+  unsupported("connection", "sortOrder"),
+  unsupported("connection", "collectionId"),
 
   // Surfaces
   planned("surface", "name", "#32"),

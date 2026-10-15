@@ -1,4 +1,5 @@
 import { CliError, errorMessage } from "../core/errors.ts";
+import type { ConfigField, ConfigFieldsOutcome } from "../core/writer.ts";
 import type { CompanionEndpoint } from "./endpoint.ts";
 
 /**
@@ -168,6 +169,56 @@ export async function probeRest(
   } catch {
     return false;
   }
+}
+
+/**
+ * A connection's config field definitions: `GET
+ * /api/v2/connections/v1/:id/config-fields` (`{"data": [field]}`; 409 when
+ * the connection is not running). This is the only connections endpoint the
+ * tool requests: the connection itself (`GET`/`PATCH .../:id`) carries
+ * secrets. Never throws; any failure is an unavailable outcome with a reason.
+ */
+export async function readConfigFields(
+  endpoint: CompanionEndpoint,
+  connectionId: string,
+  timeoutMs: number,
+): Promise<ConfigFieldsOutcome> {
+  let reply: Reply;
+  try {
+    reply = await send(
+      endpoint,
+      "GET",
+      `/api/v2/connections/v1/${encodeSegment(connectionId)}/config-fields`,
+      undefined,
+      timeoutMs,
+    );
+  } catch (error) {
+    return { available: false, reason: errorMessage(error) };
+  }
+  let data: unknown;
+  try {
+    data = v2Data(reply);
+  } catch (error) {
+    const reason = errorMessage(error);
+    return {
+      available: false,
+      reason:
+        reply.status === 409
+          ? `the connection is not running (${reason})`
+          : reason,
+    };
+  }
+  if (!Array.isArray(data) || !data.every(isConfigField))
+    return { available: false, reason: errorMessage(unexpected(reply)) };
+  return { available: true, fields: data };
+}
+
+function isConfigField(value: unknown): value is ConfigField {
+  return (
+    isObject(value) &&
+    typeof value["id"] === "string" &&
+    typeof value["type"] === "string"
+  );
 }
 
 export async function listSurfaces(

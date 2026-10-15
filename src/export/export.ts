@@ -108,6 +108,11 @@ export interface Exporter<Item> {
   entry(db: DatabaseSync, item: Item): Fields;
   /** The description file holding the entries. */
   file(entries: Fields[], values: OptionValues): Fields;
+  /**
+   * Optional comment lines (without `# `) for the YAML output, after the
+   * export line, such as what the file leaves out. The JSON output has none.
+   */
+  comments?(db: DatabaseSync, items: readonly Item[]): string[];
 }
 
 /** The valued options given, without `--`, by name. */
@@ -317,11 +322,13 @@ export function renderYaml(
   kind: string,
   count: number,
   description: Fields,
+  comments: readonly string[] = [],
 ): string[] {
   const text = stringify(description, YAML_OPTIONS);
   return [
     SCHEMA_MODELINE,
     `# companion-cli export: ${kind} (${count})`,
+    ...comments.map((comment) => `# ${comment}`),
     ...text.replace(/\n$/, "").split("\n"),
   ];
 }
@@ -335,7 +342,7 @@ export function exportCommand<Item>(exporter: Exporter<Item>): ListCommand {
       ? { checkArgs: (args, values) => exporter.checkArgs?.(args, values) }
       : {}),
     run: async ({ dbPath, patterns: args, values, options }) => {
-      const { value: entries } = readDatabase(dbPath, options, (db) => {
+      const { value } = readDatabase(dbPath, options, (db) => {
         const items = exporter.select(db, args, values);
         const refused: PartRefusal[] = [];
         // Several items: count the refused items. One item refused in
@@ -363,15 +370,19 @@ export function exportCommand<Item>(exporter: Exporter<Item>): ListCommand {
         }
         if (refused.length > 0)
           throw refusalError(heading(refused.length), refused);
-        return built;
+        return {
+          entries: built,
+          comments: exporter.comments?.(db, items) ?? [],
+        };
       });
+      const { entries, comments } = value;
       const description = exporter.file(entries, values);
       const kind =
         typeof description["kind"] === "string"
           ? description["kind"]
           : exporter.kind;
       return {
-        text: () => renderYaml(kind, entries.length, description),
+        text: () => renderYaml(kind, entries.length, description, comments),
         json: () => JSON.stringify(description),
       };
     },
