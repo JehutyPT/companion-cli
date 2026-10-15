@@ -1103,6 +1103,11 @@
               "minimum": 0,
               "maximum": 9007199254740991,
               "default": 10000
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
             }
           },
           "required": [
@@ -1124,6 +1129,11 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 9007199254740991
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
             }
           },
           "required": [
@@ -1134,21 +1144,317 @@
         },
         {
           "type": "object",
+          "title": "event: intervalRandom",
+          "description": "Runs again and again, each time after a random whole number of seconds from `min` to `max`.",
+          "properties": {
+            "event": {
+              "description": "Selects the intervalRandom event.",
+              "const": "intervalRandom"
+            },
+            "min": {
+              "description": "The shortest interval in seconds.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 3
+            },
+            "max": {
+              "description": "The longest interval in seconds; at least `min`.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 10,
+              "$comment": "Not expressible here: max must be at least min."
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: timeofday",
+          "description": "Runs at a time of day on the given days, in Companion's configured timezone (or the system's).",
+          "properties": {
+            "event": {
+              "description": "Selects the timeofday event.",
+              "const": "timeofday"
+            },
+            "time": {
+              "description": "The time, \"HH:MM:SS\" (24-hour).",
+              "type": "string",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$"
+            },
+            "days": {
+              "description": "The days it runs on, at least one.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sun",
+                  "mon",
+                  "tue",
+                  "wed",
+                  "thu",
+                  "fri",
+                  "sat"
+                ]
+              },
+              "minItems": 1,
+              "uniqueItems": true,
+              "default": [
+                "sun",
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat"
+              ]
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event",
+            "time"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: specificDate",
+          "description": "Runs once, at a date and time in Companion's configured timezone (or the system's).",
+          "properties": {
+            "event": {
+              "description": "Selects the specificDate event.",
+              "const": "specificDate"
+            },
+            "date": {
+              "description": "The date, \"YYYY-MM-DD\".",
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+              "$comment": "Not expressible here: the date must exist in the calendar."
+            },
+            "time": {
+              "description": "The time, \"HH:MM:SS\" or \"HH:MM\" (24-hour).",
+              "type": "string",
+              "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event",
+            "date",
+            "time"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: sun_event",
+          "description": "Runs at sunrise or sunset at a place, shifted by an offset.",
+          "properties": {
+            "event": {
+              "description": "Selects the sun_event event.",
+              "const": "sun_event"
+            },
+            "sun": {
+              "description": "Sunrise or sunset.",
+              "type": "string",
+              "enum": [
+                "sunrise",
+                "sunset"
+              ],
+              "default": "sunrise"
+            },
+            "latitude": {
+              "description": "The place's latitude in degrees.",
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90,
+              "default": 0
+            },
+            "longitude": {
+              "description": "The place's longitude in degrees.",
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "default": 0
+            },
+            "offset": {
+              "description": "Minutes after (or, when negative, before) the event.",
+              "type": "number",
+              "minimum": -720,
+              "maximum": 720,
+              "default": 0
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: client_connect",
+          "description": "Runs when a web client connects to Companion.",
+          "properties": {
+            "event": {
+              "description": "Selects the client_connect event.",
+              "const": "client_connect"
+            },
+            "delay": {
+              "description": "Milliseconds to wait after the connection.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "default": 0
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: button_press",
+          "description": "Runs when any button is pressed.",
+          "properties": {
+            "event": {
+              "description": "Selects the button_press event.",
+              "const": "button_press"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: button_release",
+          "description": "Runs when any button is released.",
+          "properties": {
+            "event": {
+              "description": "Selects the button_release event.",
+              "const": "button_release"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
           "title": "event: variable_changed",
-          "description": "Runs when a custom variable's value changes.",
+          "description": "Runs when a variable's value changes: a custom variable by `variable`, or any other by `variableId`.",
+          "$comment": "Not expressible here: one of variable and variableId is required, and a variableId must not start with custom: (use variable).",
+          "dependentSchemas": {
+            "variable": {
+              "$comment": "With `variable`, `variableId` is refused.",
+              "properties": {
+                "variableId": false
+              }
+            }
+          },
           "properties": {
             "event": {
               "description": "Selects the variable_changed event.",
               "const": "variable_changed"
             },
             "variable": {
-              "description": "The custom variable, by name (without `custom:`). It must exist in the database.",
+              "description": "The custom variable, by name (without `custom:`). It must exist in the database. Give this or `variableId`.",
               "$ref": "#/$defs/variableName"
+            },
+            "variableId": {
+              "description": "Any other variable, as `<label>:<name>` (for example `internal:time_hms` or `local:counter`), stored as given and not checked against the database. Give this or `variable`.",
+              "type": "string",
+              "pattern": "^[^:]+:.+$"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
             }
           },
           "required": [
-            "event",
-            "variable"
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: computer_locked",
+          "description": "Runs when the computer running Companion locks. Companion registers it only on macOS and Windows; Companion on Linux ignores it.",
+          "properties": {
+            "event": {
+              "description": "Selects the computer_locked event.",
+              "const": "computer_locked"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: computer_unlocked",
+          "description": "Runs when the computer running Companion unlocks. Companion registers it only on macOS and Windows; Companion on Linux ignores it.",
+          "properties": {
+            "event": {
+              "description": "Selects the computer_unlocked event.",
+              "const": "computer_unlocked"
+            },
+            "enabled": {
+              "description": "Whether the event can start the trigger.",
+              "type": "boolean",
+              "default": true
+            }
+          },
+          "required": [
+            "event"
           ],
           "additionalProperties": false
         }

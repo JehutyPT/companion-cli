@@ -141,7 +141,7 @@ describe("list triggers", () => {
       `New Trigger    no                                                 0        ${NO_OPTIONS}`,
       `Conditional    yes      condition_true, var internal:time_hms (…  1 +cond  ${CONDITIONAL}`,
       `Dup            no       startup 10000ms (off)                     0        ${DUP_A}`,
-      `Dup            yes      intervalRandom                            0        ${DUP_B}`,
+      `Dup            yes      random 1-2s                               0        ${DUP_B}`,
       `Reset counter  yes      startup 0ms, interval 5s, var fx_counter  2        ${reset}`,
       `Quiet          no       interval 60s                              0        ${quiet}`,
     ]);
@@ -238,6 +238,69 @@ describe("list triggers", () => {
         collectionId: null,
       },
     ]);
+  });
+
+  it("summarizes every event kind (#27)", async () => {
+    const summaries: Array<[string, Record<string, unknown>, string]> = [
+      ["intervalRandom", { minimum: 3, maximum: 10 }, "random 3-10s"],
+      [
+        "timeofday",
+        { time: "08:00:00", days: [1, 2, 3, 4, 5] },
+        "timeofday 08:00:00 mon-fri",
+      ],
+      [
+        "timeofday",
+        { time: "07:00:00", days: [6, 0] },
+        "timeofday 07:00:00 sun,sat",
+      ],
+      [
+        "timeofday",
+        { time: "07:00:00", days: [0, 1, 2, 3, 4, 5, 6] },
+        "timeofday 07:00:00 sun-sat",
+      ],
+      [
+        "specificDate",
+        { date: "2026-12-31", time: "23:00" },
+        "date 2026-12-31 23:00",
+      ],
+      [
+        "sun_event",
+        { type: "sunset", latitude: 0, longitude: 0, offset: 10 },
+        "sun sunset +10m",
+      ],
+      [
+        "sun_event",
+        { type: "sunrise", latitude: 0, longitude: 0, offset: -5 },
+        "sun sunrise -5m",
+      ],
+      [
+        "sun_event",
+        { type: "sunrise", latitude: 0, longitude: 0, offset: 0 },
+        "sun sunrise",
+      ],
+      ["client_connect", { delay: 0 }, "connect 0ms"],
+      ["button_press", {}, "press"],
+      ["button_release", {}, "release"],
+      ["computer_locked", {}, "locked"],
+      ["computer_unlocked", {}, "unlocked"],
+      ["timeofday", { days: "x" }, "timeofday"],
+    ];
+    const env = setup({}, (db) =>
+      summaries.forEach(([type, options], index) =>
+        seed(db, `trigger:FixtureTrigEvent${String(index).padStart(4, "0")}A`, {
+          type: "trigger",
+          options: { name: `E${index}`, enabled: true, sortOrder: index },
+          actions: [],
+          condition: [],
+          events: [{ id: `e${index}`, type, enabled: true, options }],
+        }),
+      ),
+    );
+    const stdout = ok(await listTriggers(env));
+    assert.deepEqual(
+      stdout.slice(1).map((line) => line.split(/ {2,}/)[2]),
+      summaries.map(([, , summary]) => summary),
+    );
   });
 
   it("gives byte-identical output on every run", async () => {

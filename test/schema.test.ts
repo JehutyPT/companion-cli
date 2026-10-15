@@ -87,6 +87,23 @@ buttons: []
 name: t
 events: [{ event: startup }]
 `,
+  "a trigger with every event kind": `kind: trigger
+name: t
+events:
+  - { event: startup, enabled: false }
+  - { event: interval, seconds: 5 }
+  - { event: intervalRandom, min: 2, max: 9 }
+  - { event: timeofday, time: "08:30:00", days: [mon, fri] }
+  - { event: specificDate, date: "2026-12-31", time: "23:00" }
+  - { event: sun_event, sun: sunset, latitude: 38.72, longitude: -9.14, offset: 10 }
+  - { event: client_connect, delay: 0 }
+  - { event: button_press }
+  - { event: button_release }
+  - { event: variable_changed, variable: fx_counter }
+  - { event: variable_changed, variableId: "internal:time_hms" }
+  - { event: computer_locked }
+  - { event: computer_unlocked }
+`,
 };
 
 /** Descriptions both the schema and the parser refuse. */
@@ -197,7 +214,26 @@ buttons:
   "a trigger without events": "kind: trigger\nname: t\nevents: []\n",
   "a trigger with a string enabled":
     "kind: trigger\nname: t\nenabled: 'true'\nevents: [{ event: startup }]\n",
-  "unknown event": "kind: trigger\nname: t\nevents: [{ event: timeofday }]\n",
+  "unknown event":
+    "kind: trigger\nname: t\nevents: [{ event: condition_true }]\n",
+  "a time of day without seconds":
+    "kind: trigger\nname: t\nevents: [{ event: timeofday, time: '08:30' }]\n",
+  "an unknown day name":
+    "kind: trigger\nname: t\nevents: [{ event: timeofday, time: '08:30:00', days: [monday] }]\n",
+  "duplicate days":
+    "kind: trigger\nname: t\nevents: [{ event: timeofday, time: '08:00:00', days: [mon, mon] }]\n",
+  "a specific date without a time":
+    "kind: trigger\nname: t\nevents: [{ event: specificDate, date: '2026-12-31' }]\n",
+  "a latitude beyond the pole":
+    "kind: trigger\nname: t\nevents: [{ event: sun_event, latitude: 91 }]\n",
+  "an unknown sun event":
+    "kind: trigger\nname: t\nevents: [{ event: sun_event, sun: noon }]\n",
+  "a random interval of zero seconds":
+    "kind: trigger\nname: t\nevents: [{ event: intervalRandom, min: 0 }]\n",
+  "an event enabled flag as text":
+    "kind: trigger\nname: t\nevents: [{ event: button_press, enabled: 'no' }]\n",
+  "both variable and variableId":
+    "kind: trigger\nname: t\nevents: [{ event: variable_changed, variable: a, variableId: 'internal:a' }]\n",
   "interval 0":
     "kind: trigger\nname: t\nevents: [{ event: interval, seconds: 0 }]\n",
   "a negative startup delay":
@@ -213,6 +249,14 @@ buttons:
  * the schema accepts them, and the schema says so in a `$comment`.
  */
 const EXCEPTIONS: Record<string, string> = {
+  "a variable_changed event naming no variable":
+    "kind: trigger\nname: t\nevents: [{ event: variable_changed }]\n",
+  "a variableId on a custom variable":
+    "kind: trigger\nname: t\nevents: [{ event: variable_changed, variableId: 'custom:a' }]\n",
+  "a random interval with max below min":
+    "kind: trigger\nname: t\nevents: [{ event: intervalRandom, min: 5, max: 2 }]\n",
+  "a date that is not on the calendar":
+    "kind: trigger\nname: t\nevents: [{ event: specificDate, date: '2026-02-30', time: '10:00' }]\n",
   "a step feedback beyond the button's steps": `${BUTTON}feedbacks: [{ feedback: step, step: 2, style: { text: x } }]\n`,
   "duplicate variable names":
     "kind: variables\nvariables: [{ name: a, default: 1 }, { name: a, default: 2 }]\n",
@@ -249,12 +293,17 @@ function schemaFields(schema: Json): Set<string> {
         ...own.map((name) => `${tag}: ${kind}.${name}`),
       ];
     });
-  const feedbackBranches = (defs["feedback"] as Json)["oneOf"] as Json[];
-  const common = props(feedbackBranches[0] as Json).filter(
-    (name) =>
-      name !== "feedback" &&
-      feedbackBranches.every((branch) => props(branch).includes(name)),
-  );
+  /** Fields every branch of a tagged list has besides its tag. */
+  const commonTo = (tag: string) => {
+    const branches = (defs[tag] as Json)["oneOf"] as Json[];
+    return props(branches[0] as Json).filter(
+      (name) =>
+        name !== tag &&
+        branches.every((branch) => props(branch).includes(name)),
+    );
+  };
+  const feedbackCommon = commonTo("feedback");
+  const eventCommon = commonTo("event");
   return new Set([
     ...(schema["oneOf"] as Json[]).flatMap((branch) => {
       const kind = ((branch["properties"] as Json)["kind"] as Json)["const"];
@@ -269,10 +318,11 @@ function schemaFields(schema: Json): Set<string> {
     ...under("variables[]", props(defs["variable"] as Json)),
     ...under("steps[]", props(defs["step"] as Json)),
     ...tagged("action"),
-    ...tagged("feedback", common),
-    ...under("feedback", common),
+    ...tagged("feedback", feedbackCommon),
+    ...under("feedback", feedbackCommon),
     ...under("feedback.style", props(defs["style"] as Json)),
-    ...tagged("event"),
+    ...tagged("event", eventCommon),
+    ...under("event", eventCommon),
   ]);
 }
 

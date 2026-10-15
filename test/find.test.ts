@@ -559,6 +559,60 @@ describe("find <text>", () => {
     ]);
   });
 
+  it("names event options by their description fields (#27)", async () => {
+    const events = `trigger:${id("FindEvts")}`;
+    const env = setup({}, (db) =>
+      insert(db, "controls", events, {
+        type: "trigger",
+        options: { name: "Events", enabled: true, sortOrder: 0, notes: "" },
+        actions: [],
+        condition: [],
+        events: [
+          {
+            id: id("EvA"),
+            type: "variable_changed",
+            enabled: true,
+            options: { variableId: "internal:time_hms" },
+          },
+          {
+            id: id("EvB"),
+            type: "timeofday",
+            enabled: true,
+            options: { time: "08:30:00", days: [5] },
+          },
+          {
+            id: id("EvC"),
+            type: "specificDate",
+            enabled: true,
+            options: { date: "2026-08-30", time: "10:00" },
+          },
+          {
+            id: id("EvD"),
+            type: "sun_event",
+            enabled: true,
+            options: { type: "sunset", latitude: 0, longitude: 0, offset: 0 },
+          },
+        ],
+        localVariables: [],
+      }),
+    );
+    assert.deepEqual(await texts(env, "time_hms"), [
+      `trigger "Events"  ${events}  events[0].variableId`,
+    ]);
+    assert.deepEqual(await texts(env, "08:30"), [
+      `trigger "Events"  ${events}  events[1].time`,
+    ]);
+    assert.deepEqual(await texts(env, "2026-08"), [
+      `trigger "Events"  ${events}  events[2].date`,
+    ]);
+    assert.deepEqual(await texts(env, "sunset"), [
+      `trigger "Events"  ${events}  events[3].sun`,
+    ]);
+    assert.deepEqual(await texts(env, "5"), [
+      `trigger "Events"  ${events}  events[1].days[0]`,
+    ]);
+  });
+
   it("never matches option keys, ids, definitions or connections", async () => {
     const env = setup({}, seedFind);
     for (const text of [

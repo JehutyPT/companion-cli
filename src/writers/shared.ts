@@ -6,6 +6,7 @@ import {
   type FieldSchema,
   NON_EMPTY_STRING,
   requiredField,
+  type SchemaFragment,
 } from "../core/field-schema.ts";
 import {
   expectJsonValue,
@@ -242,6 +243,8 @@ export interface TaggedKind<P, C = undefined, B = EntityBody> {
   readonly fields: readonly string[];
   /** Each of `fields`, documented, in the same order. */
   readonly fieldSchemas: Readonly<Record<string, FieldSchema>>;
+  /** More JSON Schema keywords for the entry, for rules across its fields. */
+  readonly schema?: SchemaFragment;
   /** Validates the kind's fields (unknown fields are already rejected). */
   parse(fields: Fields, path: string, context: C): P;
   /** Custom variables the kind's fields use, in field order; checked against the database. */

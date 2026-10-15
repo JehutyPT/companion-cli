@@ -12,6 +12,7 @@ import { bySortOrderThen } from "../readers/list.ts";
 import type { Area } from "../support-matrix.ts";
 import {
   buildTriggerControl,
+  DAY_NAMES,
   checkTrigger,
   parseTrigger,
   readTriggers,
@@ -36,12 +37,25 @@ function area(path: string): Area {
   return "trigger";
 }
 
+/** Event fields stored under the same name in the event's options. */
+const SAME_NAME_OPTIONS =
+  "delay|seconds|time|date|days|latitude|longitude|offset";
+
 /** A description field path of a trigger body as a stored path. */
 function storedPath(field: string): string {
   return field
     .replace(/^(name|enabled)$/, "options.$1")
-    .replace(/^(events\[\d+\])\.variable$/, "$1.options.variableId")
-    .replace(/^(events\[\d+\])\.(delay|seconds)$/, "$1.options.$2")
+    .replace(
+      /^(events\[\d+\])\.(variable|variableId)$/,
+      "$1.options.variableId",
+    )
+    .replace(/^(events\[\d+\])\.min$/, "$1.options.minimum")
+    .replace(/^(events\[\d+\])\.max$/, "$1.options.maximum")
+    .replace(/^(events\[\d+\])\.sun$/, "$1.options.type")
+    .replace(
+      new RegExp(`^(events\\[\\d+\\])\\.(${SAME_NAME_OPTIONS})(?=$|\\[)`),
+      "$1.options.$2",
+    )
     .replace(/^(actions\[\d+\])\.variable$/, "$1.options.name")
     .replace(/^(actions\[\d+\])\.(value|expression|by)$/, "$1.options.value")
     .replace(/^(actions\[\d+\])\.options\./, "$1.options.");
@@ -63,26 +77,75 @@ function integerOption(
   return value;
 }
 
+/**
+ * The stored options as description fields, renamed by `fields` (stored key
+ * to field). A missing option is left out, so the writer's default applies
+ * and the self-check names the difference; other values are passed on for
+ * the writer's parser to judge.
+ */
+function optionFields(
+  options: Fields,
+  fields: Readonly<Record<string, string>>,
+): Fields {
+  return Object.fromEntries(
+    Object.entries(fields)
+      .filter(([key]) => options[key] !== undefined)
+      .map(([key, field]) => [field, options[key]]),
+  );
+}
+
+/** Stored day numbers as day names; anything but a list is passed on. */
+function dayNames(days: unknown, path: string): unknown {
+  if (!Array.isArray(days)) return days;
+  return days.map((day: unknown, index) => {
+    if (typeof day !== "number" || DAY_NAMES[day] === undefined)
+      refuse(
+        `${path}.options.days[${index}]`,
+        `is ${typeof day === "number" ? day : describeStored(day)}, not a day number from 0 to 6`,
+        "event",
+      );
+    return DAY_NAMES[day];
+  });
+}
+
 /** The inverse of the trigger writer's EVENT_KINDS, by stored event type. */
 const EVENTS: Record<string, (options: Fields, path: string) => Fields> = {
   startup: (options, path) => ({
-    event: "startup",
     delay: integerOption(options, "delay", path, 0),
   }),
   interval: (options, path) => ({
-    event: "interval",
     seconds: integerOption(options, "seconds", path, 1),
   }),
-  variable_changed: (options, path) => {
-    const id = options["variableId"];
-    if (typeof id !== "string" || !id.startsWith("custom:"))
-      refuse(
-        `${path}.options.variableId`,
-        `is ${JSON.stringify(id ?? null)}; only custom variables are supported yet`,
-        "event",
-      );
-    return { event: "variable_changed", variable: id.slice("custom:".length) };
+  intervalRandom: (options) =>
+    optionFields(options, { minimum: "min", maximum: "max" }),
+  timeofday: (options, path) => {
+    const fields = optionFields(options, { time: "time" });
+    return options["days"] === undefined
+      ? fields
+      : { ...fields, days: dayNames(options["days"], path) };
   },
+  specificDate: (options) =>
+    optionFields(options, { date: "date", time: "time" }),
+  sun_event: (options) =>
+    optionFields(options, {
+      type: "sun",
+      latitude: "latitude",
+      longitude: "longitude",
+      offset: "offset",
+    }),
+  client_connect: (options, path) => ({
+    delay: integerOption(options, "delay", path, 0),
+  }),
+  button_press: () => ({}),
+  button_release: () => ({}),
+  variable_changed: (options) => {
+    const id = options["variableId"];
+    return typeof id === "string" && id.startsWith("custom:")
+      ? { variable: id.slice("custom:".length) }
+      : { variableId: id ?? null };
+  },
+  computer_locked: () => ({}),
+  computer_unlocked: () => ({}),
 };
 
 function exportEvent(stored: unknown, path: string): Fields {
@@ -95,10 +158,11 @@ function exportEvent(stored: unknown, path: string): Fields {
       `is ${JSON.stringify(type ?? null)}, which the description format does not support yet`,
       "event",
     );
-  if (stored["enabled"] !== true)
+  const enabled = stored["enabled"];
+  if (typeof enabled !== "boolean")
     refuse(
       `${path}.enabled`,
-      `is ${JSON.stringify(stored["enabled"] ?? null)}; disabled events are not supported yet`,
+      `is ${describeStored(enabled)}, not true or false`,
       "event",
     );
   const options = stored["options"];
@@ -108,7 +172,11 @@ function exportEvent(stored: unknown, path: string): Fields {
       `is ${describeStored(options)}, not a mapping`,
       "event",
     );
-  return (EVENTS[type] as (typeof EVENTS)[string])(options, path);
+  return {
+    event: type,
+    ...(EVENTS[type] as (typeof EVENTS)[string])(options, path),
+    ...(enabled ? {} : { enabled }),
+  };
 }
 
 function list(control: Fields, key: string): unknown[] {

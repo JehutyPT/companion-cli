@@ -17,7 +17,9 @@ import {
   expectMapping,
   expectNonEmptyString,
   expectNonNegativeInteger,
+  expectNumberInRange,
   expectPositiveInteger,
+  expectString,
   fieldPath,
   type Fields,
   isJsonObject,
@@ -53,12 +55,15 @@ import {
  *     - { event: startup, delay: 0 }       # delay in ms, optional, default 10000
  *     - { event: interval, seconds: 5 }    # positive integer
  *     - { event: variable_changed, variable: fx_counter }
- *   actions:                               # optional action list, default []
+ *     - { event: timeofday, time: "08:00:00", days: [mon, fri], enabled: false }
+ *   actions:                              # optional action list, default []
  *     - { action: increment, variable: fx_counter }
  *
  * The control is Companion 5.1's stored trigger: `{type: "trigger", options,
  * actions, condition: [], events, localVariables: []}`, with event options as
- * plain values. A trigger with the same name is rewritten under its control
+ * plain values. Every Companion 5.1 event type except the condition events is
+ * written (EVENT_KINDS); `enabled: false` on an event stores it disabled.
+ * A trigger with the same name is rewritten under its control
  * id, keeping its `sortOrder` and `collectionId`; everything else is replaced,
  * and `notes` is reset to "". Otherwise a new `trigger:<id>` row is appended
  * after the highest `sortOrder`. Two triggers with the same name refuse the
@@ -79,6 +84,160 @@ const defineKind = <P>(kind: Omit<EventKind<P>, "fields">): EventKind<P> =>
 /** Companion's own default for a new startup event (`VK.startup`). */
 const DEFAULT_STARTUP_DELAY_MS = 10000;
 
+/** Day names in a description file, by Companion's day number (Sunday = 0). */
+export const DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+/** The times Companion runs a time-of-day event at (`Timer.ts`). */
+export const TIME_OF_DAY_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$";
+/** The times Companion runs a specific-date event at: seconds optional. */
+export const SPECIFIC_TIME_PATTERN =
+  "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$";
+/** A date as the web UI's date input stores it. */
+export const DATE_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$";
+
+export const SUN_EVENTS = ["sunrise", "sunset"];
+
+/** `<label>:<name>`, as Companion names a variable. */
+export const VARIABLE_ID_PATTERN = "^[^:]+:.+$";
+
+/** Whether `text` is a "YYYY-MM-DD" date that exists in the calendar. */
+export function isCalendarDate(text: string): boolean {
+  if (!new RegExp(DATE_PATTERN).test(text)) return false;
+  const [year, month, day] = text.split("-").map(Number) as [
+    number,
+    number,
+    number,
+  ];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+/** An optional field: the parsed value, or `fallback` when it is missing. */
+function optional<T>(
+  fields: Fields,
+  key: string,
+  path: string,
+  parse: (value: unknown, field: string) => T,
+  fallback: T,
+): T {
+  return Object.hasOwn(fields, key)
+    ? parse(fields[key], fieldPath(path, key))
+    : fallback;
+}
+
+function parseTime(
+  fields: Fields,
+  path: string,
+  pattern: string,
+  format: string,
+): string {
+  const field = fieldPath(path, "time");
+  const time = expectString(requireField(fields, "time", path), field);
+  if (!new RegExp(pattern).test(time))
+    throw new ValidationError(
+      field,
+      `must be a time ${format}, got ${JSON.stringify(time)}`,
+    );
+  return time;
+}
+
+/** Day names as Companion's day numbers, in file order; all seven by default. */
+function parseDays(fields: Fields, path: string): number[] {
+  if (!Object.hasOwn(fields, "days")) return DAY_NAMES.map((_, day) => day);
+  const daysPath = fieldPath(path, "days");
+  const items = expectList(fields["days"], daysPath);
+  if (items.length === 0)
+    throw new ValidationError(daysPath, "must list at least one day");
+  const days: number[] = [];
+  items.forEach((item, index) => {
+    const itemPath = fieldPath(daysPath, index);
+    const name = expectString(item, itemPath);
+    const day = DAY_NAMES.indexOf(name);
+    if (day < 0)
+      throw new ValidationError(
+        itemPath,
+        `unknown day ${JSON.stringify(name)} (expected one of: ${DAY_NAMES.join(", ")})`,
+      );
+    if (days.includes(day))
+      throw new ValidationError(
+        itemPath,
+        `duplicate day ${JSON.stringify(name)}`,
+      );
+    days.push(day);
+  });
+  return days;
+}
+
+/** A variable_changed event's variable: a custom one by name, or any by id. */
+type VariableChanged = { variable: string } | { variableId: string };
+
+function parseVariableChanged(fields: Fields, path: string): VariableChanged {
+  const hasVariable = Object.hasOwn(fields, "variable");
+  const hasId = Object.hasOwn(fields, "variableId");
+  if (hasVariable && hasId)
+    throw new ValidationError(
+      fieldPath(path, "variableId"),
+      "give either variable or variableId, not both",
+    );
+  if (hasVariable)
+    return {
+      variable: parseVariableName(
+        fields["variable"],
+        fieldPath(path, "variable"),
+      ),
+    };
+  if (!hasId)
+    throw new ValidationError(
+      fieldPath(path, "variable"),
+      "is required (or variableId for a variable that is not a custom variable)",
+    );
+  const field = fieldPath(path, "variableId");
+  const id = expectString(fields["variableId"], field);
+  if (!new RegExp(VARIABLE_ID_PATTERN).test(id))
+    throw new ValidationError(
+      field,
+      `must be "<label>:<name>", got ${JSON.stringify(id)}`,
+    );
+  if (id.startsWith("custom:"))
+    throw new ValidationError(
+      field,
+      `is a custom variable; write variable: ${id.slice("custom:".length)} instead`,
+    );
+  return { variableId: id };
+}
+
+const inRange =
+  (min: number, max: number) =>
+  (value: unknown, field: string): number =>
+    expectNumberInRange(value, field, min, max);
+
+const numberInRange = (minimum: number, maximum: number) => ({
+  type: "number",
+  minimum,
+  maximum,
+});
+
+/** An event kind without options. */
+const noOptions = (type: string, doc: string) =>
+  defineKind({
+    doc,
+    fieldSchemas: {},
+    parse: () => ({}),
+    references: () => [],
+    build: () => ({ type, options: {} }),
+  });
+
+const PLATFORM_NOTE =
+  " Companion registers it only on macOS and Windows; Companion on Linux ignores it.";
+
+/**
+ * Every event kind, built as Companion stores it: options in the order of
+ * its event definition (`Resources/EventDefinitions.ts`), as plain values.
+ */
 export const EVENT_KINDS = {
   startup: defineKind({
     doc: "Runs when Companion starts.",
@@ -89,9 +248,13 @@ export const EVENT_KINDS = {
       }),
     },
     parse: (fields, path) => ({
-      delay: Object.hasOwn(fields, "delay")
-        ? expectNonNegativeInteger(fields["delay"], fieldPath(path, "delay"))
-        : DEFAULT_STARTUP_DELAY_MS,
+      delay: optional(
+        fields,
+        "delay",
+        path,
+        expectNonNegativeInteger,
+        DEFAULT_STARTUP_DELAY_MS,
+      ),
     }),
     references: () => [],
     build: ({ delay }) => ({ type: "startup", options: { delay } }),
@@ -110,33 +273,229 @@ export const EVENT_KINDS = {
     references: () => [],
     build: ({ seconds }) => ({ type: "interval", options: { seconds } }),
   }),
-  variable_changed: defineKind({
-    doc: "Runs when a custom variable's value changes.",
+  intervalRandom: defineKind({
+    doc: "Runs again and again, each time after a random whole number of seconds from `min` to `max`.",
     fieldSchemas: {
-      variable: requiredField(
-        "The custom variable, by name (without `custom:`). It must exist in the database.",
-        ref("variableName"),
-      ),
+      min: field("The shortest interval in seconds.", {
+        ...integer(1),
+        default: 3,
+      }),
+      max: field("The longest interval in seconds; at least `min`.", {
+        ...integer(1),
+        default: 10,
+        $comment: "Not expressible here: max must be at least min.",
+      }),
     },
-    parse: (fields, path) => ({
-      variable: parseVariableName(
-        requireField(fields, "variable", path),
-        fieldPath(path, "variable"),
-      ),
-    }),
-    references: ({ variable }, path) => [
-      { field: fieldPath(path, "variable"), name: variable },
-    ],
-    build: ({ variable }) => ({
-      type: "variable_changed",
-      options: { variableId: `custom:${variable}` },
+    parse: (fields, path) => {
+      const min = optional(fields, "min", path, expectPositiveInteger, 3);
+      const max = optional(fields, "max", path, expectPositiveInteger, 10);
+      if (max < min)
+        throw new ValidationError(
+          fieldPath(path, "max"),
+          `must be at least min (${min}), got ${max}`,
+        );
+      return { min, max };
+    },
+    references: () => [],
+    build: ({ min, max }) => ({
+      type: "intervalRandom",
+      options: { minimum: min, maximum: max },
     }),
   }),
+  timeofday: defineKind({
+    doc: "Runs at a time of day on the given days, in Companion's configured timezone (or the system's).",
+    fieldSchemas: {
+      time: requiredField('The time, "HH:MM:SS" (24-hour).', {
+        type: "string",
+        pattern: TIME_OF_DAY_PATTERN,
+      }),
+      days: field("The days it runs on, at least one.", {
+        ...list(
+          { type: "string", enum: DAY_NAMES },
+          { minItems: 1, uniqueItems: true },
+        ),
+        default: DAY_NAMES,
+      }),
+    },
+    parse: (fields, path) => ({
+      time: parseTime(fields, path, TIME_OF_DAY_PATTERN, '"HH:MM:SS"'),
+      days: parseDays(fields, path),
+    }),
+    references: () => [],
+    build: ({ time, days }) => ({
+      type: "timeofday",
+      options: { time, days },
+    }),
+  }),
+  specificDate: defineKind({
+    doc: "Runs once, at a date and time in Companion's configured timezone (or the system's).",
+    fieldSchemas: {
+      date: requiredField('The date, "YYYY-MM-DD".', {
+        type: "string",
+        pattern: DATE_PATTERN,
+        $comment: "Not expressible here: the date must exist in the calendar.",
+      }),
+      time: requiredField('The time, "HH:MM:SS" or "HH:MM" (24-hour).', {
+        type: "string",
+        pattern: SPECIFIC_TIME_PATTERN,
+      }),
+    },
+    parse: (fields, path) => {
+      const field = fieldPath(path, "date");
+      const date = expectString(requireField(fields, "date", path), field);
+      if (!isCalendarDate(date))
+        throw new ValidationError(
+          field,
+          `must be a date "YYYY-MM-DD", got ${JSON.stringify(date)}`,
+        );
+      return {
+        date,
+        time: parseTime(
+          fields,
+          path,
+          SPECIFIC_TIME_PATTERN,
+          '"HH:MM" or "HH:MM:SS"',
+        ),
+      };
+    },
+    references: () => [],
+    build: ({ date, time }) => ({
+      type: "specificDate",
+      options: { date, time },
+    }),
+  }),
+  sun_event: defineKind({
+    doc: "Runs at sunrise or sunset at a place, shifted by an offset.",
+    fieldSchemas: {
+      sun: field("Sunrise or sunset.", {
+        type: "string",
+        enum: SUN_EVENTS,
+        default: "sunrise",
+      }),
+      latitude: field("The place's latitude in degrees.", {
+        ...numberInRange(-90, 90),
+        default: 0,
+      }),
+      longitude: field("The place's longitude in degrees.", {
+        ...numberInRange(-180, 180),
+        default: 0,
+      }),
+      offset: field("Minutes after (or, when negative, before) the event.", {
+        ...numberInRange(-720, 720),
+        default: 0,
+      }),
+    },
+    parse: (fields, path) => {
+      const sun = optional(fields, "sun", path, expectString, "sunrise");
+      if (!SUN_EVENTS.includes(sun))
+        throw new ValidationError(
+          fieldPath(path, "sun"),
+          `must be one of ${SUN_EVENTS.join(", ")}, got ${JSON.stringify(sun)}`,
+        );
+      return {
+        sun,
+        latitude: optional(fields, "latitude", path, inRange(-90, 90), 0),
+        longitude: optional(fields, "longitude", path, inRange(-180, 180), 0),
+        offset: optional(fields, "offset", path, inRange(-720, 720), 0),
+      };
+    },
+    references: () => [],
+    build: ({ sun, latitude, longitude, offset }) => ({
+      type: "sun_event",
+      options: { type: sun, latitude, longitude, offset },
+    }),
+  }),
+  client_connect: defineKind({
+    doc: "Runs when a web client connects to Companion.",
+    fieldSchemas: {
+      delay: field("Milliseconds to wait after the connection.", {
+        ...integer(0),
+        default: 0,
+      }),
+    },
+    parse: (fields, path) => ({
+      delay: optional(fields, "delay", path, expectNonNegativeInteger, 0),
+    }),
+    references: () => [],
+    build: ({ delay }) => ({ type: "client_connect", options: { delay } }),
+  }),
+  button_press: noOptions("button_press", "Runs when any button is pressed."),
+  button_release: noOptions(
+    "button_release",
+    "Runs when any button is released.",
+  ),
+  variable_changed: defineKind<VariableChanged>({
+    doc: "Runs when a variable's value changes: a custom variable by `variable`, or any other by `variableId`.",
+    fieldSchemas: {
+      variable: field(
+        "The custom variable, by name (without `custom:`). It must exist in the database. Give this or `variableId`.",
+        ref("variableName"),
+      ),
+      variableId: field(
+        "Any other variable, as `<label>:<name>` (for example `internal:time_hms` or `local:counter`), stored as given and not checked against the database. Give this or `variable`.",
+        { type: "string", pattern: VARIABLE_ID_PATTERN },
+      ),
+    },
+    schema: {
+      $comment:
+        "Not expressible here: one of variable and variableId is required, and a variableId must not start with custom: (use variable).",
+      dependentSchemas: {
+        variable: {
+          $comment: "With `variable`, `variableId` is refused.",
+          properties: { variableId: false },
+        },
+      },
+    },
+    parse: parseVariableChanged,
+    references: (payload, path) =>
+      "variable" in payload
+        ? [{ field: fieldPath(path, "variable"), name: payload.variable }]
+        : [],
+    build: (payload) => ({
+      type: "variable_changed",
+      options: {
+        variableId:
+          "variable" in payload
+            ? `custom:${payload.variable}`
+            : payload.variableId,
+      },
+    }),
+  }),
+  computer_locked: noOptions(
+    "computer_locked",
+    `Runs when the computer running Companion locks.${PLATFORM_NOTE}`,
+  ),
+  computer_unlocked: noOptions(
+    "computer_unlocked",
+    `Runs when the computer running Companion unlocks.${PLATFORM_NOTE}`,
+  ),
 };
 
 const EVENTS = taggedKinds<undefined, EventBody>("event")(EVENT_KINDS);
 
-type EventSpec = TaggedSpec<typeof EVENT_KINDS>;
+/** Fields every event entry accepts besides its kind's own. */
+export const EVENT_FIELDS = ["enabled"] as const;
+
+export const EVENT_FIELD_SCHEMAS: Record<
+  (typeof EVENT_FIELDS)[number],
+  FieldSchema
+> = {
+  enabled: field("Whether the event can start the trigger.", {
+    ...BOOLEAN,
+    default: true,
+  }),
+};
+
+type EventSpec = TaggedSpec<typeof EVENT_KINDS> & { enabled: boolean };
+
+function parseEvent(item: unknown, path: string): EventSpec {
+  const fields = expectMapping(item, path);
+  const spec = EVENTS.parse(fields, path, undefined, EVENT_FIELDS);
+  return {
+    ...spec,
+    enabled: optional(fields, "enabled", path, expectBoolean, true),
+  };
+}
 
 export interface TriggerPlan {
   name: string;
@@ -199,10 +558,9 @@ export function parseTrigger(fields: Fields, parent = ""): TriggerPlan {
   const list = expectList(requireField(fields, "events", parent), eventsPath);
   if (list.length === 0)
     throw new ValidationError(eventsPath, "must list at least one event");
-  const events = list.map((item, index) => {
-    const path = fieldPath(eventsPath, index);
-    return EVENTS.parse(expectMapping(item, path), path, undefined);
-  });
+  const events = list.map((item, index) =>
+    parseEvent(item, fieldPath(eventsPath, index)),
+  );
   return {
     name,
     enabled,
@@ -326,7 +684,7 @@ export function buildTriggerControl(
     condition: [],
     events: plan.events.map((spec) => {
       const { type, options } = EVENTS.build(spec);
-      return { id: newId(), type, enabled: true, options };
+      return { id: newId(), type, enabled: spec.enabled, options };
     }),
     localVariables: [],
   };

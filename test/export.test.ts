@@ -8,6 +8,7 @@
 import assert from "node:assert/strict";
 import type { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
+import { parseDocument } from "yaml";
 import { USAGE } from "../src/cli.ts";
 import { SCHEMA_MODELINE } from "../src/schema.ts";
 import {
@@ -493,26 +494,13 @@ triggers:
           events: [
             {
               id: "SeedEventAAAAAAAAAAAA",
-              type: "timeofday",
+              type: "condition_false",
               enabled: true,
               options: {},
             },
           ],
         }),
-        'events[0].type is "timeofday", which the description format does not support yet',
-        "event",
-      ],
-      [
-        "a disabled event",
-        COLLECTED,
-        (value) => ({
-          ...value,
-          events: (value["events"] as Json[]).map((event) => ({
-            ...event,
-            enabled: false,
-          })),
-        }),
-        "events[0].enabled is false; disabled events are not supported yet",
+        'events[0].type is "condition_false", which the description format does not support yet',
         "event",
       ],
       [
@@ -526,19 +514,6 @@ triggers:
           })),
         }),
         "events[0].options.seconds is a string, not an integer of at least 1",
-        "event",
-      ],
-      [
-        "a variable_changed event on another variable",
-        'Var "quoted" # hash',
-        (value) => ({
-          ...value,
-          events: (value["events"] as Json[]).map((event) => ({
-            ...event,
-            options: { variableId: "internal:time_hms" },
-          })),
-        }),
-        'events[0].options.variableId is "internal:time_hms"; only custom variables are supported yet',
         "event",
       ],
       [
@@ -787,6 +762,276 @@ describe("export connection", () => {
       "run companion-cli list connections",
     );
   });
+});
+
+/** One trigger with every supported event kind, some disabled (#27). */
+const EVERY_EVENT_YAML = `kind: trigger
+name: Every event
+events:
+  - { event: startup, delay: 0, enabled: false }
+  - { event: interval, seconds: 5 }
+  - { event: intervalRandom, min: 2, max: 9 }
+  - { event: timeofday, time: "08:30:00", days: [mon, tue, wed, thu, fri] }
+  - { event: specificDate, date: "2026-12-31", time: "23:00" }
+  - { event: sun_event, sun: sunset, latitude: 38.72, longitude: -9.14, offset: 10 }
+  - { event: client_connect }
+  - { event: button_press }
+  - { event: button_release, enabled: false }
+  - { event: variable_changed, variable: fx_counter }
+  - { event: variable_changed, variableId: "internal:time_hms" }
+  - { event: variable_changed, variableId: "local:counter", enabled: false }
+  - { event: computer_locked }
+  - { event: computer_unlocked }
+`;
+
+/**
+ * A trigger as Companion 5.1's UI stores one: `createEventItem`'s key order
+ * (`id, type, enabled, options`), options in event-definition order, and
+ * nanoid ids. One per event type, so each round-trips on its own.
+ */
+function companionTrigger(name: string, sortOrder: number, event: Json): Json {
+  return {
+    type: "trigger",
+    options: { name, enabled: true, sortOrder, notes: "" },
+    actions: [],
+    condition: [],
+    events: [{ id: `SeedEvent${name.padEnd(12, "x")}`, ...event }],
+    localVariables: [],
+  };
+}
+
+const COMPANION_EVENTS: Array<[string, Json]> = [
+  [
+    "Random",
+    {
+      type: "intervalRandom",
+      enabled: true,
+      options: { minimum: 3, maximum: 10 },
+    },
+  ],
+  [
+    "Weekends",
+    {
+      type: "timeofday",
+      enabled: true,
+      options: { time: "07:00:00", days: [0, 6] },
+    },
+  ],
+  [
+    "Once",
+    {
+      type: "specificDate",
+      enabled: false,
+      options: { date: "2027-01-02", time: "10:20:30" },
+    },
+  ],
+  [
+    "Sunrise",
+    {
+      type: "sun_event",
+      enabled: true,
+      options: { type: "sunrise", latitude: 0, longitude: 0, offset: -15 },
+    },
+  ],
+  ["Connect", { type: "client_connect", enabled: true, options: { delay: 0 } }],
+  ["Press", { type: "button_press", enabled: true, options: {} }],
+  ["Release", { type: "button_release", enabled: true, options: {} }],
+  ["Locked", { type: "computer_locked", enabled: true, options: {} }],
+  ["Unlocked", { type: "computer_unlocked", enabled: false, options: {} }],
+  [
+    "Watch",
+    {
+      type: "variable_changed",
+      enabled: true,
+      options: { variableId: "internal:time_hms" },
+    },
+  ],
+];
+
+/** The fixture with Companion-shaped triggers seeded directly. */
+function companionTriggerFixture(): FixtureEnv {
+  return setup({}, (db) =>
+    COMPANION_EVENTS.forEach(([name, event], index) =>
+      insert(
+        db,
+        "controls",
+        `trigger:Seed${name.padEnd(17, "x")}`,
+        companionTrigger(name, index, event),
+      ),
+    ),
+  );
+}
+
+describe("export triggers: every event kind", () => {
+  it("exports a trigger with every event kind, disabled ones included, and round-trips", async () => {
+    const env = setup();
+    const applied = await applyTo(env, EVERY_EVENT_YAML);
+    assert.equal(applied.code, 0, applied.stderr.join("\n"));
+    const yaml = await exportRoundTrip(env, ["trigger", "Every event"]);
+    assert.equal(
+      yaml,
+      `${SCHEMA_MODELINE}
+# companion-cli export: trigger (1)
+kind: trigger
+name: Every event
+enabled: true
+events:
+  - event: startup
+    delay: 0
+    enabled: false
+  - event: interval
+    seconds: 5
+  - event: intervalRandom
+    min: 2
+    max: 9
+  - event: timeofday
+    time: 08:30:00
+    days:
+      - mon
+      - tue
+      - wed
+      - thu
+      - fri
+  - event: specificDate
+    date: 2026-12-31
+    time: 23:00
+  - event: sun_event
+    sun: sunset
+    latitude: 38.72
+    longitude: -9.14
+    offset: 10
+  - event: client_connect
+    delay: 0
+  - event: button_press
+  - event: button_release
+    enabled: false
+  - event: variable_changed
+    variable: fx_counter
+  - event: variable_changed
+    variableId: internal:time_hms
+  - event: variable_changed
+    variableId: local:counter
+    enabled: false
+  - event: computer_locked
+  - event: computer_unlocked
+`,
+    );
+  });
+
+  it("exports Companion-shaped triggers of every event type, each round-tripping", async () => {
+    const env = companionTriggerFixture();
+    const yaml = await exportRoundTrip(env, ["triggers"]);
+    const events = (parseDocument(yaml).toJS() as Json)["triggers"] as Json[];
+    assert.deepEqual(
+      events.map((trigger) => (trigger["events"] as Json[])[0]),
+      [
+        { event: "intervalRandom", min: 3, max: 10 },
+        { event: "timeofday", time: "07:00:00", days: ["sun", "sat"] },
+        {
+          event: "specificDate",
+          date: "2027-01-02",
+          time: "10:20:30",
+          enabled: false,
+        },
+        {
+          event: "sun_event",
+          sun: "sunrise",
+          latitude: 0,
+          longitude: 0,
+          offset: -15,
+        },
+        { event: "client_connect", delay: 0 },
+        { event: "button_press" },
+        { event: "button_release" },
+        { event: "computer_locked" },
+        { event: "computer_unlocked", enabled: false },
+        { event: "variable_changed", variableId: "internal:time_hms" },
+      ],
+    );
+    for (const [name] of COMPANION_EVENTS)
+      await exportRoundTrip(env, ["trigger", name]);
+  });
+
+  const refusals: Array<[string, Json, string]> = [
+    [
+      "a condition event, which waits for trigger conditions (#26)",
+      { type: "condition_true", enabled: true, options: {} },
+      'events[0].type is "condition_true", which the description format does not support yet',
+    ],
+    [
+      "a time of day Companion would never run",
+      {
+        type: "timeofday",
+        enabled: true,
+        options: { time: "08:00", days: [1] },
+      },
+      'events[0].options.time cannot be expressed: must be a time "HH:MM:SS", got "08:00"',
+    ],
+    [
+      "a time of day without a time, as Companion creates one",
+      { type: "timeofday", enabled: true, options: { days: [1] } },
+      "events[0].options.time cannot be expressed: is required",
+    ],
+    [
+      "a day number beyond Saturday",
+      {
+        type: "timeofday",
+        enabled: true,
+        options: { time: "08:00:00", days: [1, 7] },
+      },
+      "events[0].options.days[1] is 7, not a day number from 0 to 6",
+    ],
+    [
+      "a time of day without days",
+      { type: "timeofday", enabled: true, options: { time: "08:00:00" } },
+      "events[0].options.days is missing, where apply would store it",
+    ],
+    [
+      "a numeric date",
+      {
+        type: "specificDate",
+        enabled: true,
+        options: { date: 1798761600000, time: "10:00" },
+      },
+      "events[0].options.date cannot be expressed: must be a string, got a number",
+    ],
+    [
+      "a random interval with maximum below minimum",
+      {
+        type: "intervalRandom",
+        enabled: true,
+        options: { minimum: 5, maximum: 2 },
+      },
+      "events[0].options.maximum cannot be expressed: must be at least min (5), got 2",
+    ],
+    [
+      "an event enabled flag that is not a boolean",
+      { type: "button_press", enabled: 1, options: {} },
+      "events[0].enabled is a number, not true or false",
+    ],
+    [
+      "a variableId without a label",
+      { type: "variable_changed", enabled: true, options: { variableId: "x" } },
+      'events[0].options.variableId cannot be expressed: must be "<label>:<name>", got "x"',
+    ],
+  ];
+  for (const [label, event, reason] of refusals) {
+    it(`refuses ${label}`, async () => {
+      const id = "trigger:SeedRefusedxxxxxxxxxxxxx";
+      const env = setup({}, (db) =>
+        insert(db, "controls", id, companionTrigger("Refused", 0, event)),
+      );
+      const path = reason.split(" ")[0] as string;
+      const error = await assertRefused(
+        env,
+        ["trigger", "Refused"],
+        `cannot export trigger "Refused" (${id}): ${reason} (see docs/support-matrix.md, event)`,
+        path,
+        "see docs/support-matrix.md (event)",
+      );
+      assert.equal(error.code, "export_unsupported");
+    });
+  }
 });
 
 describe("export command line", () => {

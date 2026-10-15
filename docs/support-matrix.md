@@ -162,20 +162,20 @@ An export refusal names the stored field it cannot express; this file says wheth
 | --- | --- | --- | --- |
 | `startup` | supported | `event: startup`, `event: startup.delay` |  |
 | `interval` | supported | `event: interval`, `event: interval.seconds` |  |
+| `intervalRandom` | supported | `event: intervalRandom`, `event: intervalRandom.min`, `event: intervalRandom.max` | `minimum` and `maximum` |
+| `timeofday` | supported | `event: timeofday`, `event: timeofday.time`, `event: timeofday.days` | time "HH:MM:SS"; day names in the file, numbers 0–6 (Sunday 0) stored |
+| `specificDate` | supported | `event: specificDate`, `event: specificDate.date`, `event: specificDate.time` | date "YYYY-MM-DD", time "HH:MM:SS" or "HH:MM" |
+| `sun_event` | supported | `event: sun_event`, `event: sun_event.sun`, `event: sun_event.latitude`, `event: sun_event.longitude`, `event: sun_event.offset` | `sun` is stored as `type` |
+| `client_connect` | supported | `event: client_connect`, `event: client_connect.delay` |  |
+| `button_press` | supported | `event: button_press` |  |
+| `button_release` | supported | `event: button_release` |  |
 | `variable_changed (custom: variables)` | supported | `event: variable_changed`, `event: variable_changed.variable` |  |
-| `variable_changed (other variables)` | planned (#27) |  |  |
-| `intervalRandom` | planned (#27) |  |  |
-| `timeofday` | planned (#27) |  |  |
-| `specificDate` | planned (#27) |  |  |
-| `sun_event` | planned (#27) |  |  |
-| `client_connect` | planned (#27) |  |  |
-| `button_press` | planned (#27) |  |  |
-| `button_release` | planned (#27) |  |  |
-| `condition_true` | planned (#27) |  |  |
-| `condition_false` | planned (#27) |  |  |
-| `computer_locked` | planned (#27) |  | macOS and Windows only |
-| `computer_unlocked` | planned (#27) |  | macOS and Windows only |
-| `enabled = false` | planned (#27) |  | disabled events; the writer stores every event enabled |
+| `variable_changed (other variables)` | supported | `event: variable_changed.variableId` | any `<label>:<name>`, including `local:`; not checked against the database |
+| `condition_true` | planned (#26) |  | fires when the trigger's conditions change |
+| `condition_false` | planned (#26) |  | fires when the trigger's conditions change |
+| `computer_locked` | supported | `event: computer_locked` | Companion registers it on macOS and Windows only; Companion on Linux ignores it |
+| `computer_unlocked` | supported | `event: computer_unlocked` | Companion registers it on macOS and Windows only; Companion on Linux ignores it |
+| `enabled = false` | supported | `event.enabled` | on any event; enabled by default |
 
 ## Condition
 

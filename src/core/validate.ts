@@ -110,6 +110,27 @@ export function expectInteger(value: unknown, field: string): number {
   return value;
 }
 
+/** A finite number from `min` to `max`, inclusive. */
+export function expectNumberInRange(
+  value: unknown,
+  field: string,
+  min: number,
+  max: number,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < min ||
+    value > max
+  ) {
+    throw new ValidationError(
+      field,
+      `must be a number from ${min} to ${max}, got ${describeNumber(value)}`,
+    );
+  }
+  return value;
+}
+
 /** A safe integer of at least 1. */
 export function expectPositiveInteger(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {

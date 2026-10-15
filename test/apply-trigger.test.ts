@@ -520,8 +520,8 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
     ],
     [
       "unknown event",
-      trigger("  - { event: startup }\n  - { event: timeofday }\n"),
-      /: events\[1\]\.event: unknown event "timeofday" \(expected one of: startup, interval, variable_changed\)$/,
+      trigger("  - { event: startup }\n  - { event: condition_true }\n"),
+      /: events\[1\]\.event: unknown event "condition_true" \(expected one of: startup, interval, intervalRandom, timeofday, specificDate, sun_event, client_connect, button_press, button_release, variable_changed, computer_locked, computer_unlocked\)$/,
     ],
     [
       "unknown event field",
@@ -556,7 +556,7 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
     [
       "missing variable",
       trigger("  - { event: variable_changed }\n"),
-      /: events\[0\]\.variable: is required$/,
+      /: events\[0\]\.variable: is required \(or variableId for a variable that is not a custom variable\)$/,
     ],
     [
       "invalid variable name",

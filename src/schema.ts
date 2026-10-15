@@ -125,7 +125,7 @@ function taggedSchema(
   tag: string,
   description: string,
   kinds: Readonly<
-    Record<string, Pick<TaggedKind<unknown>, "doc" | "fieldSchemas">>
+    Record<string, Pick<TaggedKind<unknown>, "doc" | "fieldSchemas" | "schema">>
   >,
   common: Readonly<Record<string, FieldSchema>> = {},
 ): Record<string, unknown> {
@@ -140,7 +140,7 @@ function taggedSchema(
           ...kind.fieldSchemas,
           ...common,
         },
-        { title: `${tag}: ${name}`, description: kind.doc },
+        { title: `${tag}: ${name}`, description: kind.doc, ...kind.schema },
       ),
     ),
   };
@@ -223,6 +223,7 @@ function defs(): Record<string, unknown> {
       "event",
       "What starts a trigger, tagged with `event`.",
       trigger.EVENT_KINDS,
+      trigger.EVENT_FIELD_SCHEMAS,
     ),
   };
 }

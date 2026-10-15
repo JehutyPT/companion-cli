@@ -18,6 +18,7 @@ import { FIELDS as CONNECTION_FIELDS } from "../src/writers/connection.ts";
 import { writers } from "../src/writers/index.ts";
 import { FIELDS as PAGE_FIELDS } from "../src/writers/page.ts";
 import {
+  EVENT_FIELDS,
   EVENT_KINDS,
   FIELDS as TRIGGER_FIELDS,
   TRIGGERS_FIELDS,
@@ -33,6 +34,7 @@ export interface WriterTables {
   actionKinds: Record<string, { fields: readonly string[] }>;
   feedbackKinds: Record<string, { fields: readonly string[] }>;
   eventKinds: Record<string, { fields: readonly string[] }>;
+  eventFields: readonly string[];
   styleFields: readonly string[];
   feedbackFields: readonly string[];
   buttonFields: readonly string[];
@@ -50,6 +52,7 @@ export const WRITER_TABLES: WriterTables = {
   actionKinds: ACTION_KINDS,
   feedbackKinds: FEEDBACK_KINDS,
   eventKinds: EVENT_KINDS,
+  eventFields: EVENT_FIELDS,
   styleFields: Object.keys(STYLE_FIELDS),
   feedbackFields: FEEDBACK_FIELDS,
   buttonFields: BUTTON_FIELDS,
@@ -88,5 +91,6 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("feedback", tables.feedbackFields),
     ...under("feedback.style", tables.styleFields),
     ...tagged("event", tables.eventKinds),
+    ...under("event", tables.eventFields),
   ]);
 }

@@ -257,10 +257,10 @@ describe("support matrix", () => {
 
     it("a Companion event type is removed from the matrix", () => {
       const rows = SUPPORT_MATRIX.filter(
-        (row) => !(row.area === "event" && row.item === "timeofday"),
+        (row) => !(row.area === "event" && row.item === "condition_true"),
       );
       assert.deepEqual(matrixProblems(rows, WRITER_TABLES, REFERENCE_LISTS), [
-        "event timeofday has no row",
+        "event condition_true has no row",
       ]);
     });
   });

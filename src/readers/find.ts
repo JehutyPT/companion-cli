@@ -278,21 +278,43 @@ const isTriggerName = (path: readonly Segment[]) =>
 
 /** Event options with description terms, by event type. */
 const EVENT_TERMS: Record<string, Record<string, string>> = {
-  variable_changed: { variableId: "variable" },
   startup: { delay: "delay" },
   interval: { seconds: "seconds" },
+  intervalRandom: { minimum: "min", maximum: "max" },
+  timeofday: { time: "time", days: "days" },
+  specificDate: { date: "date", time: "time" },
+  sun_event: {
+    type: "sun",
+    latitude: "latitude",
+    longitude: "longitude",
+    offset: "offset",
+  },
+  client_connect: { delay: "delay" },
 };
+
+/** The description field of an event option, as the trigger writer names it. */
+function eventTerm(event: unknown, key: string): string | undefined {
+  const type = get(event, "type");
+  if (type === "variable_changed" && key === "variableId") {
+    const id = get(get(event, "options"), "variableId");
+    return typeof id === "string" && id.startsWith("custom:")
+      ? "variable"
+      : "variableId";
+  }
+  return typeof type === "string" ? EVENT_TERMS[type]?.[key] : undefined;
+}
+
+/** Whether a path inside a trigger is an event option, `events[N].options.…`. */
+const isEventOption = (path: readonly Segment[]) =>
+  path.length >= 4 && path[0] === "events" && path[2] === "options";
 
 /** Description terms for a path in a trigger control, when it has them. */
 function triggerPath(control: unknown, s: Segment[]): string | undefined {
   if (isTriggerName(s)) return "name";
-  if (s.length === 4 && s[0] === "events" && s[2] === "options") {
-    const type = get(at(control, s.slice(0, 2)), "type");
-    const term =
-      typeof type === "string"
-        ? EVENT_TERMS[type]?.[s[3] as string]
-        : undefined;
-    if (term) return fieldPath(join("", s.slice(0, 2)), term);
+  if (isEventOption(s)) {
+    const term = eventTerm(at(control, s.slice(0, 2)), s[3] as string);
+    if (term)
+      return fieldPath(join("", s.slice(0, 2)), term) + join("", s.slice(4));
   }
   if (
     (s[0] === "actions" || s[0] === "condition" || s[0] === "localVariables") &&
@@ -439,7 +461,10 @@ function textMatcher(text: string): Matcher {
         matched = has(asLines(value));
       } else if (isTrigger(control) && isTriggerName(path)) {
         matched = typeof value === "string" && has(value);
-      } else if (inEntityOptions(leaf) && !isExpressionFlag(leaf)) {
+      } else if (
+        (inEntityOptions(leaf) && !isExpressionFlag(leaf)) ||
+        (isTrigger(control) && isEventOption(path))
+      ) {
         matched = has(
           typeof value === "string" ? value : JSON.stringify(value),
         );
