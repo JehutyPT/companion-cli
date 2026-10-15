@@ -27,6 +27,7 @@ import { freshId } from "./ids.ts";
 import {
   checkVariablesExist,
   loadedPageCount,
+  plural,
   readPageRows,
 } from "./shared.ts";
 
@@ -210,9 +211,6 @@ function insertPage(db: DatabaseSync, page: number, value: Fields): void {
   );
 }
 
-const plural = (count: number, noun: string) =>
-  `${count} ${noun}${count === 1 ? "" : "s"}`;
-
 function writePage(db: DatabaseSync, plan: PagePlan): string {
   const target = readTarget(db, plan.page);
   let deleted = 0;
@@ -267,5 +265,7 @@ export const pageWriter: Writer<PagePlan> = {
   kind: "page",
   parse: parsePage,
   check: checkPage,
+  describe: (plan) =>
+    `page ${plan.page} ${JSON.stringify(plan.name)} (${plural(plan.buttons.length, "button")})`,
   write: writePage,
 };

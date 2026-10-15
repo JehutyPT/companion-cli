@@ -79,6 +79,10 @@ _Avoid_: Import (Companion's own import is a different feature), sync
 An apply that writes nothing: the same checks, then the writer runs on a temporary copy of the database, and the rows it would add, replace and remove are reported. It never takes a backup and never stops or starts Companion. Generated ids alone are not changes.
 _Avoid_: Preview, simulation ("plan" is the parsed description)
 
+**Validate**:
+The checks an apply runs before it writes, and nothing else: against a read-only snapshot of a database, or the description file alone (*structure only*, `--no-db`). It reports the first refusal or that the file is valid, never what would change (that is the dry run).
+_Avoid_: Lint, check (a writer's `check` is one step of validating)
+
 **Backup**:
 A copy of the database and its WAL files taken immediately before an apply.
 

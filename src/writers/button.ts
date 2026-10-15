@@ -119,5 +119,7 @@ export const buttonWriter: Writer<ButtonPlan> = {
   kind: "button",
   parse: (fields) => parseButton(fields),
   check: checkButton,
+  describe: ({ location: { page, row, column } }) =>
+    `button at page ${page}, row ${row}, column ${column}`,
   write: writeButton,
 };

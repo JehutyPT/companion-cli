@@ -318,3 +318,7 @@ export function loadedPageCount(pages: ReadonlyMap<number, unknown>): number {
   while (isJsonObject(pages.get(count + 1))) count += 1;
   return count;
 }
+
+/** `1 button`, `2 buttons`. */
+export const plural = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;

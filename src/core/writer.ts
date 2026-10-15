@@ -36,6 +36,12 @@ export interface Writer<Plan = unknown> {
   check?(db: DatabaseSync, plan: Plan): void;
 
   /**
+   * What the description describes, for `validate`'s success line, for
+   * example `page 99 "SKAARHOJ TEST" (47 buttons)`. Defaults to the kind.
+   */
+  describe?(plan: Plan): string;
+
+  /**
    * Writes the plan inside the pipeline's open transaction. Must replace only
    * the rows the description names. Returns a one-line summary.
    */

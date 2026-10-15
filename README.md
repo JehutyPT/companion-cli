@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `list variables` and `list triggers` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `validate` checks a description file without writing, `list variables` and `list triggers` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -167,6 +167,24 @@ actions:                                   # optional, default []; the same acti
 A trigger with the same name (compared exactly) is replaced under its control id, keeping its position in the trigger list and its collection (if that collection is disabled in Companion, the trigger does not run even with `enabled: true`; a collection that no longer exists is dropped by Companion at startup); everything else in it is replaced, including its notes and any condition. Otherwise a new trigger is added after the others. Two existing triggers with the name refuse the apply. Every variable an event watches or an action uses must already exist. Conditions, other event types and local variables are not supported; `condition` and any other unknown field are refused.
 
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
+
+### Validate
+
+```sh
+companion-cli validate page.yaml                        # against the install's database (macOS)
+companion-cli validate page.yaml --db /path/to/db.sqlite
+companion-cli validate page.yaml --no-db                # the file only, any platform
+companion-cli validate page.yaml --no-db --json
+```
+
+`validate` runs the checks `apply` runs before it writes, and refuses with the same one-line message and exit code 1 (the first error only, naming the field path, such as `buttons[3].location.column: 17 is outside the grid (0..7)`). With a database it reads a snapshot copy as the read commands below do (integrity check, version guard), then runs the writer's checks against it: grid bounds, page existence, known custom variables, ambiguous trigger names, stray page rows. `--no-db` reads and validates the file only, locating and opening no database. `validate` never writes, never takes a backup and never stops or starts Companion; what an apply would change is `apply --dry-run`'s job.
+
+```
+$ companion-cli validate examples/skaarhoj-test-page/page.yaml --no-db
+valid: page 99 "SKAARHOJ TEST" (47 buttons) (structure only; not checked against a database)
+```
+
+`--json` prints `{"valid": true, "kind": "page", "file": "<path as given>", "database": "<resolved path>" | null, "checks": "database" | "structure"}`, and a failure as the error document described under [Read commands](#read-commands). `--db` with `--no-db` is a usage error (exit 2).
 
 ### Read commands
 

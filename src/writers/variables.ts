@@ -13,7 +13,7 @@ import {
   requireField,
 } from "../core/validate.ts";
 import type { Writer } from "../core/writer.ts";
-import { nextSortOrder, parseVariableName } from "./shared.ts";
+import { nextSortOrder, parseVariableName, plural } from "./shared.ts";
 
 /**
  * Variable writer: creates or replaces custom variables.
@@ -177,5 +177,6 @@ export function writeVariables(
 export const variablesWriter: Writer<CustomVariable[]> = {
   kind: "variables",
   parse: parseVariables,
+  describe: (plan) => plural(plan.length, "custom variable"),
   write: writeVariables,
 };

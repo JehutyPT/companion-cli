@@ -8,6 +8,11 @@ import {
   errorMessage,
   failureMessage,
 } from "./core/errors.ts";
+import {
+  renderValidation,
+  validate,
+  validationJson,
+} from "./core/validate-command.ts";
 import { listCommands } from "./readers/index.ts";
 import type { ListCommand } from "./readers/list.ts";
 import {
@@ -118,7 +123,14 @@ const APPLY_SYNOPSIS =
   "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run [--json]]";
 const LIST_KINDS = Object.keys(listCommands);
 const LIST_SYNOPSIS = `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`;
-const SYNOPSES = [APPLY_SYNOPSIS, LIST_SYNOPSIS, ...REST_TABLE.map(synopsis)];
+const VALIDATE_SYNOPSIS =
+  "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json]";
+const SYNOPSES = [
+  APPLY_SYNOPSIS,
+  VALIDATE_SYNOPSIS,
+  LIST_SYNOPSIS,
+  ...REST_TABLE.map(synopsis),
+];
 
 /** One line: every exit-2 message ends with it. */
 export const USAGE = `usage: companion-cli ${SYNOPSES.join(" | ")}`;
@@ -136,6 +148,10 @@ export const HELP = [
   "reports the rows an apply would add, replace and remove. It writes nothing,",
   "takes no backup and never stops or starts Companion. --json prints that",
   "report as one JSON document.",
+  "validate checks a description file as apply would before writing, and",
+  "refuses with the same message. With a database (the install's, or --db)",
+  "it also runs apply's checks against a read-only copy of it; --no-db checks",
+  "the file only. It writes nothing and never stops or starts Companion.",
   "list prints the custom variables or triggers stored in the database, one",
   "line each. A pattern is a case-sensitive glob over the whole name (* any",
   "run of characters, ? one character); several patterns list their union.",
@@ -194,7 +210,7 @@ export async function run(
 }
 
 /** Commands that only read the database, with JSON errors under `--json`. */
-const READ_COMMANDS: ReadonlySet<string> = new Set(["list"]);
+const READ_COMMANDS: ReadonlySet<string> = new Set(["list", "validate"]);
 
 /** The first word that is neither an option nor the value of `--db`. */
 function commandWord(argv: readonly string[]): string | undefined {
@@ -219,6 +235,16 @@ async function runRead(
   const end = argv.indexOf("--");
   const json = (end === -1 ? argv : argv.slice(0, end)).includes("--json");
   try {
+    if (commandWord(argv) === "validate") {
+      const parsed = parseValidate(argv);
+      if (parsed === "help") {
+        io.stdout(HELP);
+        return EXIT_OK;
+      }
+      const result = validate({ ...parsed, writers }, options);
+      io.stdout(json ? validationJson(result) : renderValidation(result));
+      return EXIT_OK;
+    }
     const parsed = parseRead(argv);
     if (parsed === "help") {
       io.stdout(HELP);
@@ -279,6 +305,47 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
   }
   if (values.db === "") throw usageFailure("--db needs a path");
   return { command, patterns, db: values.db };
+}
+
+interface ValidateCommandLine {
+  descriptionPath: string;
+  dbPath: string | undefined;
+  noDb: boolean;
+}
+
+/** Parses a `validate` command line. Throws a `usage` CliError on a bad one. */
+function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        db: { type: "string" },
+        "no-db": { type: "boolean" },
+        json: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return "help";
+  const [, file, ...extra] = positionals;
+  if (file === undefined || extra.length > 0) {
+    throw usageFailure("validate takes exactly one description file");
+  }
+  if (values.db !== undefined && values["no-db"]) {
+    throw usageFailure("--db and --no-db cannot be combined");
+  }
+  if (values.db === "") throw usageFailure("--db needs a path");
+  return {
+    descriptionPath: file,
+    dbPath: values.db,
+    noDb: values["no-db"] ?? false,
+  };
 }
 
 /** A usage error as a CliError, for commands that may print it as JSON. */

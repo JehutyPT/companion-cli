@@ -251,5 +251,6 @@ export const triggerWriter: Writer<TriggerPlan> = {
   kind: "trigger",
   parse: parseTrigger,
   check: checkTrigger,
+  describe: (plan) => `trigger ${JSON.stringify(plan.name)}`,
   write: writeTrigger,
 };
