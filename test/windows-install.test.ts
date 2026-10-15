@@ -1,7 +1,7 @@
 /**
  * Commands without `--db` on Windows (`platform: "win32"`): read commands and
- * dry runs target `<APPDATA>\companion\v5.1\db.sqlite`; live-install writes
- * stay refused until the Windows process control lands.
+ * dry runs target `<APPDATA>\companion\v5.1\db.sqlite`, and so do
+ * live-install writes (the quit, wait and restart are faked here).
  *
  * Windows paths use Windows path rules on every host, so the tests that need
  * the fixture at the Windows install path run on a Windows host only (the
@@ -13,6 +13,7 @@ import { win32 } from "node:path";
 import { describe, it } from "node:test";
 import { buildFixtureDb } from "./fixtures/companion-db.ts";
 import {
+  customVariables,
   fakeProcessControl,
   fileState,
   forbiddenProcessControl,
@@ -173,66 +174,47 @@ describe("Windows install: apply --db while Companion runs", () => {
 });
 
 describe("Windows install: live-install writes", () => {
-  it("apply without --db or --dry-run refuses, writes nothing and calls no process control", async () => {
-    const dir = tempDir();
-    const appData = tempDir();
-    const { control, calls } = forbiddenProcessControl();
-    const options = {
-      homedir: tempDir(),
-      platform: "win32" as const,
-      env: { APPDATA: appData },
-      processControl: control,
-    };
-    const file = writeDescription(dir, VARIABLES_YAML);
-    for (const json of [false, true]) {
-      const result = await runCli(
-        ["apply", file, ...(json ? ["--json"] : [])],
-        options,
-      );
-      assert.equal(result.code, 1);
-      const message =
-        "live-install writes on Windows are not supported yet: the tool cannot stop and start Companion there; pass --db with a database path, or use apply --dry-run";
-      if (json) {
-        const document = JSON.parse(result.stdout[0] ?? "") as {
-          error: { code: string; message: string; hint: string };
-        };
-        assert.deepEqual(document.error, {
-          code: "unsupported_platform",
-          message,
-          hint: "pass --db <path>",
+  for (const running of [false, true]) {
+    it(
+      `apply without --db writes the install's database (Companion ${running ? "running" : "stopped"})`,
+      { skip: WINDOWS_HOST_ONLY },
+      async () => {
+        const appData = tempDir();
+        const dbPath = buildFixtureDb(windowsInstallDir(appData), {
+          wal: true,
         });
-      } else {
-        assert.deepEqual(result.stderr, [`error: ${message}`]);
-      }
-    }
-    assert.deepEqual(calls, []);
-    assert.deepEqual(readdirSync(appData), [], "nothing created or written");
-  });
-
-  it("refuses before reading the description", async () => {
-    const result = await runCli(
-      ["apply", win32.join(tempDir(), "missing.yaml")],
-      { platform: "win32", processControl: forbiddenProcessControl().control },
+        const fake = fakeProcessControl({ running });
+        const file = writeDescription(tempDir(), VARIABLES_YAML);
+        const result = await runCli(["apply", file], {
+          homedir: tempDir(),
+          platform: "win32",
+          env: { APPDATA: appData },
+          processControl: fake.control,
+        });
+        assert.equal(result.code, 0, result.stderr.join("\n"));
+        assert.ok(customVariables(dbPath)["windows_var"]);
+        assert.deepEqual(
+          fake.calls,
+          running
+            ? [
+                "check",
+                "check",
+                "session",
+                "quit",
+                "wait",
+                "holders",
+                "start",
+                "started",
+              ]
+            : ["check", "holders"],
+        );
+        assert.equal(fake.launches.length, running ? 1 : 0);
+        assert.ok(
+          existsSync(
+            win32.join(win32.dirname(dbPath), "companion-cli-backups"),
+          ),
+        );
+      },
     );
-    assert.equal(result.code, 1);
-    assert.match(result.stderr[0] ?? "", /live-install writes on Windows/);
-  });
-
-  it(
-    "leaves an existing install database byte-identical",
-    { skip: WINDOWS_HOST_ONLY },
-    async () => {
-      const { dbPath, calls, options } = windowsInstall();
-      const before = fileState(dbPath);
-      const file = writeDescription(tempDir(), VARIABLES_YAML);
-      const result = await runCli(["apply", file], options);
-      assert.equal(result.code, 1);
-      assert.deepEqual(fileState(dbPath), before);
-      assert.deepEqual(calls, []);
-      assert.equal(
-        existsSync(win32.join(win32.dirname(dbPath), "companion-cli-backups")),
-        false,
-      );
-    },
-  );
+  }
 });

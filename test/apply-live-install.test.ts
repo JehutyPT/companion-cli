@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { USAGE } from "../src/cli.ts";
@@ -24,6 +24,7 @@ import {
   type CliRun,
   customVariables,
   dumpDatabase,
+  FAKE_LAUNCHER_PATH,
   fakeProcessControl,
   type FakeProcessOptions,
   fileState,
@@ -31,6 +32,8 @@ import {
   printedBackupDir,
   runCli,
   tempDir,
+  windowsInstallDir,
+  WINDOWS_HOST_ONLY,
   writeDescription,
 } from "./helpers.ts";
 import type { ApplyHooks } from "../src/core/apply.ts";
@@ -61,15 +64,21 @@ function recordingHooks(calls: string[]): ApplyHooks {
   };
 }
 
+interface LiveExtra {
+  quitTimeoutMs?: number;
+  startTimeoutMs?: number;
+  backupRoot?: string;
+  platform?: NodeJS.Platform;
+  env?: Record<string, string>;
+}
+
 async function liveApply(
   home: string,
   file: string,
   process: FakeProcessOptions,
   hooks?: (calls: string[]) => ApplyHooks,
-  extra: { quitTimeoutMs?: number; backupRoot?: string } = {},
-): Promise<
-  CliRun & { calls: string[]; waitedFor: number[][]; timeouts: number[] }
-> {
+  extra: LiveExtra = {},
+): Promise<CliRun & ReturnType<typeof fakeProcessControl>> {
   const fake = fakeProcessControl(process);
   const result = await runCli(["apply", file], {
     homedir: home,
@@ -81,234 +90,59 @@ async function liveApply(
   return { ...result, ...fake };
 }
 
-describe("live-install mode: order", () => {
-  it("validates, checks, quits, waits, backs up, writes, checks integrity and restarts", async () => {
-    const { home, dbPath, file } = fakeHome();
-    const result = await liveApply(home, file, { running: true });
+/**
+ * The live-install suite, run for `darwin` and `win32` with fake process
+ * controls. A Windows install's files use Windows path rules, so the `win32`
+ * run needs a Windows host (the Windows CI job). There `APPDATA` is the
+ * temporary home, so the install is `<home>\\companion\\v5.1`.
+ */
+function liveSuite(platform: "darwin" | "win32"): void {
+  const skip = platform === "win32" ? WINDOWS_HOST_ONLY : false;
 
-    assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(result.calls, [
-      "check",
-      "check",
-      "quit",
-      "wait",
-      "holders",
-      "backup",
-      "write",
-      "integrity",
-      "start",
-    ]);
-    assert.deepEqual(result.waitedFor, [[4242]]);
-    assert.deepEqual(result.timeouts, [30_000]);
-    assert.equal(
-      (customVariables(dbPath)["live_one"] as { defaultValue: number })
-        .defaultValue,
-      1,
-    );
-  });
+  const liveDir = (home: string) =>
+    platform === "win32" ? windowsInstallDir(home) : installDir(home);
+  const liveEnv = (home: string): Record<string, string> =>
+    platform === "win32" ? { APPDATA: home } : {};
 
-  it("backs up the install's database next to it, in companion-cli-backups/<timestamp>/", async () => {
-    const { home, dbPath, file } = fakeHome({ wal: true });
-    const before = fileState(dbPath);
-    const result = await liveApply(home, file, { running: true });
-
-    assert.equal(result.code, 0, result.stderr.join("\n"));
-    const expected = join(
-      installDir(home),
-      "companion-cli-backups",
-      "20261014T123456789Z",
-    );
-    assert.equal(printedBackupDir(result), expected);
-    assert.deepEqual(readdirSync(expected).sort(), [
-      "db.sqlite",
-      "db.sqlite-shm",
-      "db.sqlite-wal",
-    ]);
-    assert.deepEqual(fileState(join(expected, "db.sqlite")), before);
-  });
-
-  it("passes an injected wait timeout to the process control", async () => {
-    const { home, file } = fakeHome();
-    const result = await liveApply(home, file, { running: true }, undefined, {
-      quitTimeoutMs: 5,
-    });
-    assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(result.timeouts, [5]);
-  });
-});
-
-describe("live-install mode: Companion not running", () => {
-  it("neither quits nor starts Companion on success", async () => {
-    const { home, dbPath, file } = fakeHome();
-    const result = await liveApply(home, file, { running: false });
-    assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(result.calls, [
-      "check",
-      "check",
-      "holders",
-      "backup",
-      "write",
-      "integrity",
-    ]);
-    assert.ok(customVariables(dbPath)["live_one"]);
-  });
-
-  it("neither quits nor starts Companion on failure", async () => {
-    const { home, dbPath, file } = fakeHome();
-    const before = dumpDatabase(dbPath);
-    const result = await liveApply(home, file, { running: false }, (calls) => ({
-      ...recordingHooks(calls),
-      afterWrite: () => {
-        throw new Error("disk on fire");
-      },
-    }));
-    assert.equal(result.code, 1);
-    assert.deepEqual(result.calls, ["check", "check", "holders", "backup"]);
-    assert.match(result.stderr[0] ?? "", /disk on fire/);
-    assert.deepEqual(dumpDatabase(dbPath), before);
-  });
-});
-
-describe("live-install mode: failures before the quit", () => {
-  const cases: Array<[string, FixtureOptions, string | null, RegExp]> = [
-    [
-      "an invalid description",
-      {},
-      "kind: variables\nvariables:\n  - name: bad-name\n    default: 1\n",
-      /variables\[0\]\.name: invalid variable name/,
-    ],
-    [
-      "an unsupported version",
-      { version: 18 },
-      null,
-      /page_config_version is 18/,
-    ],
-    [
-      "a failing writer check",
-      {},
-      'kind: button\nlocation: { page: 2, row: 0, column: 0 }\ntext: x\nbackground: "#000000"\n',
-      /page 2 does not exist/,
-    ],
-  ];
-  for (const [name, fixture, yaml, expected] of cases) {
-    it(`${name} never touches the process and leaves the files byte-identical`, async () => {
-      const { home, dbPath } = fakeHome({ wal: true, ...fixture });
-      const file = writeDescription(home, yaml ?? VARIABLES_YAML, "case.yaml");
-      const before = fileState(dbPath);
-      const result = await liveApply(home, file, { running: true });
-      assert.equal(result.code, 1);
-      assert.equal(result.stderr.length, 1);
-      assert.match(result.stderr[0] ?? "", expected);
-      assert.deepEqual(result.calls, ["check"]);
-      assert.deepEqual(fileState(dbPath), before);
-      assert.equal(
-        existsSync(join(installDir(home), "companion-cli-backups")),
-        false,
-      );
-    });
+  function liveHome(options: FixtureOptions = {}) {
+    const home = tempDir();
+    const dbPath = buildFixtureDb(liveDir(home), options);
+    return { home, dbPath, file: writeDescription(home, VARIABLES_YAML) };
   }
 
-  it("a missing database never touches the process", async () => {
-    const home = tempDir();
-    const file = writeDescription(home, VARIABLES_YAML);
-    const result = await liveApply(home, file, { running: true });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr[0] ?? "", /^error: database not found: .*v5\.1/);
-    assert.deepEqual(result.calls, ["check"]);
-  });
-
-  it("an unreadable snapshot never touches the process", async () => {
-    const home = tempDir();
-    mkdirSync(installDir(home), { recursive: true });
-    const dbPath = join(installDir(home), "db.sqlite");
-    writeFileSync(dbPath, "not a database, just text");
-    const before = fileState(dbPath);
-    const result = await liveApply(
-      home,
-      writeDescription(home, VARIABLES_YAML),
-      { running: true },
-    );
-    assert.equal(result.code, 1);
-    assert.deepEqual(result.calls, ["check"]);
-    assert.deepEqual(fileState(dbPath), before);
-  });
-
-  it("a failing running check refuses without quitting", async () => {
-    const { home, dbPath, file } = fakeHome();
-    const before = fileState(dbPath);
-    const result = await liveApply(home, file, {
-      running: true,
-      failCheck: true,
+  /**
+   * `liveApply` on this platform. On Windows the session check runs right
+   * before the quit; it is checked here and left out of `calls`, so both
+   * platforms share the expected order.
+   */
+  async function suiteApply(
+    home: string,
+    file: string,
+    process: FakeProcessOptions,
+    hooks?: (calls: string[]) => ApplyHooks,
+    extra: LiveExtra = {},
+  ) {
+    const result = await liveApply(home, file, process, hooks, {
+      platform,
+      env: liveEnv(home),
+      ...extra,
     });
-    assert.equal(result.code, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /cannot tell whether Companion is running.*ps exploded/,
-    );
-    assert.deepEqual(result.calls, ["check"]);
-    assert.deepEqual(fileState(dbPath), before);
-  });
-});
-
-describe("live-install mode: failures after the quit restart Companion", () => {
-  function setVersion(path: string, version: number) {
-    const db = new DatabaseSync(path);
-    db.prepare(
-      "UPDATE main SET value = ? WHERE id = 'page_config_version'",
-    ).run(JSON.stringify(version));
-    db.close();
+    if (platform !== "win32") return result;
+    const quit = result.calls.indexOf("quit");
+    if (quit >= 0) assert.equal(result.calls[quit - 1], "session");
+    return {
+      ...result,
+      calls: result.calls.filter((call) => call !== "session"),
+    };
   }
 
-  const cases: Array<
-    [string, (calls: string[]) => ApplyHooks, RegExp, string[]]
-  > = [
-    [
-      "a failure after the backup",
-      (calls) => ({
-        ...recordingHooks(calls),
-        afterBackup: () => {
-          calls.push("backup");
-          throw new Error("backup went sideways");
-        },
-      }),
-      /backup went sideways/,
-      ["check", "check", "quit", "wait", "holders", "backup", "start"],
-    ],
-    [
-      "the repeated check under the write lock",
-      (calls) => ({
-        ...recordingHooks(calls),
-        afterBackup: (path) => {
-          calls.push("backup");
-          setVersion(path, 18);
-        },
-      }),
-      /page_config_version is 18; .*nothing written/,
-      ["check", "check", "quit", "wait", "holders", "backup", "start"],
-    ],
-    [
-      "the write",
-      (calls) => ({
-        ...recordingHooks(calls),
-        afterWrite: () => {
-          calls.push("write");
-          throw new Error("disk on fire");
-        },
-      }),
-      /write failed, rolled back.*disk on fire/,
-      ["check", "check", "quit", "wait", "holders", "backup", "write", "start"],
-    ],
-    [
-      "the integrity check",
-      (calls) => ({
-        ...recordingHooks(calls),
-        integrityCheck: () => {
-          calls.push("integrity");
-          return ["Page 3: btreeInitPage() returns error code 11"];
-        },
-      }),
-      /integrity check failed: Page 3/,
-      [
+  describe(`live-install mode (${platform}): order`, { skip }, () => {
+    it("validates, checks, quits, waits, backs up, writes, checks integrity and restarts", async () => {
+      const { home, dbPath, file } = liveHome();
+      const result = await suiteApply(home, file, { running: true });
+
+      assert.equal(result.code, 0, result.stderr.join("\n"));
+      assert.deepEqual(result.calls, [
         "check",
         "check",
         "quit",
@@ -318,215 +152,821 @@ describe("live-install mode: failures after the quit restart Companion", () => {
         "write",
         "integrity",
         "start",
-      ],
-    ],
-  ];
-  for (const [name, hooks, expected, order] of cases) {
-    it(`${name}: content unchanged, Companion started, original reason`, async () => {
-      const { home, dbPath, file } = fakeHome({ wal: true });
-      const before = dumpDatabase(dbPath);
-      const result = await liveApply(home, file, { running: true }, hooks);
-      assert.equal(result.code, 1);
-      assert.equal(result.stderr.length, 1);
-      assert.match(result.stderr[0] ?? "", expected);
-      assert.deepEqual(result.calls, order);
-      if (name === "the repeated check under the write lock") {
-        assert.equal(customVariables(dbPath)["live_one"], undefined);
-      } else {
-        assert.deepEqual(dumpDatabase(dbPath), before);
-      }
+        "started",
+      ]);
+      assert.deepEqual(result.waitedFor, [[4242]]);
+      assert.deepEqual(result.timeouts, [30_000]);
+      assert.equal(
+        (customVariables(dbPath)["live_one"] as { defaultValue: number })
+          .defaultValue,
+        1,
+      );
     });
-  }
 
-  it("a failing backup starts Companion and leaves the files byte-identical", async () => {
-    const { home, dbPath, file } = fakeHome({ wal: true });
-    const before = fileState(dbPath);
-    const blocker = join(tempDir(), "not-a-dir");
-    writeFileSync(blocker, "");
-    const result = await liveApply(home, file, { running: true }, undefined, {
-      backupRoot: blocker,
-    });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr[0] ?? "", /cannot create backup directory/);
-    assert.deepEqual(result.calls, [
-      "check",
-      "check",
-      "quit",
-      "wait",
-      "holders",
-      "start",
-    ]);
-    assert.deepEqual(fileState(dbPath), before);
-  });
-
-  it("reports both reasons when the restart also fails", async () => {
-    const { home, file } = fakeHome();
-    const result = await liveApply(
-      home,
-      file,
-      { running: true, failStart: true },
-      (calls) => ({
-        ...recordingHooks(calls),
-        afterWrite: () => {
-          throw new Error("disk on fire");
-        },
-      }),
-    );
-    assert.equal(result.code, 1);
-    assert.equal(result.stderr.length, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /write failed, rolled back.*disk on fire.*start Companion manually.*open failed/,
-    );
-  });
-});
-
-describe("live-install mode: quit, wait and start failures", () => {
-  it("a wait timeout aborts without backup, write or start", async () => {
-    const { home, dbPath, file } = fakeHome({ wal: true });
-    const before = fileState(dbPath);
-    const result = await liveApply(home, file, {
-      running: true,
-      timeout: true,
-    });
-    assert.equal(result.code, 1);
-    assert.equal(result.stderr.length, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /did not exit within 30 seconds.*Companion may be partly stopped/,
-    );
-    assert.deepEqual(result.calls, ["check", "check", "quit", "wait"]);
-    assert.deepEqual(fileState(dbPath), before);
-    assert.equal(
-      existsSync(join(installDir(home), "companion-cli-backups")),
-      false,
-    );
-  });
-
-  it("a failed start after a committed write says the change was written", async () => {
-    const { home, dbPath, file } = fakeHome();
-    const result = await liveApply(home, file, {
-      running: true,
-      failStart: true,
-    });
-    assert.equal(result.code, 1);
-    assert.equal(result.stderr.length, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /change was written.*start Companion manually.*open failed/,
-    );
-    assert.ok(customVariables(dbPath)["live_one"]);
-  });
-});
-
-describe("live-install mode: quit and wait errors start Companion", () => {
-  for (const [name, options, expected] of [
-    ["quit throws", { failQuit: true }, ["check", "check", "quit", "start"]],
-    [
-      "wait throws",
-      { failWait: true },
-      ["check", "check", "quit", "wait", "start"],
-    ],
-  ] as const) {
-    it(`${name}: nothing written, start attempted, original reason`, async () => {
-      const { home, dbPath, file } = fakeHome({ wal: true });
+    it("backs up the install's database next to it, in companion-cli-backups/<timestamp>/", async () => {
+      const { home, dbPath, file } = liveHome({ wal: true });
       const before = fileState(dbPath);
-      const result = await liveApply(home, file, { running: true, ...options });
+      const result = await suiteApply(home, file, { running: true });
+
+      assert.equal(result.code, 0, result.stderr.join("\n"));
+      const expected = join(
+        liveDir(home),
+        "companion-cli-backups",
+        "20261014T123456789Z",
+      );
+      assert.equal(printedBackupDir(result), expected);
+      assert.deepEqual(readdirSync(expected).sort(), [
+        "db.sqlite",
+        "db.sqlite-shm",
+        "db.sqlite-wal",
+      ]);
+      assert.deepEqual(fileState(join(expected, "db.sqlite")), before);
+    });
+
+    it("passes an injected wait timeout to the process control", async () => {
+      const { home, file } = liveHome();
+      const result = await suiteApply(
+        home,
+        file,
+        { running: true },
+        undefined,
+        {
+          quitTimeoutMs: 5,
+        },
+      );
+      assert.equal(result.code, 0, result.stderr.join("\n"));
+      assert.deepEqual(result.timeouts, [5]);
+    });
+  });
+
+  describe(
+    `live-install mode (${platform}): Companion not running`,
+    { skip },
+    () => {
+      it("neither quits nor starts Companion on success", async () => {
+        const { home, dbPath, file } = liveHome();
+        const result = await suiteApply(home, file, { running: false });
+        assert.equal(result.code, 0, result.stderr.join("\n"));
+        assert.deepEqual(result.calls, [
+          "check",
+          "check",
+          "holders",
+          "backup",
+          "write",
+          "integrity",
+        ]);
+        assert.ok(customVariables(dbPath)["live_one"]);
+      });
+
+      it("neither quits nor starts Companion on failure", async () => {
+        const { home, dbPath, file } = liveHome();
+        const before = dumpDatabase(dbPath);
+        const result = await suiteApply(
+          home,
+          file,
+          { running: false },
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterWrite: () => {
+              throw new Error("disk on fire");
+            },
+          }),
+        );
+        assert.equal(result.code, 1);
+        assert.deepEqual(result.calls, ["check", "check", "holders", "backup"]);
+        assert.match(result.stderr[0] ?? "", /disk on fire/);
+        assert.deepEqual(dumpDatabase(dbPath), before);
+      });
+    },
+  );
+
+  describe(
+    `live-install mode (${platform}): failures before the quit`,
+    { skip },
+    () => {
+      const cases: Array<[string, FixtureOptions, string | null, RegExp]> = [
+        [
+          "an invalid description",
+          {},
+          "kind: variables\nvariables:\n  - name: bad-name\n    default: 1\n",
+          /variables\[0\]\.name: invalid variable name/,
+        ],
+        [
+          "an unsupported version",
+          { version: 18 },
+          null,
+          /page_config_version is 18/,
+        ],
+        [
+          "a failing writer check",
+          {},
+          'kind: button\nlocation: { page: 2, row: 0, column: 0 }\ntext: x\nbackground: "#000000"\n',
+          /page 2 does not exist/,
+        ],
+      ];
+      for (const [name, fixture, yaml, expected] of cases) {
+        it(`${name} never touches the process and leaves the files byte-identical`, async () => {
+          const { home, dbPath } = liveHome({ wal: true, ...fixture });
+          const file = writeDescription(
+            home,
+            yaml ?? VARIABLES_YAML,
+            "case.yaml",
+          );
+          const before = fileState(dbPath);
+          const result = await suiteApply(home, file, { running: true });
+          assert.equal(result.code, 1);
+          assert.equal(result.stderr.length, 1);
+          assert.match(result.stderr[0] ?? "", expected);
+          assert.deepEqual(result.calls, ["check"]);
+          assert.deepEqual(fileState(dbPath), before);
+          assert.equal(
+            existsSync(join(liveDir(home), "companion-cli-backups")),
+            false,
+          );
+        });
+      }
+
+      it("a missing database never touches the process", async () => {
+        const home = tempDir();
+        const file = writeDescription(home, VARIABLES_YAML);
+        const result = await suiteApply(home, file, { running: true });
+        assert.equal(result.code, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /^error: database not found: .*v5\.1/,
+        );
+        assert.deepEqual(result.calls, ["check"]);
+      });
+
+      it("an unreadable snapshot never touches the process", async () => {
+        const home = tempDir();
+        mkdirSync(liveDir(home), { recursive: true });
+        const dbPath = join(liveDir(home), "db.sqlite");
+        writeFileSync(dbPath, "not a database, just text");
+        const before = fileState(dbPath);
+        const result = await suiteApply(
+          home,
+          writeDescription(home, VARIABLES_YAML),
+          { running: true },
+        );
+        assert.equal(result.code, 1);
+        assert.deepEqual(result.calls, ["check"]);
+        assert.deepEqual(fileState(dbPath), before);
+      });
+
+      it("a failing running check refuses without quitting", async () => {
+        const { home, dbPath, file } = liveHome();
+        const before = fileState(dbPath);
+        const result = await suiteApply(home, file, {
+          running: true,
+          failCheck: true,
+        });
+        assert.equal(result.code, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /cannot tell whether Companion is running.*ps exploded/,
+        );
+        assert.deepEqual(result.calls, ["check"]);
+        assert.deepEqual(fileState(dbPath), before);
+      });
+    },
+  );
+
+  describe(
+    `live-install mode (${platform}): failures after the quit restart Companion`,
+    { skip },
+    () => {
+      function setVersion(path: string, version: number) {
+        const db = new DatabaseSync(path);
+        db.prepare(
+          "UPDATE main SET value = ? WHERE id = 'page_config_version'",
+        ).run(JSON.stringify(version));
+        db.close();
+      }
+
+      const cases: Array<
+        [string, (calls: string[]) => ApplyHooks, RegExp, string[]]
+      > = [
+        [
+          "a failure after the backup",
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterBackup: () => {
+              calls.push("backup");
+              throw new Error("backup went sideways");
+            },
+          }),
+          /backup went sideways/,
+          ["check", "check", "quit", "wait", "holders", "backup", "start"],
+        ],
+        [
+          "the repeated check under the write lock",
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterBackup: (path) => {
+              calls.push("backup");
+              setVersion(path, 18);
+            },
+          }),
+          /page_config_version is 18; .*nothing written/,
+          ["check", "check", "quit", "wait", "holders", "backup", "start"],
+        ],
+        [
+          "the write",
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterWrite: () => {
+              calls.push("write");
+              throw new Error("disk on fire");
+            },
+          }),
+          /write failed, rolled back.*disk on fire/,
+          [
+            "check",
+            "check",
+            "quit",
+            "wait",
+            "holders",
+            "backup",
+            "write",
+            "start",
+          ],
+        ],
+        [
+          "the integrity check",
+          (calls) => ({
+            ...recordingHooks(calls),
+            integrityCheck: () => {
+              calls.push("integrity");
+              return ["Page 3: btreeInitPage() returns error code 11"];
+            },
+          }),
+          /integrity check failed: Page 3/,
+          [
+            "check",
+            "check",
+            "quit",
+            "wait",
+            "holders",
+            "backup",
+            "write",
+            "integrity",
+            "start",
+          ],
+        ],
+      ];
+      for (const [name, hooks, expected, order] of cases) {
+        it(`${name}: content unchanged, Companion started, original reason`, async () => {
+          const { home, dbPath, file } = liveHome({ wal: true });
+          const before = dumpDatabase(dbPath);
+          const result = await suiteApply(home, file, { running: true }, hooks);
+          assert.equal(result.code, 1);
+          assert.equal(result.stderr.length, 1);
+          assert.match(result.stderr[0] ?? "", expected);
+          assert.deepEqual(result.calls, order);
+          if (name === "the repeated check under the write lock") {
+            assert.equal(customVariables(dbPath)["live_one"], undefined);
+          } else {
+            assert.deepEqual(dumpDatabase(dbPath), before);
+          }
+        });
+      }
+
+      it("a failing backup starts Companion and leaves the files byte-identical", async () => {
+        const { home, dbPath, file } = liveHome({ wal: true });
+        const before = fileState(dbPath);
+        const blocker = join(tempDir(), "not-a-dir");
+        writeFileSync(blocker, "");
+        const result = await suiteApply(
+          home,
+          file,
+          { running: true },
+          undefined,
+          {
+            backupRoot: blocker,
+          },
+        );
+        assert.equal(result.code, 1);
+        assert.match(result.stderr[0] ?? "", /cannot create backup directory/);
+        assert.deepEqual(result.calls, [
+          "check",
+          "check",
+          "quit",
+          "wait",
+          "holders",
+          "start",
+        ]);
+        assert.deepEqual(fileState(dbPath), before);
+      });
+
+      it("reports both reasons when the restart also fails", async () => {
+        const { home, file } = liveHome();
+        const result = await suiteApply(
+          home,
+          file,
+          { running: true, failStart: true },
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterWrite: () => {
+              throw new Error("disk on fire");
+            },
+          }),
+        );
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /write failed, rolled back.*disk on fire.*start Companion manually.*open failed/,
+        );
+      });
+    },
+  );
+
+  describe(
+    `live-install mode (${platform}): quit, wait and start failures`,
+    { skip },
+    () => {
+      it("a wait timeout aborts without backup, write or start", async () => {
+        const { home, dbPath, file } = liveHome({ wal: true });
+        const before = fileState(dbPath);
+        const result = await suiteApply(home, file, {
+          running: true,
+          timeout: true,
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /did not exit within 30 seconds.*Companion may be partly stopped/,
+        );
+        assert.deepEqual(result.calls, ["check", "check", "quit", "wait"]);
+        assert.deepEqual(fileState(dbPath), before);
+        assert.equal(
+          existsSync(join(liveDir(home), "companion-cli-backups")),
+          false,
+        );
+      });
+
+      it("a failed start after a committed write says the change was written", async () => {
+        const { home, dbPath, file } = liveHome();
+        const result = await suiteApply(home, file, {
+          running: true,
+          failStart: true,
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /change was written.*start Companion manually.*open failed/,
+        );
+        assert.ok(customVariables(dbPath)["live_one"]);
+      });
+    },
+  );
+
+  describe(
+    `live-install mode (${platform}): quit and wait errors start Companion`,
+    { skip },
+    () => {
+      for (const [name, options, expected] of [
+        [
+          "quit throws",
+          { failQuit: true },
+          ["check", "check", "quit", "start"],
+        ],
+        [
+          "wait throws",
+          { failWait: true },
+          ["check", "check", "quit", "wait", "start"],
+        ],
+      ] as const) {
+        it(`${name}: nothing written, start attempted, original reason`, async () => {
+          const { home, dbPath, file } = liveHome({ wal: true });
+          const before = fileState(dbPath);
+          const result = await suiteApply(home, file, {
+            running: true,
+            ...options,
+          });
+          assert.equal(result.code, 1);
+          assert.equal(result.stderr.length, 1);
+          assert.match(
+            result.stderr[0] ?? "",
+            /cannot quit Companion: (osascript failed|ps vanished); nothing written/,
+          );
+          assert.deepEqual(result.calls, expected);
+          assert.deepEqual(fileState(dbPath), before);
+        });
+      }
+
+      it("reports both reasons when the start after a failed quit also fails", async () => {
+        const { home, file } = liveHome();
+        const result = await suiteApply(home, file, {
+          running: true,
+          failQuit: true,
+          failStart: true,
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /osascript failed.*start Companion manually.*open failed/,
+        );
+      });
+    },
+  );
+
+  describe(
+    `live-install mode (${platform}): pipeline order with the snapshot check`,
+    { skip },
+    () => {
+      it("runs the writer's snapshot check before the quit and its locked check after the backup", async () => {
+        const { home, dbPath } = liveHome();
+        const fake = fakeProcessControl({ running: true });
+        await apply(
+          {
+            descriptionPath: writeDescription(home, VARIABLES_YAML),
+            writers: {
+              variables: {
+                ...variablesWriter,
+                check: (db) =>
+                  void fake.calls.push(
+                    db.isTransaction ? "locked check" : "snapshot check",
+                  ),
+              } as Writer,
+            },
+          },
+          {
+            homedir: home,
+            platform,
+            env: liveEnv(home),
+            processControl: fake.control,
+            hooks: recordingHooks(fake.calls),
+          },
+        );
+        assert.deepEqual(fake.calls, [
+          "check",
+          "snapshot check",
+          "check",
+          "quit",
+          "wait",
+          "holders",
+          "backup",
+          "locked check",
+          "write",
+          "integrity",
+          "start",
+          "started",
+        ]);
+        assert.ok(customVariables(dbPath)["live_one"]);
+      });
+
+      it("starts Companion when opening the database for writing fails", async () => {
+        const { home, file } = liveHome();
+        const result = await suiteApply(
+          home,
+          file,
+          { running: true },
+          (calls) => ({
+            ...recordingHooks(calls),
+            afterBackup: (path) => {
+              calls.push("backup");
+              // A directory in place of the database file cannot be opened.
+              rmSync(path);
+              mkdirSync(path);
+            },
+          }),
+        );
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /cannot open database .* for writing.*backup kept at/,
+        );
+        assert.deepEqual(result.calls, [
+          "check",
+          "check",
+          "quit",
+          "wait",
+          "holders",
+          "backup",
+          "start",
+        ]);
+      });
+    },
+  );
+
+  describe(`live-install mode (${platform}): in-use guard`, { skip }, () => {
+    it("live mode, not running: refuses a held database without quitting or starting", async () => {
+      const { home, dbPath, file } = liveHome({ wal: true });
+      const before = fileState(dbPath);
+      const result = await suiteApply(home, file, {
+        running: false,
+        holders: [999],
+      });
       assert.equal(result.code, 1);
-      assert.equal(result.stderr.length, 1);
       assert.match(
         result.stderr[0] ?? "",
-        /cannot quit Companion: (osascript failed|ps vanished); nothing written/,
+        /open in another process \(PID 999\)/,
       );
-      assert.deepEqual(result.calls, expected);
+      assert.deepEqual(result.calls, ["check", "check", "holders"]);
       assert.deepEqual(fileState(dbPath), before);
     });
-  }
 
-  it("reports both reasons when the start after a failed quit also fails", async () => {
-    const { home, file } = fakeHome();
-    const result = await liveApply(home, file, {
-      running: true,
-      failQuit: true,
-      failStart: true,
-    });
-    assert.equal(result.code, 1);
-    assert.equal(result.stderr.length, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /osascript failed.*start Companion manually.*open failed/,
-    );
+    for (const [name, options] of [
+      ["held after the quit", { holders: [999] }],
+      ["the in-use check fails after the quit", { failHolders: true }],
+    ] as const) {
+      it(`live mode: ${name} refuses, leaves the files byte-identical and starts Companion`, async () => {
+        const { home, dbPath, file } = liveHome({ wal: true });
+        const before = fileState(dbPath);
+        const result = await suiteApply(home, file, {
+          running: true,
+          ...options,
+        });
+        assert.equal(result.code, 1);
+        assert.equal(result.stderr.length, 1);
+        assert.match(
+          result.stderr[0] ?? "",
+          /open in another process|cannot tell whether the database is in use/,
+        );
+        assert.deepEqual(result.calls, [
+          "check",
+          "check",
+          "quit",
+          "wait",
+          "holders",
+          "start",
+        ]);
+        assert.deepEqual(fileState(dbPath), before);
+        assert.equal(
+          existsSync(join(liveDir(home), "companion-cli-backups")),
+          false,
+        );
+      });
+    }
   });
-});
 
-describe("live-install mode: pipeline order with the snapshot check", () => {
-  it("runs the writer's snapshot check before the quit and its locked check after the backup", async () => {
-    const { home, dbPath } = fakeHome();
-    const fake = fakeProcessControl({ running: true });
-    await apply(
-      {
-        descriptionPath: writeDescription(home, VARIABLES_YAML),
-        writers: {
-          variables: {
-            ...variablesWriter,
-            check: (db) =>
-              void fake.calls.push(
-                db.isTransaction ? "locked check" : "snapshot check",
-              ),
-          } as Writer,
-        },
-      },
-      {
+  describe(
+    `live-install mode (${platform}): restart on the same configuration folder`,
+    { skip },
+    () => {
+      /** A configuration folder outside the default, holding a fixture database. */
+      function customRoot(): { root: string; dbPath: string } {
+        const root = join(tempDir(), "custom cfg");
+        return { root, dbPath: buildFixtureDb(join(root, "v5.1")) };
+      }
+
+      it("starts Companion without COMPANION_CONFIG_BASEDIR on the default folder, even when this shell exports one", async () => {
+        const { home, dbPath, file } = liveHome();
+        const defaultRoot = dirname(liveDir(home));
+        const result = await suiteApply(
+          home,
+          file,
+          // As the launcher writes it, with a trailing separator.
+          { running: true, configDir: `${defaultRoot}${sep}` },
+          undefined,
+          {
+            env: {
+              ...liveEnv(home),
+              COMPANION_CONFIG_BASEDIR: join(tempDir(), "elsewhere"),
+              PATH: "/some/bin",
+            },
+          },
+        );
+        assert.equal(result.code, 0, result.stderr.join("\n"));
+        assert.ok(customVariables(dbPath)["live_one"]);
+        assert.equal(result.launches.length, 1);
+        const [launch] = result.launches;
+        assert.equal(launch?.env["COMPANION_CONFIG_BASEDIR"], undefined);
+        assert.ok(!("COMPANION_CONFIG_BASEDIR" in (launch?.env ?? {})));
+        assert.equal(launch?.env["PATH"], "/some/bin", "the rest is inherited");
+        assert.equal(
+          launch?.launcherPath,
+          FAKE_LAUNCHER_PATH,
+          "the launcher listed before the quit",
+        );
+        assert.deepEqual(result.calls.slice(-2), ["start", "started"]);
+        assert.ok(!result.stderr.some((line) => line.startsWith("warning")));
+      });
+
+      it("starts Companion on a custom folder from the running server's --config-dir", async () => {
+        const { home, file } = liveHome();
+        const { root, dbPath } = customRoot();
+        const result = await suiteApply(home, file, {
+          running: true,
+          configDir: root,
+        });
+        assert.equal(result.code, 0, result.stderr.join("\n"));
+        assert.ok(customVariables(dbPath)["live_one"]);
+        assert.equal(result.launches[0]?.env["COMPANION_CONFIG_BASEDIR"], root);
+        assert.ok(!result.stderr.some((line) => line.startsWith("warning")));
+      });
+
+      it("starts Companion on a custom folder from COMPANION_CONFIG_BASEDIR", async () => {
+        const { home, file } = liveHome();
+        const { root, dbPath } = customRoot();
+        const result = await suiteApply(
+          home,
+          file,
+          // A server whose command line names no folder is not checked.
+          { running: true },
+          undefined,
+          {
+            env: {
+              ...liveEnv(home),
+              COMPANION_CONFIG_BASEDIR: `${root}${sep}`,
+            },
+          },
+        );
+        assert.equal(result.code, 0, result.stderr.join("\n"));
+        assert.ok(customVariables(dbPath)["live_one"]);
+        assert.equal(result.launches[0]?.env["COMPANION_CONFIG_BASEDIR"], root);
+        assert.ok(
+          !result.stderr.some((line) => line.startsWith("warning")),
+          "a new server naming no folder is not checked, and not warned about",
+        );
+      });
+
+      it("a restart on another folder is restart_failed, committed, naming both folders", async () => {
+        const { home, file } = liveHome();
+        const { root, dbPath } = customRoot();
+        const other = join(tempDir(), "other cfg");
+        const fake = fakeProcessControl({
+          running: true,
+          configDir: root,
+          restartConfigDir: other,
+        });
+        const result = await runCli(["apply", file, "--json"], {
+          homedir: home,
+          platform,
+          env: liveEnv(home),
+          processControl: fake.control,
+        });
+        assert.equal(result.code, 1);
+        const { error } = JSON.parse(result.stdout[0] ?? "") as {
+          error: {
+            code: string;
+            message: string;
+            committed: boolean;
+            backup: string;
+            hint: string;
+          };
+        };
+        assert.equal(error.code, "restart_failed");
+        assert.equal(error.committed, true);
+        assert.ok(error.message.includes(`configuration folder ${root} `));
+        assert.ok(error.message.includes(`configuration folder ${other},`));
+        assert.ok(error.message.includes(error.backup));
+        assert.match(error.hint, /the write is committed/);
+        assert.ok(customVariables(dbPath)["live_one"], "the write stays");
+        assert.deepEqual(fake.calls.slice(-2), ["start", "started"]);
+      });
+
+      for (const [name, options, reason] of [
+        [
+          "no server is listed after the start",
+          { notRestarted: true },
+          /no Companion server was listed within 30 seconds/,
+        ],
+        [
+          "the listing after the start fails",
+          { failStartCheck: true },
+          /cannot list its processes \(ps broke after start\)/,
+        ],
+      ] as const) {
+        it(`${name}: a warning, and the apply succeeds`, async () => {
+          const { home, dbPath, file } = liveHome();
+          const result = await suiteApply(home, file, {
+            running: true,
+            ...options,
+          });
+          assert.equal(result.code, 0, result.stderr.join("\n"));
+          assert.ok(customVariables(dbPath)["live_one"]);
+          const warnings = result.stderr.filter((line) =>
+            line.startsWith(
+              "warning: could not confirm Companion started again",
+            ),
+          );
+          assert.equal(warnings.length, 1);
+          assert.match(warnings[0] ?? "", reason);
+        });
+      }
+    },
+  );
+}
+
+for (const platform of ["darwin", "win32"] as const) liveSuite(platform);
+
+describe(
+  "live-install mode (win32): the CLI must run in Companion's session",
+  { skip: WINDOWS_HOST_ONLY },
+  () => {
+    async function windowsApply(process: FakeProcessOptions) {
+      const home = tempDir();
+      const dbPath = buildFixtureDb(windowsInstallDir(home), { wal: true });
+      const file = writeDescription(home, VARIABLES_YAML);
+      const before = fileState(dbPath);
+      const fake = fakeProcessControl(process);
+      const result = await runCli(["apply", file, "--json"], {
         homedir: home,
-        platform: "darwin",
+        platform: "win32",
+        env: { APPDATA: home },
         processControl: fake.control,
-        hooks: recordingHooks(fake.calls),
-      },
-    );
-    assert.deepEqual(fake.calls, [
-      "check",
-      "snapshot check",
-      "check",
-      "quit",
-      "wait",
-      "holders",
-      "backup",
-      "locked check",
-      "write",
-      "integrity",
-      "start",
-    ]);
-    assert.ok(customVariables(dbPath)["live_one"]);
-  });
+      });
+      assert.equal(result.code, 1);
+      assert.deepEqual(fileState(dbPath), before, "nothing written");
+      assert.deepEqual(fake.launches, [], "nothing started");
+      assert.ok(!fake.calls.includes("quit"), "nothing quit");
+      const { error } = JSON.parse(result.stdout[0] ?? "") as {
+        error: { code: string; message: string; hint: string };
+      };
+      assert.equal(error.code, "companion_running");
+      assert.equal(
+        error.hint,
+        "run this from the desktop session that runs Companion",
+      );
+      return { error, calls: fake.calls };
+    }
 
-  it("starts Companion when opening the database for writing fails", async () => {
-    const { home, file } = fakeHome();
-    const result = await liveApply(home, file, { running: true }, (calls) => ({
-      ...recordingHooks(calls),
-      afterBackup: (path) => {
-        calls.push("backup");
-        // A directory in place of the database file cannot be opened.
-        rmSync(path);
-        mkdirSync(path);
-      },
-    }));
-    assert.equal(result.code, 1);
-    assert.equal(result.stderr.length, 1);
-    assert.match(
-      result.stderr[0] ?? "",
-      /cannot open database .* for writing.*backup kept at/,
-    );
-    assert.deepEqual(result.calls, [
-      "check",
-      "check",
-      "quit",
-      "wait",
-      "holders",
-      "backup",
-      "start",
-    ]);
-  });
-});
+    it("refuses over SSH (another session) before quitting, starting or writing", async () => {
+      const { error, calls } = await windowsApply({
+        running: true,
+        ownSession: 0,
+      });
+      assert.equal(
+        error.message,
+        "Companion runs in Windows session 1 and this command in session 0: Companion can only be quit gracefully from its own session; run this from the desktop session that runs Companion; nothing quit or written",
+      );
+      assert.equal(
+        error.hint,
+        "run this from the desktop session that runs Companion",
+      );
+      assert.deepEqual(calls, ["check", "check", "session"]);
+    });
+
+    for (const [name, options] of [
+      ["this process's session is unknown", { ownSession: null }],
+      ["the launcher's session is unknown", { launcherSession: null }],
+    ] as const) {
+      it(`refuses when ${name}`, async () => {
+        const { error } = await windowsApply({ running: true, ...options });
+        assert.match(error.message, /desktop session that runs Companion/);
+        assert.match(error.message, /session unknown/);
+      });
+    }
+
+    for (const [name, options] of [
+      ["no launcher is listed", { noLauncher: true }],
+      ["the launcher's executable is unknown", { launcherPath: null }],
+    ] as const) {
+      it(`refuses when ${name}`, async () => {
+        const { error } = await windowsApply({ running: true, ...options });
+        assert.match(
+          error.message,
+          /^cannot find the launcher of Companion's server \(PID 4242\).*; run this from the desktop session that runs Companion; nothing quit or written$/,
+        );
+      });
+    }
+
+    it("refuses when its own session cannot be read", async () => {
+      const { error } = await windowsApply({
+        running: true,
+        failSession: true,
+      });
+      assert.equal(
+        error.message,
+        "cannot tell which Windows session this command runs in (listing vanished), so it cannot tell whether Companion can be quit gracefully from here; run this from the desktop session that runs Companion; nothing quit or written",
+      );
+    });
+
+    it("waits for the server listed before the quit, as on macOS", async () => {
+      const home = tempDir();
+      buildFixtureDb(windowsInstallDir(home));
+      const fake = fakeProcessControl({ running: true });
+      const result = await runCli(
+        ["apply", writeDescription(home, VARIABLES_YAML)],
+        {
+          homedir: home,
+          platform: "win32",
+          env: { APPDATA: home },
+          processControl: fake.control,
+        },
+      );
+      assert.equal(result.code, 0, result.stderr.join("\n"));
+      assert.deepEqual(fake.calls, [
+        "check",
+        "check",
+        "session",
+        "quit",
+        "wait",
+        "holders",
+        "start",
+        "started",
+      ]);
+      assert.deepEqual(fake.waitedFor, [[4242]]);
+    });
+  },
+);
 
 describe("live-install mode: platform", () => {
   it("refuses a non-macOS platform before touching any file or process", async () => {
@@ -844,49 +1284,6 @@ describe("in-use guard: refuse a database another process holds", () => {
       assert.deepEqual(fileState(copy), before);
       assert.equal(
         existsSync(join(home, "copies", "companion-cli-backups")),
-        false,
-      );
-    });
-  }
-
-  it("live mode, not running: refuses a held database without quitting or starting", async () => {
-    const { home, dbPath, file } = fakeHome({ wal: true });
-    const before = fileState(dbPath);
-    const result = await liveApply(home, file, {
-      running: false,
-      holders: [999],
-    });
-    assert.equal(result.code, 1);
-    assert.match(result.stderr[0] ?? "", /open in another process \(PID 999\)/);
-    assert.deepEqual(result.calls, ["check", "check", "holders"]);
-    assert.deepEqual(fileState(dbPath), before);
-  });
-
-  for (const [name, options] of [
-    ["held after the quit", { holders: [999] }],
-    ["the in-use check fails after the quit", { failHolders: true }],
-  ] as const) {
-    it(`live mode: ${name} refuses, leaves the files byte-identical and starts Companion`, async () => {
-      const { home, dbPath, file } = fakeHome({ wal: true });
-      const before = fileState(dbPath);
-      const result = await liveApply(home, file, { running: true, ...options });
-      assert.equal(result.code, 1);
-      assert.equal(result.stderr.length, 1);
-      assert.match(
-        result.stderr[0] ?? "",
-        /open in another process|cannot tell whether the database is in use/,
-      );
-      assert.deepEqual(result.calls, [
-        "check",
-        "check",
-        "quit",
-        "wait",
-        "holders",
-        "start",
-      ]);
-      assert.deepEqual(fileState(dbPath), before);
-      assert.equal(
-        existsSync(join(installDir(home), "companion-cli-backups")),
         false,
       );
     });

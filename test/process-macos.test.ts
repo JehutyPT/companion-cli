@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   type CommandRunner,
+  type CompanionServer,
   holderPidsFromLsof,
   isServerCommand,
   macosProcessControl,
@@ -9,6 +10,7 @@ import {
   serversFromPs,
   type ProcessControl,
 } from "../src/core/process.ts";
+import type { Env } from "../src/rest/endpoint.ts";
 
 /**
  * `ps -axww -o pid=,command=` from a Mac running Companion 5.1 (user name and
@@ -41,8 +43,10 @@ type Reply = { status: number; stdout: string; stderr?: string };
  */
 function fakeRunner(psOutputs: string[], replies: Record<string, Reply> = {}) {
   const commands: Array<[string, string[]]> = [];
-  const run: CommandRunner = async (file, args) => {
+  const envs: Array<Env | undefined> = [];
+  const run: CommandRunner = async (file, args, options) => {
     commands.push([file, [...args]]);
+    envs.push(options?.env);
     if (file === "ps") {
       const stdout = psOutputs.length > 1 ? psOutputs.shift() : psOutputs[0];
       return { status: 0, stdout: stdout ?? "", stderr: "" };
@@ -50,8 +54,17 @@ function fakeRunner(psOutputs: string[], replies: Record<string, Reply> = {}) {
     const reply = replies[file] ?? { status: 0, stdout: "" };
     return { stderr: "", ...reply };
   };
-  return { run, commands };
+  return { run, commands, envs };
 }
+
+/** The server of `PS_RUNNING`, as `servers()` lists it. */
+const SERVER = serversFromPs(PS_RUNNING)[0] as CompanionServer;
+
+/** A launch with a custom configuration folder. */
+const LAUNCH = {
+  env: { PATH: "/usr/bin", COMPANION_CONFIG_BASEDIR: "/srv/companion" },
+  launcherPath: null,
+};
 
 /** A clock that advances by `step` ms on every sleep. */
 function fakeClock(step: number) {
@@ -129,22 +142,52 @@ describe("macOS process control commands (not run)", () => {
     assert.deepEqual(fake.commands, [["ps", PS_ARGS]]);
   });
 
-  it("quits with osascript and starts with open -a Companion", async () => {
+  it("quits with osascript and starts with open -a Companion, handing it the launch environment", async () => {
     const fake = fakeRunner([PS_RUNNING]);
     const control = macosProcessControl({ run: fake.run });
-    await control.quit();
-    await control.start();
+    await control.quit([SERVER]);
+    await control.start(LAUNCH);
     assert.deepEqual(fake.commands, [
       ["osascript", ["-e", 'quit app "Companion"']],
       ["open", ["-a", "Companion"]],
     ]);
+    assert.deepEqual(fake.envs, [undefined, LAUNCH.env]);
+  });
+
+  it("has no Windows session", async () => {
+    const fake = fakeRunner([PS_RUNNING]);
+    assert.equal(
+      await macosProcessControl({ run: fake.run }).ownSessionId(),
+      null,
+    );
+    assert.deepEqual(fake.commands, []);
+  });
+
+  it("waits for a server to be listed after the start", async () => {
+    const fake = fakeRunner([PS_LAUNCHER_ONLY, PS_LAUNCHER_ONLY, PS_RUNNING]);
+    const clock = fakeClock(100);
+    const control = macosProcessControl({ run: fake.run, ...clock });
+    assert.deepEqual(
+      (await control.waitForStart(30_000)).map((server) => server.pid),
+      [35454],
+    );
+    assert.equal(fake.commands.length, 3);
+    assert.equal(clock.sleeps.length, 2);
+  });
+
+  it("gives an empty list when no server is listed in time after the start", async () => {
+    const fake = fakeRunner([PS_LAUNCHER_ONLY]);
+    const clock = fakeClock(1_000);
+    const control = macosProcessControl({ run: fake.run, ...clock });
+    assert.deepEqual(await control.waitForStart(5_000), []);
+    assert.ok(clock.sleeps.length >= 5 && clock.sleeps.length <= 6);
   });
 
   it("waits until the server PIDs seen before the quit are gone", async () => {
     const fake = fakeRunner([PS_RUNNING, PS_RUNNING, PS_LAUNCHER_ONLY]);
     const clock = fakeClock(100);
     const control = macosProcessControl({ run: fake.run, ...clock });
-    assert.equal(await control.waitForExit([35454], 30_000), true);
+    assert.equal(await control.waitForExit([SERVER], 30_000), true);
     assert.deepEqual(fake.commands, [
       ["ps", PS_ARGS],
       ["ps", PS_ARGS],
@@ -156,28 +199,28 @@ describe("macOS process control commands (not run)", () => {
   it("ignores a new server started under another PID while waiting", async () => {
     const fake = fakeRunner([PS_RUNNING.replace("35454 ", "50000 ")]);
     const control = macosProcessControl({ run: fake.run, ...fakeClock(100) });
-    assert.equal(await control.waitForExit([35454], 30_000), true);
+    assert.equal(await control.waitForExit([SERVER], 30_000), true);
   });
 
   it("treats a reused PID running something else as exited", async () => {
     const fake = fakeRunner(["35454 /bin/zsh"]);
     const control = macosProcessControl({ run: fake.run, ...fakeClock(100) });
-    assert.equal(await control.waitForExit([35454], 30_000), true);
+    assert.equal(await control.waitForExit([SERVER], 30_000), true);
   });
 
   it("returns false once the timeout passes", async () => {
     const fake = fakeRunner([PS_RUNNING]);
     const clock = fakeClock(1_000);
     const control = macosProcessControl({ run: fake.run, ...clock });
-    assert.equal(await control.waitForExit([35454], 5_000), false);
+    assert.equal(await control.waitForExit([SERVER], 5_000), false);
     assert.ok(clock.sleeps.length >= 5 && clock.sleeps.length <= 6);
   });
 
   it("fails when ps, osascript or open exit non-zero", async () => {
     for (const [file, call] of [
       ["ps", (c: ProcessControl) => c.serverPids()],
-      ["osascript", (c: ProcessControl) => c.quit()],
-      ["open", (c: ProcessControl) => c.start()],
+      ["osascript", (c: ProcessControl) => c.quit([SERVER])],
+      ["open", (c: ProcessControl) => c.start(LAUNCH)],
     ] as const) {
       const fake = fakeRunner([], {
         [file]: { status: 1, stdout: "", stderr: `${file} broke` },

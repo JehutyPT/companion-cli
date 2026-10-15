@@ -350,6 +350,7 @@ describe("apply --json: a real apply prints one result document", () => {
       "wait",
       "holders",
       "start",
+      "started",
     ]);
   });
 

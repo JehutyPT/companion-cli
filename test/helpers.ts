@@ -19,7 +19,11 @@ import {
   type FixtureOptions,
 } from "./fixtures/companion-db.ts";
 import type { CliOptions } from "../src/cli.ts";
-import type { CompanionServer, ProcessControl } from "../src/core/process.ts";
+import type {
+  CompanionLaunch,
+  CompanionServer,
+  ProcessControl,
+} from "../src/core/process.ts";
 
 const tempDirs: string[] = [];
 after(() => {
@@ -58,9 +62,11 @@ export const STOPPED_PROCESS_CONTROL: ProcessControl = {
   servers: async () => [],
   serverPids: async () => [],
   databaseHolders: async () => [],
+  ownSessionId: () => forbidden("ownSessionId"),
   quit: () => forbidden("quit"),
   waitForExit: () => forbidden("waitForExit"),
   start: () => forbidden("start"),
+  waitForStart: () => forbidden("waitForStart"),
 };
 
 function forbidden(name: string): never {
@@ -89,9 +95,11 @@ export function forbiddenProcessControl(): {
       servers: async () => [],
       serverPids: () => refuse("serverPids"),
       databaseHolders: () => refuse("databaseHolders"),
+      ownSessionId: () => refuse("ownSessionId"),
       quit: () => refuse("quit"),
       waitForExit: () => refuse("waitForExit"),
       start: () => refuse("start"),
+      waitForStart: () => refuse("waitForStart"),
     },
   };
 }
@@ -116,27 +124,51 @@ export interface FakeProcessOptions {
   failWait?: boolean;
   timeout?: boolean;
   failStart?: boolean;
+  /** The CLI's own Windows session (`ownSessionId`); 1 when left out. */
+  ownSession?: number | null;
+  failSession?: boolean;
+  /** The launcher's session; 1 when left out. */
+  launcherSession?: number | null;
+  /** The launcher's executable; `FAKE_LAUNCHER_PATH` when left out. */
+  launcherPath?: string | null;
+  /** No launcher listed for the server. */
+  noLauncher?: boolean;
+  /**
+   * The `--config-dir` of the server listed after the start: left out, the
+   * same as before the quit; null, none on its command line.
+   */
+  restartConfigDir?: string | null;
+  /** No server is listed after the start. */
+  notRestarted?: boolean;
+  /** Listing after the start fails. */
+  failStartCheck?: boolean;
 }
 
-/** A fake process control recording `check`, `holders`, `quit`, `wait` and `start`. */
+/** The fake launcher's executable. */
+export const FAKE_LAUNCHER_PATH = "C:\\Program Files\\Companion\\Companion.exe";
+
+/**
+ * A fake process control recording `check`, `session`, `holders`, `quit`,
+ * `wait`, `start` and `started` (the listing after the start), the PIDs
+ * waited for and the launches.
+ */
 export function fakeProcessControl(options: FakeProcessOptions): {
   control: ProcessControl;
   calls: string[];
   waitedFor: number[][];
   timeouts: number[];
+  launches: CompanionLaunch[];
 } {
   const calls = options.calls ?? [];
   const waitedFor: number[][] = [];
   const timeouts: number[] = [];
-  const servers = async (): Promise<CompanionServer[]> => {
-    calls.push("check");
-    if (options.failCheck) throw new Error("ps exploded");
-    if (!options.running) return [];
+  const launches: CompanionLaunch[] = [];
+  const listed = (configDir: string | null | undefined): CompanionServer[] => {
     const install = options.install ?? null;
-    const configDir =
-      options.configDir === undefined
+    const flag =
+      configDir === undefined || configDir === null
         ? ""
-        : ` --config-dir=${options.configDir} --admin-port=8000`;
+        : ` --config-dir=${configDir} --admin-port=8000`;
     return [
       {
         pid: 4242,
@@ -144,12 +176,30 @@ export function fakeProcessControl(options: FakeProcessOptions): {
           (install === null
             ? "node main.js"
             : `"${win32.join(install, "resources", "node-runtimes", "node26", "node.exe")}" "${win32.join(install, "resources", "main.js")}"`) +
-          configDir,
+          flag,
         install,
         sessionId: 1,
-        launcher: { pid: 4241, path: null, sessionId: 1 },
+        launcher: options.noLauncher
+          ? null
+          : {
+              pid: 4241,
+              path:
+                options.launcherPath === undefined
+                  ? FAKE_LAUNCHER_PATH
+                  : options.launcherPath,
+              sessionId:
+                options.launcherSession === undefined
+                  ? 1
+                  : options.launcherSession,
+            },
       },
     ];
+  };
+  const servers = async (): Promise<CompanionServer[]> => {
+    calls.push("check");
+    if (options.failCheck) throw new Error("ps exploded");
+    if (!options.running) return [];
+    return listed(options.configDir);
   };
   const control: ProcessControl = {
     servers,
@@ -159,23 +209,39 @@ export function fakeProcessControl(options: FakeProcessOptions): {
       if (options.failHolders) throw new Error("lsof exploded");
       return [...(options.holders ?? [])];
     },
+    ownSessionId: async () => {
+      calls.push("session");
+      if (options.failSession) throw new Error("listing vanished");
+      return options.ownSession === undefined ? 1 : options.ownSession;
+    },
     quit: async () => {
       calls.push("quit");
       if (options.failQuit) throw new Error("osascript failed");
     },
-    waitForExit: async (pids, timeoutMs) => {
+    waitForExit: async (exiting, timeoutMs) => {
       calls.push("wait");
       if (options.failWait) throw new Error("ps vanished");
-      waitedFor.push([...pids]);
+      waitedFor.push(exiting.map((server) => server.pid));
       timeouts.push(timeoutMs);
       return !options.timeout;
     },
-    start: async () => {
+    start: async (launch) => {
       calls.push("start");
+      launches.push(launch);
       if (options.failStart) throw new Error("open failed");
     },
+    waitForStart: async () => {
+      calls.push("started");
+      if (options.failStartCheck) throw new Error("ps broke after start");
+      if (options.notRestarted) return [];
+      return listed(
+        options.restartConfigDir === undefined
+          ? options.configDir
+          : options.restartConfigDir,
+      );
+    },
   };
-  return { control, calls, waitedFor, timeouts };
+  return { control, calls, waitedFor, timeouts, launches };
 }
 
 /**

@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  type CommandResult,
   type CommandRunner,
+  type CompanionServer,
   companionServers,
   DatabaseInUseError,
   defaultProcessControl,
   EXCLUSIVE_OPEN_FLAG,
   type FileOpener,
+  isProcessAlive,
   parseWin32Processes,
   sessionIdOf,
   WIN32_PROCESS_LISTING,
@@ -155,39 +158,237 @@ describe("Windows process control", () => {
         !(error instanceof DatabaseInUseError) && /EACCES/.test(String(error)),
     );
   });
+});
 
-  it("does not support quitting, waiting for or starting Companion yet", async () => {
-    const control = windowsProcessControl();
-    for (const call of [
-      () => control.quit(),
-      () => control.waitForExit([1], 10),
-      () => control.start(),
-    ]) {
-      await assert.rejects(call(), /not supported on Windows yet/);
-    }
+describe("Windows quit, wait and start (not run)", () => {
+  /** A runner answering the listing with the spike fixture, others with `reply`. */
+  function recordingRunner(reply: CommandResult = ok) {
+    const commands: Array<[string, string[]]> = [];
+    const run: CommandRunner = async (file, args) => {
+      commands.push([file, [...args]]);
+      return file === "powershell.exe"
+        ? { status: 0, stdout: LISTING, stderr: "" }
+        : reply;
+    };
+    return { run, commands };
+  }
+  const ok: CommandResult = { status: 0, stdout: "", stderr: "" };
+
+  const SERVER = companionServers(
+    parseWin32Processes(LISTING),
+  )[0] as CompanionServer;
+  const LAUNCHER = "D:\\Data\\Bitfocus Companion\\Companion.exe";
+  const ENV = { PATH: "C:\\Windows", COMPANION_CONFIG_BASEDIR: "D:\\cfg" };
+
+  /** A clock whose sleeps advance it by `step` ms. */
+  function clock(step: number) {
+    let time = 0;
+    const sleeps: number[] = [];
+    return {
+      now: () => time,
+      sleep: async (ms: number) => {
+        sleeps.push(ms);
+        time += step;
+      },
+      sleeps,
+    };
+  }
+
+  it("the fixture's server has the launcher the quit and start use", () => {
+    assert.deepEqual(SERVER.launcher, {
+      pid: 3832,
+      path: LAUNCHER,
+      sessionId: 1,
+    });
+  });
+
+  it("quits with taskkill /PID <launcher>, never /F", async () => {
+    const fake = recordingRunner();
+    await windowsProcessControl({ run: fake.run }).quit([SERVER]);
+    assert.deepEqual(fake.commands, [["taskkill.exe", ["/PID", "3832"]]]);
+  });
+
+  it("asks each launcher once", async () => {
+    const fake = recordingRunner();
+    const second = { ...SERVER, pid: 9999 };
+    const other = {
+      ...SERVER,
+      pid: 9998,
+      launcher: { pid: 7777, path: LAUNCHER, sessionId: 1 },
+    };
+    await windowsProcessControl({ run: fake.run }).quit([
+      SERVER,
+      second,
+      other,
+    ]);
+    assert.deepEqual(fake.commands, [
+      ["taskkill.exe", ["/PID", "3832"]],
+      ["taskkill.exe", ["/PID", "7777"]],
+    ]);
+    for (const [, args] of fake.commands) assert.ok(!args.includes("/F"));
+  });
+
+  it("fails when taskkill exits non-zero, or a server has no launcher", async () => {
+    const refused = recordingRunner({
+      status: 1,
+      stdout: "",
+      stderr:
+        "ERROR: The process with PID 3832 could not be terminated. Reason: This process can only be terminated forcefully (with /F option).",
+    });
+    await assert.rejects(
+      windowsProcessControl({ run: refused.run }).quit([SERVER]),
+      /taskkill\.exe exited 1: .*forcefully/,
+    );
+    const fake = recordingRunner();
+    await assert.rejects(
+      windowsProcessControl({ run: fake.run }).quit([
+        { ...SERVER, launcher: null },
+      ]),
+      /launcher of Companion's server \(PID 3176\) is not listed/,
+    );
+    assert.deepEqual(fake.commands, []);
+  });
+
+  it("waits for the server and the launcher by PID, without listing again", async () => {
+    const fake = recordingRunner();
+    const alive = new Map([
+      [3176, 1],
+      [3832, 3],
+    ]);
+    const checked: number[] = [];
+    const isAlive = (pid: number) => {
+      checked.push(pid);
+      const left = alive.get(pid) ?? 0;
+      alive.set(pid, left - 1);
+      return left > 0;
+    };
+    const time = clock(100);
+    const control = windowsProcessControl({ run: fake.run, isAlive, ...time });
+    assert.equal(await control.waitForExit([SERVER], 30_000), true);
+    assert.deepEqual(fake.commands, []);
+    assert.ok(checked.includes(3176) && checked.includes(3832));
+    // The launcher outlives the server: the wait goes on until it is gone.
+    assert.deepEqual(time.sleeps, [250, 250, 250, 250]);
+  });
+
+  it("returns false once the timeout passes", async () => {
+    const time = clock(1_000);
+    const control = windowsProcessControl({
+      run: recordingRunner().run,
+      isAlive: (pid) => pid === 3832,
+      ...time,
+    });
+    assert.equal(await control.waitForExit([SERVER], 5_000), false);
+    assert.ok(time.sleeps.length >= 5 && time.sleeps.length <= 6);
+  });
+
+  it("probes liveness with signal 0: this process is alive, an unused PID is not", () => {
+    assert.equal(isProcessAlive(process.pid), true);
+    assert.equal(isProcessAlive(2 ** 30), false);
+  });
+
+  it("starts the remembered launcher detached, with the launch environment", async () => {
+    const started: Array<[string, unknown]> = [];
+    const fake = recordingRunner();
+    const control = windowsProcessControl({
+      run: fake.run,
+      spawn: async (file, env) => {
+        started.push([file, env]);
+      },
+    });
+    await control.start({ env: ENV, launcherPath: LAUNCHER });
+    assert.deepEqual(started, [[LAUNCHER, ENV]]);
+    assert.deepEqual(fake.commands, []);
+  });
+
+  it("fails to start without a launcher path, or when the spawn fails", async () => {
+    const spawned: string[] = [];
+    const control = windowsProcessControl({
+      run: recordingRunner().run,
+      spawn: async (file) => {
+        spawned.push(file);
+        throw new Error(`cannot start ${file}: ENOENT`);
+      },
+    });
+    await assert.rejects(
+      control.start({ env: ENV, launcherPath: null }),
+      /launcher executable is not known/,
+    );
+    assert.deepEqual(spawned, []);
+    await assert.rejects(
+      control.start({ env: ENV, launcherPath: LAUNCHER }),
+      /cannot start .*ENOENT/,
+    );
+  });
+
+  it("refuses to start a real launcher inside the test runner", async () => {
+    await assert.rejects(
+      windowsProcessControl().start({ env: ENV, launcherPath: LAUNCHER }),
+      /refusing to run .*Companion\.exe inside the test runner/,
+    );
+  });
+
+  it("reads its own session from the latest listing", async () => {
+    const fake = recordingRunner();
+    // 7000 is a CLI over SSH (session 0) in the fixture.
+    const overSsh = windowsProcessControl({ run: fake.run, pid: 7000 });
+    await overSsh.servers();
+    assert.equal(await overSsh.ownSessionId(), 0);
+    assert.equal(fake.commands.length, 1, "no second listing");
+    // Without a listing yet it lists; an unlisted PID has no session.
+    const fresh = windowsProcessControl({ run: fake.run, pid: 3832 });
+    assert.equal(await fresh.ownSessionId(), 1);
+    assert.equal(fake.commands.length, 2);
+    const unlisted = windowsProcessControl({ run: fake.run, pid: 123456 });
+    assert.equal(await unlisted.ownSessionId(), null);
+  });
+
+  it("waits for a server to be listed after the start", async () => {
+    let listings = 0;
+    const run: CommandRunner = async () => ({
+      status: 0,
+      stdout: listings++ < 2 ? "[]" : LISTING,
+      stderr: "",
+    });
+    const time = clock(100);
+    const control = windowsProcessControl({ run, ...time });
+    assert.deepEqual(
+      (await control.waitForStart(30_000)).map((server) => server.pid),
+      [3176],
+    );
+    assert.equal(listings, 3);
+    const none = windowsProcessControl({
+      run: async () => ({ status: 0, stdout: "[]", stderr: "" }),
+      ...clock(1_000),
+    });
+    assert.deepEqual(await none.waitForStart(5_000), []);
   });
 });
 
 describe("default process control", () => {
-  // The macOS control's command runner refuses inside the test runner, so its
-  // quit names osascript; the Windows control's quit is not supported yet.
+  // The command runner refuses inside the test runner, so each quit names
+  // the command it would have run.
+  const server = companionServers(
+    parseWin32Processes(LISTING),
+  )[0] as CompanionServer;
+
   it("is the macOS control on macOS", async () => {
     await assert.rejects(
-      defaultProcessControl("darwin").quit(),
+      defaultProcessControl("darwin").quit([server]),
       /refusing to run osascript/,
     );
   });
 
   it("is the Windows control on Windows", async () => {
     await assert.rejects(
-      defaultProcessControl("win32").quit(),
-      /not supported on Windows yet/,
+      defaultProcessControl("win32").quit([server]),
+      /refusing to run taskkill\.exe/,
     );
   });
 
   it("stays the macOS control elsewhere, which apply never calls there", async () => {
     await assert.rejects(
-      defaultProcessControl("linux").quit(),
+      defaultProcessControl("linux").quit([server]),
       /refusing to run osascript/,
     );
   });

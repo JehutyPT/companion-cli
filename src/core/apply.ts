@@ -19,21 +19,23 @@ import {
 } from "./errors.ts";
 import {
   assertDatabaseExists,
-  assertLiveWriteSupported,
   configDirOf,
   type ConfigRoot,
   describeDatabase,
   type InstallContext,
   installContext,
   isInstallDatabase,
+  launchEnvironment,
   resolveDatabaseTarget,
   sameRoot,
   type ServerCommandLine,
 } from "./paths.ts";
 import {
+  type CompanionLaunch,
   type CompanionServer,
   DatabaseInUseError,
   DEFAULT_QUIT_TIMEOUT_MS,
+  DEFAULT_START_TIMEOUT_MS,
   defaultProcessControl,
   type ProcessControl,
 } from "./process.ts";
@@ -42,10 +44,9 @@ import {
  * The shared apply pipeline. Every writer goes through it, in this order:
  *
  *  1. in live-install mode (no `dbPath`), refuse any platform without an
- *     install location (macOS and Windows have one), and refuse a write on
- *     Windows, where the tool cannot stop and start Companion yet (a dry run
- *     goes ahead). List the running servers (`locateServers`, failing
- *     closed) and take the database in the configuration root: the running
+ *     install location (macOS and Windows have one). List the running
+ *     servers (`locateServers`, failing closed) and take the database in the
+ *     configuration root: the running
  *     server's `--config-dir`, else `COMPANION_CONFIG_BASEDIR`, else the
  *     platform default (`resolveConfigRoot`);
  *  2. read and validate the whole description file (no database access);
@@ -57,7 +58,10 @@ import {
  *     running at this point;
  *  4. live-install mode: list the servers again; refuse if one runs on
  *     another configuration root than step 1 chose; if the Companion server
- *     process is running, quit Companion and wait for that process to exit.
+ *     process is running, on Windows refuse unless this process runs in the
+ *     launcher's session (a graceful quit reaches only that session) and the
+ *     launcher's executable is known, then quit Companion and wait for the
+ *     server (and on Windows the launcher) to exit.
  *     With an explicit database path (macOS and Windows, the platforms with
  *     an install database): refuse the install's database while Companion
  *     runs, that is the database in a running server's `--config-dir` (or
@@ -74,8 +78,14 @@ import {
  *     content is unchanged;
  *  7. start Companion again if step 4 quit it, also after a failure in 4
  *     (except a wait timeout), 5 or 6;
- *  8. after a successful write and start, run `ApplyOptions.waitForRest`
- *     (the CLI waits for Companion's REST API) and report its outcome.
+ *     Companion's launcher gets this process's environment with
+ *     `COMPANION_CONFIG_BASEDIR` set to the root, or removed when the root is
+ *     the default (`launchEnvironment`), so it runs on the same root;
+ *  8. after a successful write and start, wait for a server to be listed
+ *     and check its `--config-dir` is the old root (a mismatch is
+ *     `restart_failed`, committed; no server listed in time is a
+ *     warning), then run `ApplyOptions.waitForRest` (the CLI waits for
+ *     Companion's REST API) and report its outcome.
  *
  * Process control goes through `ApplyOptions.processControl`; the pipeline
  * never runs commands itself.
@@ -125,6 +135,8 @@ export interface ApplyOptions extends WriterRuntime {
   servers?: readonly ServerCommandLine[];
   /** How long to wait for the server process to exit after a quit. */
   quitTimeoutMs?: number;
+  /** How long to wait for a server to be listed after the restart. */
+  startTimeoutMs?: number;
   /**
    * Runs after the start that follows a successful write, and only then. The
    * CLI waits for Companion's REST API here. Must not throw: the write is
@@ -155,7 +167,7 @@ export interface ApplyResult {
   live: boolean;
   /**
    * The install's configuration root and the rule that chose it; null with
-   * `--db`. #40 starts Companion again with this root.
+   * `--db`. A restart starts Companion again on this root.
    */
   root: ConfigRoot | null;
   /** Live-install mode quit Companion and started it again. */
@@ -253,10 +265,7 @@ export async function apply(
   request: ApplyRequest,
   options: ApplyOptions = {},
 ): Promise<ApplyResult> {
-  // Step 1's write refusal comes before the description is read, as the
-  // platform guard does. #40 removes it.
   const { platform } = installContext(options);
-  if (request.dbPath === undefined) assertLiveWriteSupported(platform);
   const { dbPath, live, root, install, writer, plan, warnings } =
     await prepareApply(request, options);
 
@@ -306,10 +315,17 @@ export async function apply(
     return write();
   }
 
+  if (root === null) {
+    throw new Error("live-install mode without a configuration root");
+  }
   const servers = await runningServers(control);
-  if (root !== null) assertSameRoot(servers, root, platform);
-  const pids = servers.map((server) => server.pid);
-  if (pids.length === 0) return write();
+  assertSameRoot(servers, root, platform);
+  if (servers.length === 0) return write();
+  if (platform === "win32") await assertSameSession(control, servers);
+  const launch: CompanionLaunch = {
+    env: launchEnvironment(install, root.root),
+    launcherPath: servers[0]?.launcher?.path ?? null,
+  };
 
   // From here on the tool may have stopped Companion: every exit except a
   // wait timeout starts it again.
@@ -317,12 +333,14 @@ export async function apply(
   options.log?.("quitting Companion");
   let exited: boolean;
   try {
-    await control.quit();
-    exited = await control.waitForExit(pids, timeoutMs);
+    await control.quit(servers);
+    exited = await control.waitForExit(servers, timeoutMs);
   } catch (error) {
-    // Nothing is written yet; `open -a` is harmless if Companion still runs.
+    // Nothing is written yet; a start is harmless if Companion still runs
+    // (a second launcher only focuses the first and exits).
     return startAfterFailure(
       control,
+      launch,
       options,
       new CliError(
         `cannot quit Companion: ${errorMessage(error)}; nothing written`,
@@ -341,11 +359,11 @@ export async function apply(
   try {
     result = await write();
   } catch (error) {
-    return startAfterFailure(control, options, error);
+    return startAfterFailure(control, launch, options, error);
   }
   options.log?.("starting Companion");
   try {
-    await control.start();
+    await control.start(launch);
   } catch (error) {
     throw new CliError(
       `the change was written (backup kept at ${result.backupDir}) but Companion did not start again; start Companion manually: ${errorMessage(error)}`,
@@ -358,8 +376,115 @@ export async function apply(
       },
     );
   }
+  const unchecked = await confirmRestartRoot(
+    control,
+    root,
+    platform,
+    options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS,
+    result.backupDir,
+  );
   const rest = (await options.waitForRest?.()) ?? null;
-  return { ...result, restarted: true, rest };
+  return {
+    ...result,
+    restarted: true,
+    rest,
+    warnings: [...result.warnings, ...unchecked],
+  };
+}
+
+const SAME_SESSION_HINT =
+  "run this from the desktop session that runs Companion";
+
+/**
+ * Windows, before the quit: refuses unless this process runs in the session
+ * of every server's launcher and each launcher's executable is known.
+ * `taskkill` without `/F` closes the launcher's window only from its own
+ * session (spike #36), and the restart needs the executable. Nothing has
+ * been quit, so nothing is started.
+ */
+async function assertSameSession(
+  control: ProcessControl,
+  servers: readonly CompanionServer[],
+): Promise<void> {
+  const refusal = { ...COMPANION_RUNNING, hint: SAME_SESSION_HINT };
+  let own: number | null;
+  try {
+    own = await control.ownSessionId();
+  } catch (error) {
+    throw new CliError(
+      `cannot tell which Windows session this command runs in (${errorMessage(error)}), so it cannot tell whether Companion can be quit gracefully from here; ${SAME_SESSION_HINT}; nothing quit or written`,
+      { ...refusal, cause: error },
+    );
+  }
+  for (const server of servers) {
+    const { launcher } = server;
+    if (launcher === null || launcher.path === null) {
+      throw new CliError(
+        `cannot find the launcher of Companion's server (PID ${server.pid}), so the tool could neither quit Companion gracefully nor start it again; ${SAME_SESSION_HINT}; nothing quit or written`,
+        refusal,
+      );
+    }
+    if (
+      own === null ||
+      launcher.sessionId === null ||
+      launcher.sessionId !== own
+    ) {
+      throw new CliError(
+        `Companion runs in Windows session ${launcher.sessionId ?? "unknown"} and this command in session ${own ?? "unknown"}: Companion can only be quit gracefully from its own session; ${SAME_SESSION_HINT}; nothing quit or written`,
+        refusal,
+      );
+    }
+  }
+}
+
+/**
+ * After the restart that follows a write: waits for a server to be listed
+ * and checks it runs on `root`. A server on another root means Companion now
+ * uses another database than the one written: `restart_failed`, committed.
+ * When it cannot check (no server listed in time, a failing listing) it
+ * returns a warning instead; the write and the start both succeeded.
+ */
+async function confirmRestartRoot(
+  control: ProcessControl,
+  root: ConfigRoot,
+  platform: NodeJS.Platform,
+  timeoutMs: number,
+  backupDir: string,
+): Promise<string[]> {
+  const cannot = (why: string) => [
+    `warning: could not confirm Companion started again on the configuration folder ${root.root}: ${why}`,
+  ];
+  let servers: CompanionServer[];
+  try {
+    servers = await control.waitForStart(timeoutMs);
+  } catch (error) {
+    return cannot(`cannot list its processes (${errorMessage(error)})`);
+  }
+  if (servers.length === 0) {
+    return cannot(
+      `no Companion server was listed within ${timeoutMs / 1000} seconds`,
+    );
+  }
+  // A server whose command line names no folder (headless, not supported)
+  // is not checked, as before the quit (`assertSameRoot`).
+  const folders = servers
+    .map((server) => configDirOf(server.commandLine, platform))
+    .filter((folder) => folder !== null);
+  const other = folders.find(
+    (folder) => !sameRoot(folder, root.root, platform),
+  );
+  if (other !== undefined) {
+    throw new CliError(
+      `the change was written to the configuration folder ${root.root} (backup kept at ${backupDir}), but Companion started again with the configuration folder ${other}, so it does not use the database written`,
+      {
+        code: "restart_failed",
+        hint: `quit Companion and start it on ${root.root} (COMPANION_CONFIG_BASEDIR); the write is committed`,
+        committed: true,
+        backup: backupDir,
+      },
+    );
+  }
+  return [];
 }
 
 /**
@@ -368,12 +493,13 @@ export async function apply(
  */
 async function startAfterFailure(
   control: ProcessControl,
+  launch: CompanionLaunch,
   options: ApplyOptions,
   error: unknown,
 ): Promise<never> {
   options.log?.("starting Companion");
   try {
-    await control.start();
+    await control.start(launch);
   } catch (startError) {
     throw new CliError(
       `${errorMessage(error)}; Companion was quit and did not start again, start Companion manually: ${errorMessage(startError)}`,

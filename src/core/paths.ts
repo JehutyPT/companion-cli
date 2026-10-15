@@ -380,17 +380,31 @@ export function describeDatabase(target: {
 }
 
 /**
- * Refuses a live-install write (no `--db`) where the tool cannot stop and
- * start Companion yet: Windows, until its process control lands (#40). Any
- * other platform without an install location is refused by the resolver.
+ * The environment to start Companion's launcher with so it runs on `root`
+ * again: the install context's environment with `COMPANION_CONFIG_BASEDIR`
+ * set to `root`, or removed when `root` is the platform's default folder.
+ * Removed, not emptied: the launcher would use an empty value as the root.
+ * Removing it matters on macOS too, where `open -a` passes the environment
+ * on, so a variable exported in the shell would otherwise move a Companion
+ * that ran on the default folder. On Windows, where variable names ignore
+ * case, every spelling is removed.
  */
-export function assertLiveWriteSupported(platform: NodeJS.Platform): void {
-  if (platform === "win32") {
-    throw new CliError(
-      "live-install writes on Windows are not supported yet: the tool cannot stop and start Companion there; pass --db with a database path, or use apply --dry-run",
-      { code: "unsupported_platform", hint: "pass --db <path>" },
-    );
+export function launchEnvironment(
+  install: InstallContext,
+  root: string,
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...install.env };
+  for (const name of Object.keys(env)) {
+    const same =
+      install.platform === "win32"
+        ? name.toUpperCase() === CONFIG_BASEDIR_VARIABLE
+        : name === CONFIG_BASEDIR_VARIABLE;
+    if (same) delete env[name];
   }
+  if (!sameRoot(root, defaultConfigRoot(install), install.platform)) {
+    env[CONFIG_BASEDIR_VARIABLE] = root;
+  }
+  return env;
 }
 
 /**

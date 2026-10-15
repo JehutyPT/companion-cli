@@ -290,7 +290,7 @@ describe("configuration folder (darwin): live apply", () => {
       assert.deepEqual(
         calls,
         rule === "server"
-          ? ["check", "check", "quit", "wait", "holders", "start"]
+          ? ["check", "check", "quit", "wait", "holders", "start", "started"]
           : ["check", "check", "holders"],
       );
     });

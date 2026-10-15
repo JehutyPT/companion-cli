@@ -1,7 +1,8 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { open as openFile } from "node:fs/promises";
 import { win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Env } from "../rest/endpoint.ts";
 
 /**
  * Controls the local Companion application. The apply pipeline only talks to
@@ -22,15 +23,44 @@ export interface ProcessControl {
    * `DatabaseInUseError` instead.
    */
   databaseHolders(dbPath: string): Promise<number[]>;
-  /** Asks Companion to quit. Returns once the request is sent, not when it has exited. */
-  quit(): Promise<void>;
   /**
-   * Waits until none of `pids` is a running server process. Resolves `true`
-   * once they are gone, `false` if `timeoutMs` passes first.
+   * The CLI's own Windows session id, from the latest process listing (listing
+   * again when there is none yet); null on macOS. A graceful quit reaches
+   * only a launcher in the same session (spike #36).
    */
-  waitForExit(pids: readonly number[], timeoutMs: number): Promise<boolean>;
+  ownSessionId(): Promise<number | null>;
+  /**
+   * Asks Companion to quit: the running `servers`' launchers on Windows, the
+   * app on macOS. Returns once the request is sent, not when it has exited.
+   */
+  quit(servers: readonly CompanionServer[]): Promise<void>;
+  /**
+   * Waits until `servers` (and on Windows their launchers) have exited.
+   * Resolves `true` once they are gone, `false` if `timeoutMs` passes first.
+   */
+  waitForExit(
+    servers: readonly CompanionServer[],
+    timeoutMs: number,
+  ): Promise<boolean>;
   /** Starts Companion. The launcher starts the server on its own. */
-  start(): Promise<void>;
+  start(launch: CompanionLaunch): Promise<void>;
+  /**
+   * Waits until a Companion server is listed after a start. Resolves to the
+   * listed servers, or an empty list if `timeoutMs` passes first.
+   */
+  waitForStart(timeoutMs: number): Promise<CompanionServer[]>;
+}
+
+/** How to start Companion again. */
+export interface CompanionLaunch {
+  /**
+   * The launcher's whole environment: the CLI's, with
+   * `COMPANION_CONFIG_BASEDIR` set to the old root or removed
+   * (`launchEnvironment`).
+   */
+  env: Env;
+  /** Windows: the launcher executable seen before the quit; null on macOS. */
+  launcherPath: string | null;
 }
 
 /** A running Companion server process (see CONTEXT.md). */
@@ -63,6 +93,9 @@ export interface LauncherProcess {
 
 /** Default wait for the server process to exit after a quit. */
 export const DEFAULT_QUIT_TIMEOUT_MS = 30_000;
+
+/** Default wait for a server to be listed after a start. */
+export const DEFAULT_START_TIMEOUT_MS = 30_000;
 
 /**
  * The server is `node … Companion.app/Contents/Resources/main.js
@@ -279,6 +312,7 @@ export interface CommandResult {
 export type CommandRunner = (
   file: string,
   args: readonly string[],
+  options?: { env?: Env },
 ) => Promise<CommandResult>;
 
 export interface MacosProcessControlOptions {
@@ -295,19 +329,18 @@ export interface MacosProcessControlOptions {
  * spawns), so a test that forgot to inject a fake fails instead of quitting or
  * starting the developer's Companion.
  */
-const execRunner: CommandRunner = (file, args) => {
-  if (process.env["NODE_TEST_CONTEXT"]) {
-    return Promise.reject(
-      new Error(
-        `refusing to run ${file} inside the test runner; inject a fake process control`,
-      ),
-    );
-  }
+const execRunner: CommandRunner = (file, args, options = {}) => {
+  if (insideTestRunner()) return refuseInTests(file);
   return new Promise((resolve, reject) => {
     execFile(
       file,
       [...args],
-      { encoding: "utf8", maxBuffer: RUNNER_MAX_BUFFER, windowsHide: true },
+      {
+        encoding: "utf8",
+        maxBuffer: RUNNER_MAX_BUFFER,
+        windowsHide: true,
+        ...(options.env === undefined ? {} : { env: options.env }),
+      },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== "number") {
           reject(new Error(`cannot run ${file}: ${error.message}`));
@@ -318,6 +351,79 @@ const execRunner: CommandRunner = (file, args) => {
     );
   });
 };
+
+/** `node --test` sets `NODE_TEST_CONTEXT` in every test process. */
+function insideTestRunner(): boolean {
+  return Boolean(process.env["NODE_TEST_CONTEXT"]);
+}
+
+function refuseInTests(file: string): Promise<never> {
+  return Promise.reject(
+    new Error(
+      `refusing to run ${file} inside the test runner; inject a fake process control`,
+    ),
+  );
+}
+
+/**
+ * Starts `file` detached and resolves once it has started, without waiting
+ * for it to exit: its own process group, no stdio, unreferenced, with `env`
+ * as its whole environment. Rejects when it cannot start.
+ */
+export type DetachedSpawner = (file: string, env: Env) => Promise<void>;
+
+/**
+ * Starts a real program detached. Refuses inside the test runner, as the
+ * command runner does. The window is not hidden (`windowsHide` could hide
+ * Companion's own launcher window); the launcher is a GUI program, so it
+ * opens no console.
+ */
+const spawnDetached: DetachedSpawner = (file, env) => {
+  if (insideTestRunner()) return refuseInTests(file);
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, [], { detached: true, stdio: "ignore", env });
+    child.once("error", (error) => {
+      reject(new Error(`cannot start ${file}: ${error.message}`));
+    });
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+};
+
+/**
+ * Whether process `pid` is still running: `process.kill(pid, 0)`, signal 0,
+ * which sends nothing and only checks that the process exists. `ESRCH` means
+ * gone; any other error (`EPERM`: another user's process) counts as running,
+ * so a wait fails closed.
+ */
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+/**
+ * Lists the servers until there is one or `timeoutMs` passes; resolves to
+ * the last listing (empty on timeout).
+ */
+async function pollForServers(
+  listing: () => Promise<CompanionServer[]>,
+  timeoutMs: number,
+  clock: { sleep: (ms: number) => Promise<void>; now: () => number },
+  pollMs: number,
+): Promise<CompanionServer[]> {
+  const deadline = clock.now() + timeoutMs;
+  for (;;) {
+    const listed = await listing();
+    if (listed.length > 0 || clock.now() >= deadline) return listed;
+    await clock.sleep(pollMs);
+  }
+}
 
 /**
  * Output limit of a real command. A full process listing carries every
@@ -332,8 +438,11 @@ async function succeed(
   run: CommandRunner,
   file: string,
   args: readonly string[],
+  options?: { env?: Env },
 ): Promise<string> {
-  const result = await run(file, args);
+  const result = await (options === undefined
+    ? run(file, args)
+    : run(file, args, options));
   if (result.status !== 0) {
     throw new Error(
       `${file} exited ${result.status}: ${result.stderr.trim() || "no output"}`,
@@ -379,10 +488,12 @@ export function macosProcessControl(
         `lsof exited ${result.status}: ${result.stderr.trim() || "no output"}`,
       );
     },
+    ownSessionId: async () => null,
     quit: async () => {
       await succeed(run, "osascript", ["-e", 'quit app "Companion"']);
     },
-    waitForExit: async (pids, timeoutMs) => {
+    waitForExit: async (exiting, timeoutMs) => {
+      const pids = exiting.map((server) => server.pid);
       const deadline = now() + timeoutMs;
       for (;;) {
         const running = await serverPids();
@@ -391,9 +502,14 @@ export function macosProcessControl(
         await sleep(pollMs);
       }
     },
-    start: async () => {
-      await succeed(run, "open", ["-a", "Companion"]);
+    // `open -a` hands its own environment to the app it launches (a probe
+    // app on macOS 26.6.2, #40), so the launch environment carries the
+    // configuration root.
+    start: async (launch) => {
+      await succeed(run, "open", ["-a", "Companion"], { env: launch.env });
     },
+    waitForStart: (timeoutMs) =>
+      pollForServers(servers, timeoutMs, { sleep, now }, pollMs),
   };
 }
 
@@ -429,6 +545,15 @@ export interface WindowsProcessControlOptions {
   attempts?: number;
   /** Delay between those opens. */
   retryMs?: number;
+  /** Starts the launcher detached. */
+  spawn?: DetachedSpawner;
+  /** Whether a PID is still running (`isProcessAlive`). */
+  isAlive?: (pid: number) => boolean;
+  now?: () => number;
+  /** Delay between liveness checks or listings while waiting. */
+  pollMs?: number;
+  /** This process's PID, whose session `ownSessionId` reads. */
+  pid?: number;
 }
 
 /**
@@ -439,9 +564,16 @@ export interface WindowsProcessControlOptions {
  *
  * Listing runs `WIN32_PROCESS_LISTING` in PowerShell (no profile, never
  * interactive) through the command runner, which refuses inside the test
- * runner as on macOS. Quitting, waiting for and starting Companion are not
- * supported yet (#40), and apply does not call them on Windows, where
- * live-install mode is refused.
+ * runner as on macOS.
+ *
+ * Quitting runs `taskkill /PID <launcher>` without `/F` for each server's
+ * launcher: it asks the launcher's window to close, and Companion quits
+ * gracefully, whatever the window state, but only from the launcher's own
+ * session (spike #36); apply checks the sessions first. Force-killing is
+ * never used. Waiting polls the server and launcher PIDs with a signal-0
+ * liveness probe, without listing again. Starting runs the launcher
+ * executable seen before the quit, detached, with the launch environment;
+ * like the command runner, it refuses inside the test runner.
  *
  * Unlike the command runner the probe is not refused inside the test runner:
  * it only opens and closes files.
@@ -460,6 +592,13 @@ export function windowsProcessControl(
   const sleep = options.sleep ?? ((ms: number) => delay(ms));
   const attempts = options.attempts ?? 5;
   const retryMs = options.retryMs ?? 250;
+  const spawnLauncher = options.spawn ?? spawnDetached;
+  const isAlive = options.isAlive ?? isProcessAlive;
+  const now = options.now ?? Date.now;
+  const pollMs = options.pollMs ?? 250;
+  const ownPid = options.pid ?? process.pid;
+  /** The latest listing, which `ownSessionId` reads. */
+  let lastListing: Win32Process[] | null = null;
 
   /** Whether `path` is free: true when closed or missing, false when locked. */
   const isFree = async (path: string): Promise<boolean> => {
@@ -478,11 +617,8 @@ export function windowsProcessControl(
     }
   };
 
-  const unsupported = (what: string) => () =>
-    Promise.reject(new Error(`${what} is not supported on Windows yet`));
-
-  const listProcesses = async () =>
-    parseWin32Processes(
+  const listProcesses = async () => {
+    lastListing = parseWin32Processes(
       await succeed(run, "powershell.exe", [
         "-NoProfile",
         "-NonInteractive",
@@ -490,7 +626,23 @@ export function windowsProcessControl(
         WIN32_PROCESS_LISTING,
       ]),
     );
+    return lastListing;
+  };
   const servers = async () => companionServers(await listProcesses());
+
+  /** Each server's launcher PID, once; a server without one is an error. */
+  const launcherPids = (running: readonly CompanionServer[]): number[] => {
+    const pids = new Set<number>();
+    for (const server of running) {
+      if (server.launcher === null) {
+        throw new Error(
+          `the launcher of Companion's server (PID ${server.pid}) is not listed`,
+        );
+      }
+      pids.add(server.launcher.pid);
+    }
+    return [...pids];
+  };
 
   return {
     servers,
@@ -503,15 +655,42 @@ export function windowsProcessControl(
       }
       return [];
     },
-    quit: unsupported("quitting Companion"),
-    waitForExit: unsupported("waiting for Companion to exit"),
-    start: unsupported("starting Companion"),
+    ownSessionId: async () =>
+      sessionIdOf(lastListing ?? (await listProcesses()), ownPid),
+    quit: async (running) => {
+      for (const pid of launcherPids(running)) {
+        await succeed(run, "taskkill.exe", ["/PID", String(pid)]);
+      }
+    },
+    waitForExit: async (exiting, timeoutMs) => {
+      const pids = [
+        ...new Set([
+          ...exiting.map((server) => server.pid),
+          ...launcherPids(exiting),
+        ]),
+      ];
+      const deadline = now() + timeoutMs;
+      for (;;) {
+        if (!pids.some((pid) => isAlive(pid))) return true;
+        if (now() >= deadline) return false;
+        await sleep(pollMs);
+      }
+    },
+    start: async ({ env, launcherPath }) => {
+      if (launcherPath === null) {
+        throw new Error("Companion's launcher executable is not known");
+      }
+      await spawnLauncher(launcherPath, env);
+    },
+    waitForStart: (timeoutMs) =>
+      pollForServers(servers, timeoutMs, { sleep, now }, pollMs),
   };
 }
 
 /**
  * The process control for `platform`: Windows gets the Windows control, every
- * other platform the macOS one (apply only calls it on macOS there).
+ * other platform the macOS one (apply calls it only with a macOS or Windows
+ * install).
  */
 export function defaultProcessControl(
   platform: NodeJS.Platform,
