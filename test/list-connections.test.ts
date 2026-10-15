@@ -56,7 +56,11 @@ describe("list connections", () => {
     assert.equal(stdout.length, 1);
     const document = JSON.parse(stdout[0] ?? "");
     assert.equal(document.database, env.dbPath);
-    assert.deepEqual(Object.keys(document), ["database", "connections"]);
+    assert.deepEqual(Object.keys(document), [
+      "database",
+      "databaseSource",
+      "connections",
+    ]);
     const row = (
       id: string,
       label: string | null,

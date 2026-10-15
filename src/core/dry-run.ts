@@ -6,6 +6,7 @@ import {
   WriteFailure,
 } from "./database.ts";
 import { CliError } from "./errors.ts";
+import { type ConfigRoot, describeDatabase } from "./paths.ts";
 import {
   type DatabaseDiff,
   type DatabaseRows,
@@ -26,15 +27,18 @@ import {
  *     every table again, roll back;
  *  5. close the copy and delete the temporary directory, on every path.
  *
- * It never opens the target for writing, never takes a backup and never
- * calls the process-control seam, so Companion is never quit, waited on or
- * started. The report comes from comparing the two reads, so writers need no
- * dry-run code of their own.
+ * It never opens the target for writing and never takes a backup. Of the
+ * process-control seam it only lists the running servers, without `--db`,
+ * to find the install's configuration root; Companion is never quit, waited
+ * on or started. The report comes from comparing the two reads, so writers
+ * need no dry-run code of their own.
  */
 
 export interface DryRunResult {
   /** The resolved database path. */
   database: string;
+  /** The install's configuration root and its rule; null with `--db`. */
+  root: ConfigRoot | null;
   diff: DatabaseDiff;
   /** The report's table sections, or `no changes`. */
   lines: string[];
@@ -48,7 +52,7 @@ export async function dryRun(
   request: ApplyRequest,
   options: ApplyOptions = {},
 ): Promise<DryRunResult> {
-  const { dbPath, writer, plan, warnings } = await prepareApply(
+  const { dbPath, root, writer, plan, warnings } = await prepareApply(
     request,
     options,
   );
@@ -64,6 +68,7 @@ export async function dryRun(
       const after = readTables(db);
       return {
         database: dbPath,
+        root,
         ...diffTables(before ?? after, after),
         summary,
         warnings,
@@ -86,7 +91,7 @@ export async function dryRun(
 /** The text report: header, table sections or `no changes`, and the summary. */
 export function renderDryRun(result: DryRunResult): string[] {
   return [
-    `dry run: nothing written to ${result.database}`,
+    `dry run: nothing written to ${describeDatabase({ dbPath: result.database, root: result.root })}`,
     ...result.lines,
     `apply would report: ${result.summary}`,
   ];
@@ -98,6 +103,7 @@ export function dryRunJson(result: DryRunResult): string {
   return JSON.stringify({
     dryRun: true,
     database: result.database,
+    databaseSource: result.root?.source ?? null,
     changed: Object.keys(tables).length > 0,
     tables,
     summary: result.summary,

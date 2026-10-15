@@ -300,6 +300,7 @@ describe("find --variable", () => {
     const document = await json(env, ["--variable", "fx_*"]);
     assert.deepEqual(Object.keys(document), [
       "database",
+      "databaseSource",
       "query",
       "variables",
       "exists",
@@ -418,6 +419,7 @@ describe("find --connection", () => {
     const document = await json(env, ["--connection", "twin"]);
     assert.deepEqual(Object.keys(document), [
       "database",
+      "databaseSource",
       "query",
       "connections",
       "matches",

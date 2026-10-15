@@ -82,7 +82,7 @@ describe("Windows install: read commands and dry runs without --db", () => {
     });
     assert.equal(result.code, 1);
     assert.deepEqual(result.stderr, [
-      "error: database not found: C:\\Users\\nobody\\AppData\\Roaming\\companion\\v5.1\\db.sqlite",
+      "error: database not found: C:\\Users\\nobody\\AppData\\Roaming\\companion\\v5.1\\db.sqlite (from the default configuration folder)",
     ]);
     assert.deepEqual(calls, []);
   });
@@ -100,7 +100,7 @@ describe("Windows install: read commands and dry runs without --db", () => {
     assert.equal(document.error.code, "database_not_found");
     assert.equal(
       document.error.message,
-      "database not found: C:\\Users\\nobody\\AppData\\Roaming\\companion\\v5.1\\db.sqlite",
+      "database not found: C:\\Users\\nobody\\AppData\\Roaming\\companion\\v5.1\\db.sqlite (from the default configuration folder)",
     );
   });
 });
@@ -168,7 +168,7 @@ describe("Windows install: apply --db while Companion runs", () => {
       processControl: fake.control,
     });
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(fake.calls, ["holders"]);
+    assert.deepEqual(fake.calls, ["check", "holders"]);
   });
 });
 

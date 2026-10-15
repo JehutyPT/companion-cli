@@ -342,6 +342,7 @@ describe("list triggers", () => {
     const json = ok(await listTriggers(env, ["--json"]));
     assert.deepEqual(JSON.parse(json[0] ?? ""), {
       database: env.dbPath,
+      databaseSource: null,
       triggers: [],
     });
   });

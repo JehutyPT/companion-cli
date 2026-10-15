@@ -60,7 +60,11 @@ describe("list surfaces", () => {
     const stdout = ok(await listSurfaces(env, ["--json"]));
     assert.equal(stdout.length, 1);
     const document = JSON.parse(stdout[0] ?? "");
-    assert.deepEqual(Object.keys(document), ["database", "surfaces"]);
+    assert.deepEqual(Object.keys(document), [
+      "database",
+      "databaseSource",
+      "surfaces",
+    ]);
     assert.deepEqual(document.surfaces, [
       {
         id: "fixture-surface",

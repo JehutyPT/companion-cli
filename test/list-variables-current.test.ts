@@ -170,6 +170,7 @@ describe("list variables: current values", () => {
     const document = json(await listVariables(target, ["--json"]));
     assert.deepEqual(document, {
       database: target.dbPath,
+      databaseSource: "default",
       variables: [
         {
           name: "fx_counter",
@@ -246,6 +247,7 @@ describe("list variables: current values", () => {
     const document = json(await listVariables(target, ["nomatch*", "--json"]));
     assert.deepEqual(document, {
       database: target.dbPath,
+      databaseSource: "default",
       variables: [],
       values: "live",
     });
@@ -291,6 +293,7 @@ describe("list variables: current values", () => {
       assert.deepEqual(currentValues(document), ALL_NULL);
       assert.deepEqual(Object.keys(document), [
         "database",
+        "databaseSource",
         "variables",
         "values",
         "note",
@@ -432,6 +435,7 @@ describe("list variables: current values", () => {
       const document = json(await listVariables(target, [...args, "--json"]));
       assert.deepEqual(Object.keys(document), [
         "database",
+        "databaseSource",
         "variables",
         "values",
         "note",

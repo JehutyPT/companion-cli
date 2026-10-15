@@ -1,5 +1,10 @@
 import { loadDescription, type WriterRegistry } from "./description.ts";
-import { installContext, resolveDatabaseTarget } from "./paths.ts";
+import {
+  type ConfigRoot,
+  describeDatabase,
+  installContext,
+  resolveDatabaseTarget,
+} from "./paths.ts";
 import { type ReadOptions, readDatabase } from "./read.ts";
 import { resolvePlan, type WriterRuntime } from "./resolve.ts";
 
@@ -37,6 +42,8 @@ export interface ValidateResult {
   file: string;
   /** The resolved database path, or null with `noDb`. */
   database: string | null;
+  /** The install's configuration root and its rule; null with `--db` or `noDb`. */
+  root: ConfigRoot | null;
   /** What the file describes, for example `page 99 "MAIN" (2 buttons)`. */
   described: string;
   /** The writer's warnings (settings `--unchecked` let through unchecked). */
@@ -60,6 +67,7 @@ export async function validate(
     kind: writer.kind,
     file: request.descriptionPath,
     database: null,
+    root: null,
     described: writer.describe?.(parsed) ?? writer.kind,
     warnings: [],
   };
@@ -74,7 +82,7 @@ export async function validate(
   // writer check's own error is rethrown as it is, as the dry run would.
   let checkError: unknown;
   try {
-    const { database } = readDatabase(request.dbPath, options, (db) => {
+    const { database, root } = readDatabase(request.dbPath, options, (db) => {
       try {
         writer.check?.(db, plan);
       } catch (error) {
@@ -82,7 +90,7 @@ export async function validate(
         throw error;
       }
     });
-    return { ...result, database, warnings };
+    return { ...result, database, root, warnings };
   } catch (error) {
     throw checkError ?? error;
   }
@@ -92,7 +100,7 @@ export async function validate(
 export function renderValidation(result: ValidateResult): string {
   return result.database === null
     ? `valid: ${result.described} (structure only; not checked against a database)`
-    : `valid: ${result.described} against ${result.database}`;
+    : `valid: ${result.described} against ${describeDatabase({ dbPath: result.database, root: result.root })}`;
 }
 
 /** The `--json` document. */
@@ -102,6 +110,7 @@ export function validationJson(result: ValidateResult): string {
     kind: result.kind,
     file: result.file,
     database: result.database,
+    databaseSource: result.root?.source ?? null,
     checks: result.database === null ? "structure" : "database",
     warnings: result.warnings,
   });

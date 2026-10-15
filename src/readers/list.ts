@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { matchesNamePatterns } from "../core/patterns.ts";
+import type { RootSource } from "../core/paths.ts";
 import { type ReadOptions, readDatabase } from "../core/read.ts";
 import type { ConfigDirs, Env } from "../rest/endpoint.ts";
 
@@ -37,6 +38,8 @@ export interface Column<Item> {
 
 export interface Listing<Item> {
   database: string;
+  /** Which rule chose the install's configuration root; null with `--db`. */
+  databaseSource: RootSource | null;
   items: Item[];
   /** The document-level JSON fields: the lister's, then any extension's. */
   document: Record<string, unknown>;
@@ -85,7 +88,7 @@ export function list<Item>(
   patterns: readonly string[],
   options: ReadOptions,
 ): Listing<Item> {
-  const { database, value } = readDatabase(dbPath, options, (db) => ({
+  const { database, root, value } = readDatabase(dbPath, options, (db) => ({
     items: lister
       .read(db)
       .filter((item) =>
@@ -95,7 +98,7 @@ export function list<Item>(
       ),
     document: lister.document?.(db) ?? {},
   }));
-  return { database, ...value };
+  return { database, databaseSource: root?.source ?? null, ...value };
 }
 
 /** The text table: a header row, then one row per item. */
@@ -122,6 +125,7 @@ export function listingJson<Item>(
 ): string {
   return JSON.stringify({
     database: listing.database,
+    databaseSource: listing.databaseSource,
     [lister.kind]: listing.items.map((item) => lister.json(item)),
     ...listing.document,
   });

@@ -4,6 +4,7 @@ import {
   apply,
   type ApplyOptions,
   type ApplyResult,
+  locateServers,
   type RestReadiness,
 } from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
@@ -189,9 +190,12 @@ export const HELP = [
   "usage:",
   ...SYNOPSES.map((line) => `  companion-cli ${line}`),
   "",
-  "Without --db, every command uses the local install's database:",
-  "~/Library/Application Support/companion/v5.1/db.sqlite on macOS,",
-  "%APPDATA%\\companion\\v5.1\\db.sqlite on Windows. Other platforms need --db.",
+  "Without --db, every command uses the local install's database,",
+  "<folder>/v5.1/db.sqlite, in Companion's configuration folder: the running",
+  "Companion's --config-dir, else COMPANION_CONFIG_BASEDIR, else the default,",
+  "~/Library/Application Support/companion on macOS and %APPDATA%\\companion",
+  "on Windows. Running servers on different folders are refused. Other",
+  "platforms need --db.",
   "apply writes a description file into Companion's database. Without --db it",
   "targets the local install: it quits Companion if it is running, backs up",
   "and writes the database, then starts Companion again. Writing the local",
@@ -412,7 +416,12 @@ async function runRead(
       }
       const result = await validate(
         { ...parsed, writers },
-        { ...options, ...writerRuntime(options) },
+        {
+          ...(parsed.noDb
+            ? options
+            : await withServers(parsed.dbPath, options)),
+          ...writerRuntime(options),
+        },
       );
       for (const warning of result.warnings) io.stderr(warning);
       io.stdout(json ? validationJson(result) : renderValidation(result));
@@ -424,7 +433,10 @@ async function runRead(
         io.stdout(HELP);
         return EXIT_OK;
       }
-      const document = census(parsed.dbPath, options);
+      const document = census(
+        parsed.dbPath,
+        await withServers(parsed.dbPath, options),
+      );
       if (json) io.stdout(censusJson(document));
       else for (const line of renderCensus(document)) io.stdout(line);
       return EXIT_OK;
@@ -435,7 +447,11 @@ async function runRead(
         io.stdout(HELP);
         return EXIT_OK;
       }
-      const result = find(parsed.query, parsed.db, options);
+      const result = find(
+        parsed.query,
+        parsed.db,
+        await withServers(parsed.db, options),
+      );
       if (json) io.stdout(findJson(result));
       else for (const line of renderFind(result)) io.stdout(line);
       return EXIT_OK;
@@ -452,7 +468,7 @@ async function runRead(
       flags,
       values,
       options: {
-        ...options,
+        ...(await withServers(db, options)),
         env: options.env ?? process.env,
         cwd: options.cwd ?? process.cwd(),
         homedir: options.homedir ?? homedir(),
@@ -464,6 +480,19 @@ async function runRead(
   } catch (error) {
     return failure(io, json, error);
   }
+}
+
+/**
+ * `options` with the running Companion servers, which locate the install's
+ * database without `--db` (`locateServers`): read commands list them once up
+ * front, because the read path is synchronous.
+ */
+async function withServers(
+  dbPath: string | undefined,
+  options: CliOptions,
+): Promise<CliOptions> {
+  const servers = await locateServers(dbPath, options);
+  return servers === undefined ? options : { ...options, servers };
 }
 
 /**
@@ -982,6 +1011,7 @@ function applyJson(result: ApplyResult, warnings: readonly string[]): string {
     kind: result.kind,
     summary: result.summary,
     database: result.dbPath,
+    databaseSource: result.root?.source ?? null,
     live: result.live,
     backup: result.backupDir,
     restarted: result.restarted,

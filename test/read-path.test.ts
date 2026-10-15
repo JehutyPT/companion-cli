@@ -264,7 +264,7 @@ describe("read path: Companion's process", () => {
       "database_not_found",
       1,
       new RegExp(
-        `^error: database not found: .*${pathPattern("companion", "v5.1", "db.sqlite")}$`,
+        `^error: database not found: .*${pathPattern("companion", "v5.1", "db.sqlite")} \\(from the default configuration folder\\)$`,
       ),
     );
     assert.deepEqual(calls, []);

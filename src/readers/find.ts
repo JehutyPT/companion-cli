@@ -15,6 +15,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { CliError } from "../core/errors.ts";
 import { matchesNamePatterns } from "../core/patterns.ts";
+import type { RootSource } from "../core/paths.ts";
 import { type ReadOptions, readDatabase } from "../core/read.ts";
 import { fieldPath, isJsonObject } from "../core/validate.ts";
 import { STYLE_FIELDS } from "../writers/feedbacks.ts";
@@ -57,6 +58,8 @@ export interface FindMatch {
 
 export interface FindResult {
   database: string;
+  /** Which rule chose the install's configuration root; null with `--db`. */
+  databaseSource: RootSource | null;
   query: FindQuery;
   /** Fields of the JSON document between `query` and `matches`. */
   document: Record<string, unknown>;
@@ -648,14 +651,19 @@ export function find(
   dbPath: string | undefined,
   options: ReadOptions,
 ): FindResult {
-  const { database, value } = readDatabase(dbPath, options, (db) =>
+  const { database, root, value } = readDatabase(dbPath, options, (db) =>
     "variable" in query
       ? findVariable(db, query.variable)
       : "connection" in query
         ? findConnection(db, query.connection)
         : findText(db, query.text),
   );
-  return { database, query, ...value };
+  return {
+    database,
+    databaseSource: root?.source ?? null,
+    query,
+    ...value,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -715,6 +723,7 @@ export function renderFind(result: FindResult): string[] {
 export function findJson(result: FindResult): string {
   return JSON.stringify({
     database: result.database,
+    databaseSource: result.databaseSource,
     query: result.query,
     ...result.document,
     matches: result.matches,

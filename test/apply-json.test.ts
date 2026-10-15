@@ -92,10 +92,11 @@ const SCENARIOS: Scenario[] = [
     hint: () => QUIT_HINT,
   },
   {
+    // Live-install mode: the listing that locates the install's database fails.
     name: "the running check fails",
     process: { running: true, failCheck: true },
     code: "companion_running",
-    hint: () => QUIT_HINT,
+    hint: () => "pass --db <path>",
   },
   {
     name: "another process holds the database after the quit",
@@ -299,6 +300,7 @@ describe("apply --json: a real apply prints one result document", () => {
       kind: "variables",
       summary: "custom variables: 1 created, 0 replaced",
       database: dbPath,
+      databaseSource: null,
       live: false,
       backup,
       restarted: false,
@@ -326,6 +328,7 @@ describe("apply --json: a real apply prints one result document", () => {
       kind: "variables",
       summary: "custom variables: 1 created, 0 replaced",
       database: dbPath,
+      databaseSource: "default",
       live: true,
       backup,
       restarted: true,
@@ -339,7 +342,15 @@ describe("apply --json: a real apply prints one result document", () => {
       "starting Companion",
       NOT_CONFIGURED,
     ]);
-    assert.deepEqual(fake.calls, ["check", "quit", "wait", "holders", "start"]);
+    // The first listing locates the install's database, the second precedes the quit.
+    assert.deepEqual(fake.calls, [
+      "check",
+      "check",
+      "quit",
+      "wait",
+      "holders",
+      "start",
+    ]);
   });
 
   it("live-install mode, Companion not running: restarted false", async () => {
@@ -354,7 +365,7 @@ describe("apply --json: a real apply prints one result document", () => {
     const doc = JSON.parse(result.stdout[0] ?? "") as Record<string, unknown>;
     assert.equal(doc["live"], true);
     assert.equal(doc["restarted"], false);
-    assert.deepEqual(fake.calls, ["check", "holders"]);
+    assert.deepEqual(fake.calls, ["check", "check", "holders"]);
   });
 
   it("without --json: progress and the summary on stdout, as before", async () => {

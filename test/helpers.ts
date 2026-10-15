@@ -68,8 +68,11 @@ function forbidden(name: string): never {
 }
 
 /**
- * A process control whose every method records its name in `calls` and then
- * fails the test, for runs that must never touch Companion's process.
+ * A process control for runs that must never touch Companion's process:
+ * every method but `servers` records its name in `calls` and then fails the
+ * test. `servers` reports none running without recording: listing is
+ * read-only, and every command without `--db` lists the servers to find the
+ * install's configuration root.
  */
 export function forbiddenProcessControl(): {
   control: ProcessControl;
@@ -83,7 +86,7 @@ export function forbiddenProcessControl(): {
   return {
     calls,
     control: {
-      servers: () => refuse("servers"),
+      servers: async () => [],
       serverPids: () => refuse("serverPids"),
       databaseHolders: () => refuse("databaseHolders"),
       quit: () => refuse("quit"),
@@ -98,6 +101,11 @@ export interface FakeProcessOptions {
   running: boolean;
   /** The running server's install folder (Windows: holds `resources\BUILD`). */
   install?: string;
+  /**
+   * The running server's `--config-dir` (as written on its command line, so
+   * it may end in a separator). Without it the command line names none.
+   */
+  configDir?: string;
   /** Shared call log; tests push pipeline steps into the same array. */
   calls?: string[];
   failCheck?: boolean;
@@ -125,13 +133,18 @@ export function fakeProcessControl(options: FakeProcessOptions): {
     if (options.failCheck) throw new Error("ps exploded");
     if (!options.running) return [];
     const install = options.install ?? null;
+    const configDir =
+      options.configDir === undefined
+        ? ""
+        : ` --config-dir=${options.configDir} --admin-port=8000`;
     return [
       {
         pid: 4242,
         commandLine:
-          install === null
+          (install === null
             ? "node main.js"
-            : `"${win32.join(install, "resources", "node-runtimes", "node26", "node.exe")}" "${win32.join(install, "resources", "main.js")}"`,
+            : `"${win32.join(install, "resources", "node-runtimes", "node26", "node.exe")}" "${win32.join(install, "resources", "main.js")}"`) +
+          configDir,
         install,
         sessionId: 1,
         launcher: { pid: 4241, path: null, sessionId: 1 },

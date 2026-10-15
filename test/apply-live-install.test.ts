@@ -89,6 +89,7 @@ describe("live-install mode: order", () => {
     assert.equal(result.code, 0, result.stderr.join("\n"));
     assert.deepEqual(result.calls, [
       "check",
+      "check",
       "quit",
       "wait",
       "holders",
@@ -143,6 +144,7 @@ describe("live-install mode: Companion not running", () => {
     assert.equal(result.code, 0, result.stderr.join("\n"));
     assert.deepEqual(result.calls, [
       "check",
+      "check",
       "holders",
       "backup",
       "write",
@@ -161,7 +163,7 @@ describe("live-install mode: Companion not running", () => {
       },
     }));
     assert.equal(result.code, 1);
-    assert.deepEqual(result.calls, ["check", "holders", "backup"]);
+    assert.deepEqual(result.calls, ["check", "check", "holders", "backup"]);
     assert.match(result.stderr[0] ?? "", /disk on fire/);
     assert.deepEqual(dumpDatabase(dbPath), before);
   });
@@ -197,7 +199,7 @@ describe("live-install mode: failures before the quit", () => {
       assert.equal(result.code, 1);
       assert.equal(result.stderr.length, 1);
       assert.match(result.stderr[0] ?? "", expected);
-      assert.deepEqual(result.calls, []);
+      assert.deepEqual(result.calls, ["check"]);
       assert.deepEqual(fileState(dbPath), before);
       assert.equal(
         existsSync(join(installDir(home), "companion-cli-backups")),
@@ -212,7 +214,7 @@ describe("live-install mode: failures before the quit", () => {
     const result = await liveApply(home, file, { running: true });
     assert.equal(result.code, 1);
     assert.match(result.stderr[0] ?? "", /^error: database not found: .*v5\.1/);
-    assert.deepEqual(result.calls, []);
+    assert.deepEqual(result.calls, ["check"]);
   });
 
   it("an unreadable snapshot never touches the process", async () => {
@@ -227,7 +229,7 @@ describe("live-install mode: failures before the quit", () => {
       { running: true },
     );
     assert.equal(result.code, 1);
-    assert.deepEqual(result.calls, []);
+    assert.deepEqual(result.calls, ["check"]);
     assert.deepEqual(fileState(dbPath), before);
   });
 
@@ -270,7 +272,7 @@ describe("live-install mode: failures after the quit restart Companion", () => {
         },
       }),
       /backup went sideways/,
-      ["check", "quit", "wait", "holders", "backup", "start"],
+      ["check", "check", "quit", "wait", "holders", "backup", "start"],
     ],
     [
       "the repeated check under the write lock",
@@ -282,7 +284,7 @@ describe("live-install mode: failures after the quit restart Companion", () => {
         },
       }),
       /page_config_version is 18; .*nothing written/,
-      ["check", "quit", "wait", "holders", "backup", "start"],
+      ["check", "check", "quit", "wait", "holders", "backup", "start"],
     ],
     [
       "the write",
@@ -294,7 +296,7 @@ describe("live-install mode: failures after the quit restart Companion", () => {
         },
       }),
       /write failed, rolled back.*disk on fire/,
-      ["check", "quit", "wait", "holders", "backup", "write", "start"],
+      ["check", "check", "quit", "wait", "holders", "backup", "write", "start"],
     ],
     [
       "the integrity check",
@@ -307,6 +309,7 @@ describe("live-install mode: failures after the quit restart Companion", () => {
       }),
       /integrity check failed: Page 3/,
       [
+        "check",
         "check",
         "quit",
         "wait",
@@ -346,6 +349,7 @@ describe("live-install mode: failures after the quit restart Companion", () => {
     assert.equal(result.code, 1);
     assert.match(result.stderr[0] ?? "", /cannot create backup directory/);
     assert.deepEqual(result.calls, [
+      "check",
       "check",
       "quit",
       "wait",
@@ -391,7 +395,7 @@ describe("live-install mode: quit, wait and start failures", () => {
       result.stderr[0] ?? "",
       /did not exit within 30 seconds.*Companion may be partly stopped/,
     );
-    assert.deepEqual(result.calls, ["check", "quit", "wait"]);
+    assert.deepEqual(result.calls, ["check", "check", "quit", "wait"]);
     assert.deepEqual(fileState(dbPath), before);
     assert.equal(
       existsSync(join(installDir(home), "companion-cli-backups")),
@@ -417,8 +421,12 @@ describe("live-install mode: quit, wait and start failures", () => {
 
 describe("live-install mode: quit and wait errors start Companion", () => {
   for (const [name, options, expected] of [
-    ["quit throws", { failQuit: true }, ["check", "quit", "start"]],
-    ["wait throws", { failWait: true }, ["check", "quit", "wait", "start"]],
+    ["quit throws", { failQuit: true }, ["check", "check", "quit", "start"]],
+    [
+      "wait throws",
+      { failWait: true },
+      ["check", "check", "quit", "wait", "start"],
+    ],
   ] as const) {
     it(`${name}: nothing written, start attempted, original reason`, async () => {
       const { home, dbPath, file } = fakeHome({ wal: true });
@@ -476,6 +484,7 @@ describe("live-install mode: pipeline order with the snapshot check", () => {
       },
     );
     assert.deepEqual(fake.calls, [
+      "check",
       "snapshot check",
       "check",
       "quit",
@@ -508,6 +517,7 @@ describe("live-install mode: pipeline order with the snapshot check", () => {
       /cannot open database .* for writing.*backup kept at/,
     );
     assert.deepEqual(result.calls, [
+      "check",
       "check",
       "quit",
       "wait",
@@ -708,7 +718,7 @@ describe("--db: the install's database and the running guard", () => {
       processControl: fake.control,
     });
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(fake.calls, ["holders"]);
+    assert.deepEqual(fake.calls, ["check", "holders"]);
     assert.deepEqual(
       customVariables(copy)["fx_label"],
       FIXTURE_VARIABLES.fx_label,
@@ -738,7 +748,7 @@ describe("in-use guard: refuse a database another process holds", () => {
       result.stderr[0] ?? "",
       /^error: refusing to write .*: the database is open in another process \(PID 999, 1000\)/,
     );
-    assert.deepEqual(fake.calls, ["holders"]);
+    assert.deepEqual(fake.calls, ["check", "holders"]);
     assert.deepEqual(fileState(copy), before);
     assert.equal(
       existsSync(join(home, "copies", "companion-cli-backups")),
@@ -784,15 +794,17 @@ describe("in-use guard: refuse a database another process holds", () => {
       processControl: fake.control,
     });
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(fake.calls, ["holders"]);
+    assert.deepEqual(fake.calls, ["check", "holders"]);
   });
 
   /**
    * The Windows control with an injected opener that fails every open of the
-   * database file with `code` and finds no `-wal` / `-shm`.
+   * database file with `code` and finds no `-wal` / `-shm`, and a listing
+   * with no Companion running.
    */
   function windowsControlFailing(dbPath: string, code: string) {
     return windowsProcessControl({
+      run: async () => ({ status: 0, stdout: "[]", stderr: "" }),
       open: async (path) => {
         throw Object.assign(new Error(`${code}: open ${path}`), {
           code: path === dbPath ? code : "ENOENT",
@@ -846,7 +858,7 @@ describe("in-use guard: refuse a database another process holds", () => {
     });
     assert.equal(result.code, 1);
     assert.match(result.stderr[0] ?? "", /open in another process \(PID 999\)/);
-    assert.deepEqual(result.calls, ["check", "holders"]);
+    assert.deepEqual(result.calls, ["check", "check", "holders"]);
     assert.deepEqual(fileState(dbPath), before);
   });
 
@@ -865,6 +877,7 @@ describe("in-use guard: refuse a database another process holds", () => {
         /open in another process|cannot tell whether the database is in use/,
       );
       assert.deepEqual(result.calls, [
+        "check",
         "check",
         "quit",
         "wait",

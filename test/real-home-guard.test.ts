@@ -83,7 +83,9 @@ describe("a missing homedir option in tests", () => {
 
     // Read-only first: with no database yet, the error names the resolved path.
     assert.equal(await cli(), 1);
-    assert.deepEqual(stderr, [`error: database not found: ${dbPath}`]);
+    assert.deepEqual(stderr, [
+      `error: database not found: ${dbPath} (from the default configuration folder)`,
+    ]);
 
     buildFixtureDb(installDir(TEST_HOME));
     assert.equal(await cli(), 0, stderr.join("\n"));

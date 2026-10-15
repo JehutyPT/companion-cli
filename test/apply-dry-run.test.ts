@@ -384,6 +384,7 @@ function assertSchema(doc: Record<string, unknown>, env: FixtureEnv): void {
   assert.deepEqual(Object.keys(doc).sort(), [
     "changed",
     "database",
+    "databaseSource",
     "dryRun",
     "summary",
     "tables",
@@ -392,6 +393,7 @@ function assertSchema(doc: Record<string, unknown>, env: FixtureEnv): void {
   assert.deepEqual(doc["warnings"], []);
   assert.equal(doc["dryRun"], true);
   assert.equal(doc["database"], env.dbPath);
+  assert.equal(doc["databaseSource"], null);
   assert.equal(typeof doc["summary"], "string");
   const tables = doc["tables"] as Tables;
   assert.equal(doc["changed"], Object.keys(tables).length > 0);
@@ -490,7 +492,7 @@ describe("apply --dry-run: Companion is never touched", () => {
     ["live-install mode", false],
     ["--db naming the install's database", true],
   ] as const) {
-    it(`${mode}, Companion running: no process-control call, nothing written`, async () => {
+    it(`${mode}, Companion running: at most a listing, nothing written`, async () => {
       const { home, dbPath, file } = fakeHome();
       const tmp = tempDir();
       const before = fileState(dbPath);
@@ -500,8 +502,13 @@ describe("apply --dry-run: Companion is never touched", () => {
         { homedir: home, processControl: control, tmpdir: tmp },
       );
       assert.equal(result.code, 0, result.stderr.join("\n"));
-      assert.equal(result.stdout[0], `dry run: nothing written to ${dbPath}`);
-      assert.deepEqual(calls, []);
+      assert.equal(
+        result.stdout[0],
+        `dry run: nothing written to ${dbPath}${withDb ? "" : " (from the default configuration folder)"}`,
+      );
+      // Without --db the servers are listed to locate the install's database;
+      // Companion is never quit, waited on or started.
+      assert.deepEqual(calls, withDb ? [] : ["check"]);
       assert.deepEqual(fileState(dbPath), before);
       assert.equal(
         existsSync(join(installDir(home), "companion-cli-backups")),

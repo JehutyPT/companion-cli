@@ -3,7 +3,8 @@
  * script, and imported first by helpers.ts for single-file runs).
  *
  * It points `HOME`, `USERPROFILE` and `APPDATA` at a fresh temp directory,
- * and removes `LOCALAPPDATA` and `XDG_CONFIG_HOME`, so `os.homedir()` (the
+ * and removes `LOCALAPPDATA`, `XDG_CONFIG_HOME` and `COMPANION_CONFIG_BASEDIR`,
+ * so `os.homedir()` (the
  * fallback for a missing `homedir` option) and the Windows app-data directory
  * can never resolve to the developer's real profile: a dropped option then
  * fails on a missing database instead of writing the real Companion install's
@@ -26,6 +27,9 @@ process.env["USERPROFILE"] = TEST_HOME;
 process.env["APPDATA"] = TEST_HOME;
 delete process.env["LOCALAPPDATA"];
 delete process.env["XDG_CONFIG_HOME"];
+// Moves Companion's configuration root (the Windows dev box sets it
+// machine-wide, pointing at a git-tracked folder).
+delete process.env["COMPANION_CONFIG_BASEDIR"];
 process.on("exit", () => rmSync(TEST_HOME, { recursive: true, force: true }));
 
 function isInside(path: string, dir: string): boolean {

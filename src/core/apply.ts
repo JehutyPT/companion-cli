@@ -20,12 +20,18 @@ import {
 import {
   assertDatabaseExists,
   assertLiveWriteSupported,
+  configDirOf,
+  type ConfigRoot,
+  describeDatabase,
   type InstallContext,
   installContext,
-  isDefaultInstallDatabase,
+  isInstallDatabase,
   resolveDatabaseTarget,
+  sameRoot,
+  type ServerCommandLine,
 } from "./paths.ts";
 import {
+  type CompanionServer,
   DatabaseInUseError,
   DEFAULT_QUIT_TIMEOUT_MS,
   defaultProcessControl,
@@ -38,7 +44,10 @@ import {
  *  1. in live-install mode (no `dbPath`), refuse any platform without an
  *     install location (macOS and Windows have one), and refuse a write on
  *     Windows, where the tool cannot stop and start Companion yet (a dry run
- *     goes ahead);
+ *     goes ahead). List the running servers (`locateServers`, failing
+ *     closed) and take the database in the configuration root: the running
+ *     server's `--config-dir`, else `COMPANION_CONFIG_BASEDIR`, else the
+ *     platform default (`resolveConfigRoot`);
  *  2. read and validate the whole description file (no database access);
  *  3. the writer's `resolve`, once (environment values; in live-install mode
  *     what the running Companion knows, so before step 4 quits it); then on
@@ -46,11 +55,16 @@ import {
  *     own database checks, so a refusal leaves the original files
  *     byte-identical (they are copied, never opened). Companion may still be
  *     running at this point;
- *  4. live-install mode: if the Companion server process is running, quit
- *     Companion and wait for that process to exit. With an explicit database
- *     path: refuse the install's database while Companion runs (macOS and
- *     Windows, the platforms with an install database), and never
- *     quit or start Companion;
+ *  4. live-install mode: list the servers again; refuse if one runs on
+ *     another configuration root than step 1 chose; if the Companion server
+ *     process is running, quit Companion and wait for that process to exit.
+ *     With an explicit database path (macOS and Windows, the platforms with
+ *     an install database): refuse the install's database while Companion
+ *     runs, that is the database in a running server's `--config-dir` (or
+ *     in the configured root when a server names none). For the database in
+ *     the configured root a failing listing refuses; for any other path it
+ *     does not, as step 5 still refuses a database Companion holds open.
+ *     Never quit or start Companion;
  *  5. on macOS and Windows, refuse if any other process has the database or
  *     its WAL files open (the in-use guard; it also catches a Companion step
  *     4 does not recognise), then back up the database and its WAL files;
@@ -103,6 +117,12 @@ export interface ApplyOptions extends WriterRuntime {
   platform?: NodeJS.Platform;
   /** Quits, waits for and starts Companion. Defaults to the platform's implementation. */
   processControl?: ProcessControl;
+  /**
+   * The running Companion servers, when the caller already listed them
+   * (`locateServers`). Left out, live-install mode lists them through
+   * `processControl` to find the install's configuration root.
+   */
+  servers?: readonly ServerCommandLine[];
   /** How long to wait for the server process to exit after a quit. */
   quitTimeoutMs?: number;
   /**
@@ -133,6 +153,11 @@ export interface ApplyResult {
   dbPath: string;
   /** Live-install mode: no `--db`, so the install's database. */
   live: boolean;
+  /**
+   * The install's configuration root and the rule that chose it; null with
+   * `--db`. #40 starts Companion again with this root.
+   */
+  root: ConfigRoot | null;
   /** Live-install mode quit Companion and started it again. */
   restarted: boolean;
   /** The wait for REST after the restart; `null` when there was none. */
@@ -155,7 +180,9 @@ export interface PreparedApply {
   dbPath: string;
   /** Live-install mode: no `--db`, so the install's database. */
   live: boolean;
-  /** What located the install's database (home, platform, environment). */
+  /** The install's configuration root and its rule; null with `--db`. */
+  root: ConfigRoot | null;
+  /** What located the install's database (home, platform, environment, servers). */
   install: InstallContext;
   writer: Writer;
   plan: unknown;
@@ -174,15 +201,19 @@ export async function prepareApply(
   request: ApplyRequest,
   options: ApplyOptions = {},
 ): Promise<PreparedApply> {
-  const install = installContext(options);
-  const { dbPath, live } = resolveDatabaseTarget(request.dbPath, install);
+  const install = installContext({
+    ...options,
+    servers: await locateServers(request.dbPath, options),
+  });
+  const target = resolveDatabaseTarget(request.dbPath, install);
+  const { dbPath, live, root } = target;
 
   const { writer, plan: parsed } = loadDescription(
     request.descriptionPath,
     request.writers,
   );
 
-  assertDatabaseExists(dbPath);
+  assertDatabaseExists(dbPath, describeDatabase(target));
 
   const { plan, warnings } = await resolvePlan(writer, parsed, {
     live,
@@ -210,6 +241,7 @@ export async function prepareApply(
   return {
     dbPath,
     live,
+    root,
     install,
     writer,
     plan,
@@ -225,10 +257,8 @@ export async function apply(
   // platform guard does. #40 removes it.
   const { platform } = installContext(options);
   if (request.dbPath === undefined) assertLiveWriteSupported(platform);
-  const { dbPath, live, install, writer, plan, warnings } = await prepareApply(
-    request,
-    options,
-  );
+  const { dbPath, live, root, install, writer, plan, warnings } =
+    await prepareApply(request, options);
 
   const control = options.processControl ?? defaultProcessControl(platform);
   // Steps 5 and 6, after the in-use guard. On other platforms (`--db` only)
@@ -243,6 +273,7 @@ export async function apply(
       kind: writer.kind,
       dbPath,
       live,
+      root,
       restarted: false,
       rest: null,
       warnings,
@@ -251,21 +282,33 @@ export async function apply(
 
   if (!live) {
     // macOS and Windows have an install database to protect; on any other
-    // platform there is none (`isDefaultInstallDatabase` would refuse it).
-    if (
-      (platform === "darwin" || platform === "win32") &&
-      isDefaultInstallDatabase(dbPath, install) &&
-      (await runningServer(control)).length > 0
-    ) {
-      throw new CliError(
-        `refusing to write the Companion install's database (${dbPath}) while Companion is running; quit Companion or omit --db to let the tool stop and restart it`,
-        COMPANION_RUNNING,
-      );
+    // platform there is none (`isInstallDatabase` would refuse it).
+    if (platform === "darwin" || platform === "win32") {
+      // The database in the configured folder (COMPANION_CONFIG_BASEDIR or the
+      // default) needs the listing, failing closed, as before. Any other path
+      // is the install's database only if a running server's --config-dir
+      // holds it; when that listing fails, the in-use check that follows still
+      // refuses a database Companion holds open, and itself fails closed.
+      const configured = isInstallDatabase(dbPath, { ...install, servers: [] });
+      const servers = configured
+        ? await runningServers(control)
+        : await runningServers(control).catch(() => []);
+      if (
+        servers.length > 0 &&
+        isInstallDatabase(dbPath, { ...install, servers })
+      ) {
+        throw new CliError(
+          `refusing to write the Companion install's database (${dbPath}) while Companion is running; quit Companion or omit --db to let the tool stop and restart it`,
+          COMPANION_RUNNING,
+        );
+      }
     }
     return write();
   }
 
-  const pids = await runningServer(control);
+  const servers = await runningServers(control);
+  if (root !== null) assertSameRoot(servers, root, platform);
+  const pids = servers.map((server) => server.pid);
   if (pids.length === 0) return write();
 
   // From here on the tool may have stopped Companion: every exit except a
@@ -353,15 +396,73 @@ function restartHint(error: unknown): string {
     : `${start}; nothing was written`;
 }
 
-/** The running Companion server process's PIDs. A failing check refuses the apply (fails closed). */
-async function runningServer(control: ProcessControl): Promise<number[]> {
+/** The running Companion server processes. A failing check refuses the apply (fails closed). */
+async function runningServers(
+  control: ProcessControl,
+): Promise<CompanionServer[]> {
   try {
-    return await control.serverPids();
+    return await control.servers();
   } catch (error) {
     throw new CliError(
       `cannot tell whether Companion is running (${errorMessage(error)}); refusing to write`,
       { ...COMPANION_RUNNING, cause: error },
     );
+  }
+}
+
+/**
+ * The running servers that locate the install's database without `--db`
+ * (macOS and Windows), listed once up front because the resolver is
+ * synchronous: `options.servers` when the caller listed them, none with
+ * `--db` or on another platform (the resolver needs no list there), else the
+ * process control's listing. A failing listing refuses (fails closed): the
+ * tool never guesses the folder while a server may run on another one.
+ */
+export async function locateServers(
+  dbPath: string | undefined,
+  options: {
+    platform?: NodeJS.Platform | undefined;
+    processControl?: ProcessControl | undefined;
+    servers?: readonly ServerCommandLine[] | undefined;
+  },
+): Promise<readonly ServerCommandLine[] | undefined> {
+  if (options.servers !== undefined) return options.servers;
+  const platform = options.platform ?? process.platform;
+  if (dbPath !== undefined) return undefined;
+  if (platform !== "darwin" && platform !== "win32") return [];
+  const control = options.processControl ?? defaultProcessControl(platform);
+  try {
+    return await control.servers();
+  } catch (error) {
+    throw new CliError(
+      `cannot tell whether Companion is running (${errorMessage(error)}), so cannot tell which configuration folder holds the install's database; pass --db with a database path`,
+      { code: "companion_running", hint: "pass --db <path>", cause: error },
+    );
+  }
+}
+
+/**
+ * Live-install mode, before the quit: refuses when a server now running uses
+ * another configuration root than the resolved one (one started since the
+ * root was resolved, or with a different `COMPANION_CONFIG_BASEDIR`), so the
+ * tool never writes a database the running Companion does not use.
+ */
+function assertSameRoot(
+  servers: readonly CompanionServer[],
+  root: ConfigRoot,
+  platform: NodeJS.Platform,
+): void {
+  for (const server of servers) {
+    const serverRoot = configDirOf(server.commandLine, platform);
+    if (serverRoot !== null && !sameRoot(serverRoot, root.root, platform)) {
+      throw new CliError(
+        `Companion is running with the configuration folder ${serverRoot}, not ${root.root}; nothing written`,
+        {
+          ...COMPANION_RUNNING,
+          hint: "quit Companion and retry, or pass --db <path>",
+        },
+      );
+    }
   }
 }
 

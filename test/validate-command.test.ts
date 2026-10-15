@@ -348,6 +348,7 @@ describe("validate: valid files", () => {
         kind,
         file,
         database: env.dbPath,
+        databaseSource: null,
         checks: "database",
         warnings: [],
       });
@@ -366,6 +367,7 @@ describe("validate: valid files", () => {
         kind,
         file,
         database: null,
+        databaseSource: null,
         checks: "structure",
         warnings: [],
       });
@@ -435,7 +437,7 @@ describe("validate: Companion's process and the install's database", () => {
     });
     assert.equal(result.code, 0, result.stderr.join("\n"));
     assert.deepEqual(result.stdout, [
-      `valid: 2 custom variables against ${dbPath}`,
+      `valid: 2 custom variables against ${dbPath} (from the default configuration folder)`,
     ]);
     assert.deepEqual(calls, []);
     assert.deepEqual(fileState(dbPath), before);

@@ -761,7 +761,12 @@ plugin: { sleepTimer: 3600, mode: b, free: anything, dim: true, label: x, fancy:
       },
     );
     assert.equal(result.code, 0, result.stderr.join("\n"));
-    assert.deepEqual(calls.slice(0, 2), [`fields ${SKAARHOJ}`, "check"]);
+    // The first listing locates the install's database, the second precedes the quit.
+    assert.deepEqual(calls.slice(0, 3), [
+      "check",
+      `fields ${SKAARHOJ}`,
+      "check",
+    ]);
     assert.equal(calls.filter((call) => call.startsWith("fields")).length, 1);
     assert.ok(calls.includes("quit"));
     assert.equal(

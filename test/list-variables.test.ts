@@ -101,6 +101,7 @@ describe("list variables", () => {
     assert.equal(stdout.length, 1);
     assert.deepEqual(JSON.parse(stdout[0] ?? ""), {
       database: env.dbPath,
+      databaseSource: null,
       variables: STANDARD_JSON,
       ...SKIPPED,
     });
@@ -135,6 +136,7 @@ describe("list variables", () => {
     const json = ok(await listVariables(env, ["nomatch*", "--json"]));
     assert.deepEqual(JSON.parse(json[0] ?? ""), {
       database: env.dbPath,
+      databaseSource: null,
       variables: [],
       ...SKIPPED,
     });
@@ -149,6 +151,7 @@ describe("list variables", () => {
     const json = ok(await listVariables(env, ["--json"]));
     assert.deepEqual(JSON.parse(json[0] ?? ""), {
       database: env.dbPath,
+      databaseSource: null,
       variables: [],
       ...SKIPPED,
     });

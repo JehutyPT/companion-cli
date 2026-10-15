@@ -69,6 +69,7 @@ describe("list pages", () => {
     assert.equal(stdout.length, 1);
     assert.deepEqual(JSON.parse(stdout[0] ?? ""), {
       database: env.dbPath,
+      databaseSource: null,
       pages: [
         {
           page: 1,
