@@ -20,6 +20,7 @@ import {
 } from "./core/validate-command.ts";
 import { EXPORT_SYNOPSES, exportCommands } from "./export/index.ts";
 import { census, censusJson, renderCensus } from "./readers/census.ts";
+import { find, type FindQuery, findJson, renderFind } from "./readers/find.ts";
 import { listCommands } from "./readers/index.ts";
 import type { ListCommand } from "./readers/list.ts";
 import {
@@ -43,6 +44,7 @@ import {
 import { DEFAULT_REST_WAIT_MS, waitForRest } from "./rest/wait.ts";
 import { descriptionSchema } from "./schema.ts";
 import { writers } from "./writers/index.ts";
+import { parseVariableName } from "./writers/shared.ts";
 
 /**
  * The REST commands. `USAGE`, `HELP` and dispatch all come from this table.
@@ -147,6 +149,8 @@ const LIST_SYNOPSIS = [
 ].join(" ");
 const SCHEMA_SYNOPSIS = "schema [--json]";
 const CENSUS_SYNOPSIS = "census [--db <path-to-db.sqlite>] [--json]";
+const FIND_SYNOPSIS =
+  'find --variable <pattern> | --connection <pattern> | "<text>" [--db <path-to-db.sqlite>] [--json]';
 const SYNOPSES = [
   APPLY_SYNOPSIS,
   VALIDATE_SYNOPSIS,
@@ -154,6 +158,7 @@ const SYNOPSES = [
   ...EXPORT_SYNOPSES,
   SCHEMA_SYNOPSIS,
   CENSUS_SYNOPSIS,
+  FIND_SYNOPSIS,
   ...REST_TABLE.map(synopsis),
 ];
 
@@ -207,6 +212,11 @@ export const HELP = [
   "the description format covers. It prints counts and keys (types, option",
   "keys, module and definition ids), never values, names, labels or",
   "connection ids; --json leaves the database path out.",
+  "find prints the buttons and triggers that use a custom variable (a name or",
+  "pattern), a connection (a label or pattern) or a text, one line each, with",
+  "the paths inside each that matched. Text search ignores case and covers",
+  "button text, feedback text, trigger and page names and action and feedback",
+  "option values.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory or, if there is none, from ~/.config/companion-cli/.env.local",
@@ -269,10 +279,16 @@ const READ_COMMANDS: ReadonlySet<string> = new Set([
   "validate",
   "schema",
   "census",
+  "find",
 ]);
 
 /** Options that take their value as the next argument. */
-const VALUED_OPTIONS: ReadonlySet<string> = new Set(["--db", "--rest-timeout"]);
+const VALUED_OPTIONS: ReadonlySet<string> = new Set([
+  "--db",
+  "--rest-timeout",
+  "--variable",
+  "--connection",
+]);
 
 /** The first word that is neither an option nor the value of a valued option. */
 function commandWord(argv: readonly string[]): string | undefined {
@@ -320,6 +336,17 @@ async function runRead(
       const document = census(parsed.dbPath, options);
       if (json) io.stdout(censusJson(document));
       else for (const line of renderCensus(document)) io.stdout(line);
+      return EXIT_OK;
+    }
+    if (commandWord(argv) === "find") {
+      const parsed = parseFind(argv);
+      if (parsed === "help") {
+        io.stdout(HELP);
+        return EXIT_OK;
+      }
+      const result = find(parsed.query, parsed.db, options);
+      if (json) io.stdout(findJson(result));
+      else for (const line of renderFind(result)) io.stdout(line);
       return EXIT_OK;
     }
     const parsed = parseRead(argv);
@@ -507,6 +534,75 @@ function parseDbFlags(
   const { values, positionals } = parsed;
   if (values.help) return "help";
   return { db: values.db, positionals };
+}
+
+interface FindCommandLine {
+  query: FindQuery;
+  db: string | undefined;
+}
+
+/** Parses a `find` command line. Throws a `usage` CliError on a bad one. */
+function parseFind(argv: readonly string[]): FindCommandLine | "help" {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        db: { type: "string" },
+        json: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+        variable: { type: "string", multiple: true },
+        connection: { type: "string", multiple: true },
+      },
+    });
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return "help";
+  const queries: FindQuery[] = [
+    ...(values.variable ?? []).map((variable) => ({ variable })),
+    ...(values.connection ?? []).map((connection) => ({ connection })),
+    ...positionals.slice(1).map((text) => ({ text })),
+  ];
+  const [query] = queries;
+  if (query === undefined || queries.length > 1) {
+    throw usageFailure(
+      "find takes exactly one of --variable, --connection or a text",
+    );
+  }
+  if ("variable" in query) checkVariablePattern(query.variable);
+  if ("connection" in query && query.connection === "") {
+    throw usageFailure("--connection needs a label or pattern");
+  }
+  if ("text" in query && query.text === "") {
+    throw usageFailure("the search text must not be empty");
+  }
+  if (values.db === "") throw usageFailure("--db needs a path");
+  return { query, db: values.db };
+}
+
+/**
+ * An exact name must pass the writers' variable name rule; a pattern's
+ * characters other than `*` and `?` must be letters, digits or `_`.
+ */
+function checkVariablePattern(pattern: string): void {
+  if (pattern === "") throw usageFailure("--variable needs a name or pattern");
+  if (/[*?]/.test(pattern)) {
+    if (!/^[\w*?]+$/.test(pattern)) {
+      throw usageFailure(
+        `invalid variable pattern "${pattern}": use only letters A-Z/a-z, digits, _ and the wildcards * and ?`,
+      );
+    }
+    return;
+  }
+  try {
+    parseVariableName(pattern, "--variable");
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
+  }
 }
 
 /** A usage error as a CliError, for commands that may print it as JSON. */

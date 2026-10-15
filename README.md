@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages`, `find` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -250,6 +250,27 @@ A read command copies the database and its WAL files to a temporary directory, c
 ```json
 {"database": "...", "variables": [{"name": "fx_counter", "defaultValue": 0, "currentValue": "3", "persistCurrentValue": false, "description": "Counter", "sortOrder": 0}], "values": "live"}
 ```
+
+**Find.** `find` prints the controls that use a custom variable, a connection or a text, one line each: where the control is, its id, and the paths inside it that matched (at most three, then `+N more`; `--json` lists them all). Give exactly one query:
+
+```sh
+companion-cli find --variable fx_counter          # a custom variable name, or a pattern: 'fx_*'
+companion-cli find --connection 'atem*'           # a connection label, or a pattern; internal included
+companion-cli find "camera 1"                     # a text, ignoring case
+```
+
+```
+$ companion-cli find --variable fx_counter
+page 1 row 0 column 0     bank:<id>     down[0].variable, text
+unplaced                  bank:<id>     text
+trigger "Reset counter"   trigger:<id>  events[2].variable, actions[1].variable
+```
+
+- It scans the buttons on loaded pages (page, row, column order), then `bank:` controls placed on no loaded page (`unplaced`, by id), then triggers (sort order, then id). Paths use description-file terms where a writer has one (`text`, `steps[1].rotate_left[0].expression`, `feedbacks[0].style.text`, `events[2].variable`), and the stored JSON path otherwise (`style.layers[2].text`, `feedbacks[1].options.input`, `feedbacks[0].children.group[1].options.input`).
+- `--variable` matches `$(custom:<name>)` in any string, the target of an internal set-value action and a `variable_changed` event. A pattern is matched against stored and referenced names, so references to deleted variables are found; an exact name that names no variable adds `note: no custom variable "<name>" exists` (`"exists": false`). JSON adds `variables` (each matched name with `exists`) and `exists` (`null` for a pattern).
+- `--connection` uses the rule `list connections` counts by: a `connectionId` anywhere, or a `$(<label>:...)` reference. Each line names the connections it matched through. An exact label that names no connection fails with `not_found`; a pattern that matches none finds nothing. JSON adds `connections`, and each match has `connections`.
+- A text matches the `text0` layer text and feedback text overrides (a stored `\n` is a line break), trigger names, page names (`page <n> name`), and every action and feedback option value (numbers and booleans as JSON text). Option keys, ids, definition and connection ids are not matched.
+- No match prints nothing and exits 0. JSON: `{"database", "query", ..., "matches": [{"kind", "page", "row", "column", "controlId", "triggerName", "paths"}]}`, with fields that do not apply `null`.
 
 **Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and for `list` no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
 

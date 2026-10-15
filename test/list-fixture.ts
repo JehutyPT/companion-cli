@@ -17,14 +17,22 @@ import {
  * Runs `list <kind>` on the fixture and checks that it stayed read-only: no
  * process-control call, the target byte-identical, no temporary copy left.
  */
-export async function listReadOnly(
+export function listReadOnly(
   env: FixtureEnv,
   kind: string,
   args: string[] = [],
 ): Promise<CliRun> {
+  return readOnly(env, ["list", kind, "--db", env.dbPath, ...args]);
+}
+
+/** Runs any read command on the fixture with #12's read-only checks. */
+export async function readOnly(
+  env: FixtureEnv,
+  argv: string[],
+): Promise<CliRun> {
   const before = fileState(env.dbPath);
   const { control, calls } = forbiddenProcessControl();
-  const result = await runCli(["list", kind, "--db", env.dbPath, ...args], {
+  const result = await runCli(argv, {
     processControl: control,
     tmpdir: env.tmpdir,
   });

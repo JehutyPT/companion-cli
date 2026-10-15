@@ -65,6 +65,11 @@ export function readConnections(db: DatabaseSync): StoredConnection[] {
  */
 const REFERENCE_LABEL = /\$\(([^:$)]+):/g;
 
+/** The connection labels a text's variable references name, in order. */
+export function referencedLabels(text: string): string[] {
+  return [...text.matchAll(REFERENCE_LABEL)].map((match) => match[1] ?? "");
+}
+
 /** Answers which connections a stored control references. */
 export interface ConnectionIndex {
   /**
@@ -90,8 +95,8 @@ export function connectionIndex(
       const ids = new Set<string>();
       const visit = (value: unknown): void => {
         if (typeof value === "string") {
-          for (const [, label] of value.matchAll(REFERENCE_LABEL)) {
-            for (const id of byLabel.get(label as string) ?? []) ids.add(id);
+          for (const label of referencedLabels(value)) {
+            for (const id of byLabel.get(label) ?? []) ids.add(id);
           }
         } else if (Array.isArray(value)) {
           value.forEach(visit);
