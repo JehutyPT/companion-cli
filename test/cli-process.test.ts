@@ -4,10 +4,16 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildFixtureDb } from "./fixtures/companion-db.ts";
-import { fileState, tempDir, writeDescription } from "./helpers.ts";
+import {
+  customVariables,
+  fileState,
+  tempDir,
+  writeDescription,
+} from "./helpers.ts";
 
 const BIN = fileURLToPath(
   new URL("../src/bin/companion-cli.ts", import.meta.url),
@@ -59,12 +65,12 @@ function cli(args: string[], home: string) {
 }
 
 /**
- * The executable's `--db` in-use guard runs on macOS only today. Windows gets
- * it with #38; Linux is tracked by #42.
+ * The executable's `--db` in-use guard runs `lsof` on macOS and an exclusive
+ * open on Windows (#38); Linux has none yet (#42).
  */
-const IN_USE_GUARD_SKIP =
+const LSOF_GUARD_SKIP =
   process.platform === "win32"
-    ? "the --db in-use guard does not run on Windows yet (#38)"
+    ? "Windows probes with an exclusive open, not lsof (tested below)"
     : process.platform === "linux"
       ? "the --db in-use guard does not run on Linux (#42)"
       : false;
@@ -77,7 +83,7 @@ describe("companion-cli executable", () => {
   it(
     "fails closed, byte-identical, when the in-use check cannot run",
     {
-      skip: IN_USE_GUARD_SKIP,
+      skip: LSOF_GUARD_SKIP,
     },
     () => {
       const dir = tempDir();
@@ -103,6 +109,55 @@ describe("companion-cli executable", () => {
         existsSync(join(dir, "copy", "companion-cli-backups")),
         false,
       );
+    },
+  );
+
+  // The Windows probe only opens and closes files, so it runs for real inside
+  // the test runner.
+  it(
+    "on Windows, refuses a database another process holds open, then applies once it is closed",
+    {
+      skip:
+        process.platform === "win32"
+          ? false
+          : "the exclusive-open probe exists only on Windows",
+    },
+    () => {
+      const dir = tempDir();
+      const dbPath = buildFixtureDb(join(dir, "copy"), { wal: true });
+      const file = writeDescription(
+        dir,
+        "kind: variables\nvariables:\n  - {name: from_bin, default: 1}\n",
+      );
+      const holder = new DatabaseSync(dbPath);
+      let closed = false;
+      try {
+        holder.prepare("select count(*) from sqlite_master").get();
+        const before = fileState(dbPath);
+        const refused = cli(["apply", file, "--db", dbPath], dir);
+        assert.equal(refused.status, 1, refused.stderr);
+        assert.equal(
+          refused.stderr.trimEnd().split("\n").length,
+          1,
+          refused.stderr,
+        );
+        assert.match(
+          refused.stderr,
+          /^error: refusing to write .*: the database is open in another process; close it first/,
+        );
+        assert.deepEqual(fileState(dbPath), before);
+        assert.equal(
+          existsSync(join(dir, "copy", "companion-cli-backups")),
+          false,
+        );
+        holder.close();
+        closed = true;
+        const applied = cli(["apply", file, "--db", dbPath], dir);
+        assert.equal(applied.status, 0, applied.stderr);
+        assert.ok(customVariables(dbPath)["from_bin"]);
+      } finally {
+        if (!closed) holder.close();
+      }
     },
   );
 

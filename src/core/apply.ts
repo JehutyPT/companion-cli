@@ -24,8 +24,9 @@ import {
   resolveDatabaseTarget,
 } from "./paths.ts";
 import {
+  DatabaseInUseError,
   DEFAULT_QUIT_TIMEOUT_MS,
-  macosProcessControl,
+  defaultProcessControl,
   type ProcessControl,
 } from "./process.ts";
 
@@ -44,9 +45,9 @@ import {
  *     Companion and wait for that process to exit. With an explicit database
  *     path: refuse the install's database while Companion runs, and never
  *     quit or start Companion;
- *  5. on macOS, refuse if any other process has the database or its WAL
- *     files open (the in-use guard; it also catches a Companion step 4 does
- *     not recognise), then back up the database and its WAL files;
+ *  5. on macOS and Windows, refuse if any other process has the database or
+ *     its WAL files open (the in-use guard; it also catches a Companion step
+ *     4 does not recognise), then back up the database and its WAL files;
  *  6. in one transaction, under the write lock: repeat the version guard and
  *     the writer's checks, let the writer write, run `pragma integrity_check`;
  *     commit only if it returns `ok`, otherwise roll back so the database
@@ -94,7 +95,7 @@ export interface ApplyOptions extends WriterRuntime {
   hooks?: ApplyHooks;
   /** Platform deciding whether live-install mode is supported. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
-  /** Quits, waits for and starts Companion. Defaults to the macOS implementation. */
+  /** Quits, waits for and starts Companion. Defaults to the platform's implementation. */
   processControl?: ProcessControl;
   /** How long to wait for the server process to exit after a quit. */
   quitTimeoutMs?: number;
@@ -222,11 +223,13 @@ export async function apply(
     warnings,
   } = await prepareApply(request, options);
 
-  const control = options.processControl ?? macosProcessControl();
-  // Steps 5 and 6, after the in-use guard. On non-macOS (`--db` only) there
-  // is no process check at all.
+  const control = options.processControl ?? defaultProcessControl(platform);
+  // Steps 5 and 6, after the in-use guard. On other platforms (`--db` only)
+  // there is no process check at all.
   const write = async (): Promise<ApplyResult> => {
-    if (platform === "darwin") await assertNotInUse(control, dbPath);
+    if (platform === "darwin" || platform === "win32") {
+      await assertNotInUse(control, dbPath);
+    }
     const written = writeStopped(dbPath, writer, plan, options);
     return {
       ...written,
@@ -365,6 +368,12 @@ async function assertNotInUse(
   try {
     holders = await control.databaseHolders(dbPath);
   } catch (error) {
+    if (error instanceof DatabaseInUseError) {
+      throw new CliError(
+        `refusing to write ${dbPath}: the database is open in another process; close it first`,
+        { ...COMPANION_RUNNING, cause: error },
+      );
+    }
     throw new CliError(
       `cannot tell whether the database is in use (${errorMessage(error)}); refusing to write ${dbPath}`,
       { ...COMPANION_RUNNING, cause: error },

@@ -33,8 +33,13 @@ function isInside(path: string, dir: string): boolean {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-/** Throws when `path` is inside a real home directory. */
+/**
+ * Throws when `path` is inside a real home directory and not inside the test
+ * home. The test home itself may be inside the real one: on Windows the temp
+ * directory is usually `%LOCALAPPDATA%\Temp`, under the profile.
+ */
 export function assertNotRealHome(path: string): void {
+  if (isInside(path, TEST_HOME)) return;
   for (const real of REAL_HOMES) {
     if (isInside(path, real)) {
       throw new Error(`test resolved ${path}, inside the real home ${real}`);

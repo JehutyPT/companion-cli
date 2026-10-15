@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { open as openFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 
 /**
@@ -13,7 +14,9 @@ export interface ProcessControl {
   /**
    * PIDs of processes that have the database or its `-wal` / `-shm` file
    * open; empty when none. Catches a Companion the server match misses (a
-   * renamed bundle, a development build) and any other SQLite client.
+   * renamed bundle, a development build) and any other SQLite client. A
+   * platform that can tell the database is in use but not by whom throws
+   * `DatabaseInUseError` instead.
    */
   databaseHolders(dbPath: string): Promise<number[]>;
   /** Asks Companion to quit. Returns once the request is sent, not when it has exited. */
@@ -182,4 +185,108 @@ export function macosProcessControl(
       await succeed(run, "open", ["-a", "Companion"]);
     },
   };
+}
+
+/**
+ * The database is open in another process, which the platform cannot name.
+ * Thrown by `ProcessControl.databaseHolders`; apply refuses with the in-use
+ * message instead of the "cannot tell" one.
+ */
+export class DatabaseInUseError extends Error {
+  override name = "DatabaseInUseError";
+}
+
+/**
+ * libuv's `UV_FS_O_EXLOCK`: on Windows, open with share mode 0, so the open
+ * fails with `EBUSY` (a sharing violation) while any other handle is open.
+ * A literal because Node does not export it: `fs.constants.UV_FS_O_EXLOCK` is
+ * `undefined`, and `O_RDONLY | undefined` is a plain open that always
+ * succeeds (spike #36, row 8).
+ */
+export const EXCLUSIVE_OPEN_FLAG = 0x10000000;
+
+/** Opens a file with `flags` (`fs.promises.open`'s shape); the probe closes it at once. */
+export type FileOpener = (
+  path: string,
+  flags: number,
+) => Promise<{ close(): Promise<void> }>;
+
+export interface WindowsProcessControlOptions {
+  open?: FileOpener;
+  sleep?: (ms: number) => Promise<void>;
+  /** Opens per file before a sharing violation counts as in use. */
+  attempts?: number;
+  /** Delay between those opens. */
+  retryMs?: number;
+}
+
+/**
+ * Windows: the in-use check opens each of the database, `-wal` and `-shm`
+ * that exists with an exclusive share mode and closes it again. A sharing
+ * violation that outlasts a few retries (antivirus and the indexer hold files
+ * briefly) means another process has it open; it cannot say which. Listing,
+ * quitting, waiting for and starting Companion are not supported yet, and
+ * apply does not call them on Windows, where live-install mode is refused.
+ *
+ * Unlike the macOS command runner the probe is not refused inside the test
+ * runner: it only opens and closes files.
+ *
+ * Every handle counts, this process's own included (there is no PID to
+ * filter, as macOS filters its own): apply must have closed its snapshot and
+ * any other connection to the database before it calls the check. Only
+ * `EBUSY` is retried; any other error, `EPERM` and `EACCES` included, fails
+ * closed at once.
+ */
+export function windowsProcessControl(
+  options: WindowsProcessControlOptions = {},
+): ProcessControl {
+  const open: FileOpener = options.open ?? openFile;
+  const sleep = options.sleep ?? ((ms: number) => delay(ms));
+  const attempts = options.attempts ?? 5;
+  const retryMs = options.retryMs ?? 250;
+
+  /** Whether `path` is free: true when closed or missing, false when locked. */
+  const isFree = async (path: string): Promise<boolean> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const handle = await open(path, EXCLUSIVE_OPEN_FLAG);
+        await handle.close();
+        return true;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ENOENT") return true;
+        if (code !== "EBUSY") throw error;
+        if (attempt >= attempts) return false;
+        await sleep(retryMs);
+      }
+    }
+  };
+
+  const unsupported = (what: string) => () =>
+    Promise.reject(new Error(`${what} is not supported on Windows yet`));
+
+  return {
+    serverPids: unsupported("listing Companion's processes"),
+    databaseHolders: async (dbPath) => {
+      for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (!(await isFree(path))) {
+          throw new DatabaseInUseError(`${path} is open in another process`);
+        }
+      }
+      return [];
+    },
+    quit: unsupported("quitting Companion"),
+    waitForExit: unsupported("waiting for Companion to exit"),
+    start: unsupported("starting Companion"),
+  };
+}
+
+/**
+ * The process control for `platform`: Windows gets the Windows control, every
+ * other platform the macOS one (apply only calls it on macOS there).
+ */
+export function defaultProcessControl(
+  platform: NodeJS.Platform,
+): ProcessControl {
+  return platform === "win32" ? windowsProcessControl() : macosProcessControl();
 }

@@ -34,6 +34,7 @@ import {
   writeDescription,
 } from "./helpers.ts";
 import type { ApplyHooks } from "../src/core/apply.ts";
+import { windowsProcessControl } from "../src/core/process.ts";
 
 const VARIABLES_YAML = `kind: variables
 variables:
@@ -772,6 +773,69 @@ describe("in-use guard: refuse a database another process holds", () => {
     );
     assert.deepEqual(fileState(copy), before);
   });
+
+  it("Windows --db runs the in-use check, and nothing else of the process control", async () => {
+    const { home, file } = fakeHome();
+    const copy = copyIn(home);
+    const fake = fakeProcessControl({ running: true });
+    const result = await runCli(["apply", file, "--db", copy], {
+      homedir: home,
+      platform: "win32",
+      processControl: fake.control,
+    });
+    assert.equal(result.code, 0, result.stderr.join("\n"));
+    assert.deepEqual(fake.calls, ["holders"]);
+  });
+
+  /**
+   * The Windows control with an injected opener that fails every open of the
+   * database file with `code` and finds no `-wal` / `-shm`.
+   */
+  function windowsControlFailing(dbPath: string, code: string) {
+    return windowsProcessControl({
+      open: async (path) => {
+        throw Object.assign(new Error(`${code}: open ${path}`), {
+          code: path === dbPath ? code : "ENOENT",
+        });
+      },
+      sleep: async () => {},
+    });
+  }
+
+  for (const [name, code, message] of [
+    [
+      "refuses a database another process holds",
+      "EBUSY",
+      /^refusing to write .*: the database is open in another process; close it first$/,
+    ],
+    [
+      "fails closed on an unexpected probe error",
+      "EACCES",
+      /^cannot tell whether the database is in use \(EACCES: open .*\); refusing to write /,
+    ],
+  ] as const) {
+    it(`Windows --db ${name}, byte-identical`, async () => {
+      const { home, file } = fakeHome();
+      const copy = copyIn(home);
+      const before = fileState(copy);
+      const result = await runCli(["apply", file, "--db", copy, "--json"], {
+        homedir: home,
+        platform: "win32",
+        processControl: windowsControlFailing(copy, code),
+      });
+      assert.equal(result.code, 1);
+      const doc = JSON.parse(result.stdout.join("\n")) as {
+        error: { code: string; message: string };
+      };
+      assert.equal(doc.error.code, "companion_running");
+      assert.match(doc.error.message, message);
+      assert.deepEqual(fileState(copy), before);
+      assert.equal(
+        existsSync(join(home, "copies", "companion-cli-backups")),
+        false,
+      );
+    });
+  }
 
   it("live mode, not running: refuses a held database without quitting or starting", async () => {
     const { home, dbPath, file } = fakeHome({ wal: true });
