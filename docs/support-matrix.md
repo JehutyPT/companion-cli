@@ -54,6 +54,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `options.stepProgression = "expression"` | supported | `button.progression` |  |
 | `options.stepExpression` | supported | `button.stepExpression` | with `progression: expression`; `""` otherwise |
 | `options.stepExpression (without expression progression)` | unsupported |  | Companion keeps a stale expression after the progression changes; apply would clear it |
+| `options.stepExpression (empty, with expression progression)` | unsupported |  | Companion allows it after switching to expression progression; a description requires an expression |
 | `options.canModifyStyleInApis` | supported | `button.apiStyle` | Companion's default `false` unless `apiStyle: true`; the CLI never uses the style API |
 | `options.notes` | supported | `button.notes` |  |
 
@@ -66,7 +67,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `action_sets.rotate_left` | supported | `button.rotate_left`, `steps[].rotate_left` |  |
 | `action_sets.rotate_right` | supported | `button.rotate_right`, `steps[].rotate_right` |  |
 | `action_sets.<duration>` | supported | `button.hold`, `steps[].hold`, `hold[].after`, `hold[].actions` | hold action sets, keyed by a positive whole number of milliseconds |
-| `action_sets.<duration> (other keys)` | unsupported |  | a key Companion reads as a number but not a positive whole number, such as `1.5` or `1e3` |
+| `action_sets.<duration> (other keys)` | unsupported |  | any other key, such as `1.5` or `1e3`, which Companion reads as a number but is not a positive whole number |
 | `options.runWhileHeld` | supported | `hold[].whileHeld` | the while-held durations, in hold-entry order |
 | `options.runWhileHeld (without its hold set)` | unsupported |  | a duration with no hold set in the step, or listed twice |
 | `options (other keys)` | unsupported |  | such as a step `name` |

@@ -73,7 +73,7 @@ function entityField(path: string): string {
  * Where the writer's four-layer template stores each style field, and where
  * each button option goes.
  */
-const STYLE_PATHS: Readonly<Record<string, string>> = {
+const FIELD_PATHS: Readonly<Record<string, string>> = {
   text: "style.layers[3].text.value",
   background: "style.layers[1].color.value",
   textColor: "style.layers[3].color.value",
@@ -117,7 +117,7 @@ function holdEntry(fields: unknown, index: number): Fields | undefined {
  * `fields`, the description, resolves a hold entry to its duration.
  */
 export function buttonStoredPath(field: string, fields: Fields = {}): string {
-  const style = STYLE_PATHS[field];
+  const style = FIELD_PATHS[field];
   if (style !== undefined) return style;
   const topHold = /^hold\[(\d+)\](.*)$/.exec(field);
   if (topHold)
@@ -503,8 +503,8 @@ function nonEmpty({ sets, hold }: ExportedStep): Fields {
 /**
  * The options' description fields, each only when it differs from the
  * default. A stale `stepExpression` (kept by Companion after the
- * progression changed) is refused; other differences are left to the
- * self-check.
+ * progression changed) and an empty one with expression progression are
+ * refused; other differences are left to the self-check.
  */
 function exportOptions(options: Fields): Fields {
   const progression = options["stepProgression"];
@@ -523,6 +523,12 @@ function exportOptions(options: Fields): Fields {
     refuse(
       "options.stepExpression",
       `is set while options.stepProgression is ${JSON.stringify(progression)}, which a description cannot express`,
+      "button option",
+    );
+  if (progression === "expression" && expression === "")
+    refuse(
+      "options.stepExpression",
+      'is empty while options.stepProgression is "expression", which a description cannot express',
       "button option",
     );
   const notes = options["notes"];

@@ -200,6 +200,11 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
     "options.stepExpression (without expression progression)",
     "Companion keeps a stale expression after the progression changes; apply would clear it",
   ),
+  unsupported(
+    "button option",
+    "options.stepExpression (empty, with expression progression)",
+    "Companion allows it after switching to expression progression; a description requires an expression",
+  ),
   supported(
     "button option",
     "options.canModifyStyleInApis",
@@ -228,7 +233,7 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
   unsupported(
     "step",
     "action_sets.<duration> (other keys)",
-    "a key Companion reads as a number but not a positive whole number, such as `1.5` or `1e3`",
+    "any other key, such as `1.5` or `1e3`, which Companion reads as a number but is not a positive whole number",
   ),
   supported(
     "step",

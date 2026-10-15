@@ -394,6 +394,19 @@ const REFUSALS: RefusalCase[] = [
     item: "options.stepExpression (without expression progression)",
   },
   {
+    label: "an empty step expression with expression progression",
+    change: control(A, (value) => {
+      (value["options"] as Json)["stepProgression"] = "expression";
+    }),
+    cell: "0/0",
+    id: A,
+    reason:
+      'options.stepExpression is empty while options.stepProgression is "expression", which a description cannot express',
+    path: "options.stepExpression",
+    area: "button option",
+    item: "options.stepExpression (empty, with expression progression)",
+  },
+  {
     label: "a step name",
     change: control(A, (value) => {
       (stepOf(value)["options"] as Json)["name"] = "First";

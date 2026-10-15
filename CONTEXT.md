@@ -45,8 +45,14 @@ A control placed at a location. In 5.1 its type is `button-layered`: a style mad
 **Step**:
 One state of a button, holding its own action sets. Pressing advances to the next step when step progression is `auto`.
 
+**Step progression**:
+How a button moves between its steps: `auto` (each press advances), `manual` (only actions change the step) or `expression` (a step expression picks the step). Written `progression` in a description.
+
 **Action set**:
-The list of actions a step runs for one input: `down`, `up`, `rotate_left` or `rotate_right`.
+The list of actions a step runs for one input: `down`, `up`, `rotate_left`, `rotate_right`, or a hold set.
+
+**Hold set**:
+An action set keyed by a duration in milliseconds, run when the button has been held that long: on release, or while still held when the duration is in the step's `runWhileHeld` list. Written as a `hold` entry (`after`, `whileHeld`, `actions`) in a description.
 
 **Action**:
 One operation run by a button or trigger, identified by a connection id and a definition id (for example `internal` / `custom_variable_set_value`).
