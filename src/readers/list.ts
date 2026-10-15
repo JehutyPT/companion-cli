@@ -119,10 +119,15 @@ export function listingJson<Item>(
   });
 }
 
-/** A `list <kind>` command: reads once, then renders as text or JSON. */
+/**
+ * A read command (`list <kind>`, `export <kind>`): reads once, then renders
+ * as text or JSON.
+ */
 export interface ListCommand {
   /** Kind-specific boolean options, without `--`. */
   readonly flags: readonly string[];
+  /** A usage reason when the name arguments are wrong for this command. */
+  checkArgs?(args: readonly string[]): string | undefined;
   run(request: ListRequest): Promise<{ text(): string[]; json(): string }>;
 }
 

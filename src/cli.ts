@@ -13,6 +13,7 @@ import {
   validate,
   validationJson,
 } from "./core/validate-command.ts";
+import { EXPORT_SYNOPSES, exportCommands } from "./export/index.ts";
 import { listCommands } from "./readers/index.ts";
 import type { ListCommand } from "./readers/list.ts";
 import {
@@ -140,6 +141,7 @@ const SYNOPSES = [
   APPLY_SYNOPSIS,
   VALIDATE_SYNOPSIS,
   LIST_SYNOPSIS,
+  ...EXPORT_SYNOPSES,
   SCHEMA_SYNOPSIS,
   ...REST_TABLE.map(synopsis),
 ];
@@ -171,6 +173,10 @@ export const HELP = [
   "Connection configuration and secrets are never printed. A pattern is a",
   "case-sensitive glob over the whole name or label (* any",
   "run of characters, ? one character); several patterns list their union.",
+  "export prints stored content as a description file (YAML, or JSON with",
+  "--json) that apply accepts; applying it unchanged changes nothing. It",
+  "refuses, printing nothing, any item the format cannot express exactly,",
+  "naming the stored field (see docs/support-matrix.md).",
   "Read commands read a temporary copy of the database: they write nothing,",
   "never stop or start Companion and work while it runs. --json prints one",
   "JSON document, and any failure as one JSON error document on stdout.",
@@ -236,6 +242,7 @@ export async function run(
 /** Read-only commands (no database writes), with JSON errors under `--json`. */
 const READ_COMMANDS: ReadonlySet<string> = new Set([
   "list",
+  "export",
   "validate",
   "schema",
 ]);
@@ -322,7 +329,7 @@ interface ReadCommandLine {
   flags: ReadonlySet<string>;
 }
 
-/** Parses a `list` command line. Throws a `usage` CliError on a bad one. */
+/** Parses a `list` or `export` command line. Throws a `usage` CliError on a bad one. */
 function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
   let parsed;
   try {
@@ -344,27 +351,28 @@ function parseRead(argv: readonly string[]): ReadCommandLine | "help" {
   }
   const { values, positionals } = parsed;
   if (values.help) return "help";
-  const [, kind, ...patterns] = positionals;
-  const expected = LIST_KINDS.join(" or ");
+  const [verb = "", kind, ...patterns] = positionals;
+  const commands = verb === "export" ? exportCommands : listCommands;
+  const expected = Object.keys(commands).join(" or ");
   if (kind === undefined) {
-    throw usageFailure(`list needs a kind (${expected})`);
+    throw usageFailure(`${verb} needs a kind (${expected})`);
   }
-  const command = Object.hasOwn(listCommands, kind)
-    ? listCommands[kind]
-    : undefined;
+  const command = Object.hasOwn(commands, kind) ? commands[kind] : undefined;
   if (command === undefined) {
-    throw usageFailure(`unknown list kind "${kind}" (expected ${expected})`);
+    throw usageFailure(`unknown ${verb} kind "${kind}" (expected ${expected})`);
   }
   if (patterns.includes("")) {
     throw usageFailure("a name pattern must not be empty");
   }
+  const argsProblem = command.checkArgs?.(patterns);
+  if (argsProblem !== undefined) throw usageFailure(argsProblem);
   if (values.db === "") throw usageFailure("--db needs a path");
   const flags = new Set(
     LIST_FLAGS.filter((flag) => (values as Record<string, unknown>)[flag]),
   );
   for (const flag of flags) {
     if (!command.flags.includes(flag)) {
-      throw usageFailure(`--${flag} is not valid with list ${kind}`);
+      throw usageFailure(`--${flag} is not valid with ${verb} ${kind}`);
     }
   }
   return { command, patterns, db: values.db, flags };

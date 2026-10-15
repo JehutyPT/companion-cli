@@ -106,6 +106,11 @@ export const KIND_SCHEMAS: Record<DescriptionKind, KindSchema> = {
     examples: trigger.EXAMPLES,
     fields: trigger.FIELD_SCHEMAS,
   },
+  triggers: {
+    doc: trigger.TRIGGERS_DOC,
+    examples: trigger.TRIGGERS_EXAMPLES,
+    fields: trigger.TRIGGERS_FIELD_SCHEMAS,
+  },
 };
 
 /** A `oneOf` over a table of tagged kinds, each discriminated by `tag`. */
@@ -203,6 +208,9 @@ function defs(): Record<string, unknown> {
       description:
         "The style fields a feedback overrides; at least one. The others keep the button's own style.",
       minProperties: 1,
+    }),
+    triggerBody: objectSchema(trigger.FIELD_SCHEMAS, {
+      description: "One trigger: every `kind: trigger` field, without `kind`.",
     }),
     event: taggedSchema(
       "event",

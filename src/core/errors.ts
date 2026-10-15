@@ -17,6 +17,7 @@ export const ERROR_CODES = [
   "backup_failed",
   "write_failed",
   "restart_failed",
+  "export_unsupported",
   "unexpected",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

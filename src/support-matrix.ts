@@ -331,6 +331,12 @@ export const SUPPORT_MATRIX: readonly MatrixRow[] = [
   // Triggers
   supported("trigger", "events", ["trigger.events"]),
   supported("trigger", "actions", ["trigger.actions"]),
+  supported(
+    "trigger",
+    "several triggers in one file",
+    ["kind: triggers", "triggers.triggers"],
+    "each entry is a `kind: trigger` body; `export triggers` writes one",
+  ),
 
   // Trigger options
   supported("trigger option", "options.name", ["trigger.name"], "the identity"),
@@ -434,9 +440,9 @@ const HEADER = `# Support matrix
 
 What the description format covers of what Companion 5.1 stores. Export and apply cover the same surface ([ADR 0006](adr/0006-export-apply-symmetry.md)), and \`npm test\` fails when this file disagrees with the writers or omits an item from Companion's own lists.
 
-- **supported**: apply writes it, and export (#18, #19, not yet built) reads it back. *Field* is the description field (\`action: set.value\` is the \`value\` field of an \`action: set\` entry); a supported row without one is a value the writers keep or always write.
+- **supported**: apply writes it, and export reads it back (custom variables and triggers today; pages and buttons with #19). *Field* is the description field (\`action: set.value\` is the \`value\` field of an \`action: set\` entry); a supported row without one is a value the writers keep or always write.
 - **planned**: not in the format yet; the ticket adds it.
-- **unsupported**: not planned. Apply never writes it, export (once built) refuses content that has it, and \`list\` and \`find\` still show it.
+- **unsupported**: not planned. Apply never writes it, export refuses content that has it, and \`list\` and \`find\` still show it.
 
 An export refusal names the stored field it cannot express; this file says whether that field is planned.
 `;

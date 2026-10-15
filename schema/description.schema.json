@@ -356,6 +356,69 @@
         "events"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: triggers",
+      "description": "Creates or replaces several triggers in one apply, each exactly as a `kind: trigger` file would. Triggers the file does not name are untouched.",
+      "examples": [
+        {
+          "kind": "triggers",
+          "triggers": [
+            {
+              "name": "Reset counter",
+              "events": [
+                {
+                  "event": "startup",
+                  "delay": 0
+                }
+              ],
+              "actions": [
+                {
+                  "action": "set",
+                  "variable": "fx_counter",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "name": "Tick",
+              "events": [
+                {
+                  "event": "interval",
+                  "seconds": 5
+                }
+              ],
+              "actions": [
+                {
+                  "action": "increment",
+                  "variable": "fx_counter"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "triggers"
+        },
+        "triggers": {
+          "description": "The triggers to create or replace, in order. At least one; names must be distinct.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/triggerBody"
+          },
+          "minItems": 1,
+          "$comment": "Not expressible here: names must be distinct."
+        }
+      },
+      "required": [
+        "kind",
+        "triggers"
+      ],
+      "additionalProperties": false
     }
   ],
   "$defs": {
@@ -901,6 +964,43 @@
           "$ref": "#/$defs/text"
         }
       },
+      "additionalProperties": false
+    },
+    "triggerBody": {
+      "type": "object",
+      "description": "One trigger: every `kind: trigger` field, without `kind`.",
+      "properties": {
+        "name": {
+          "description": "The trigger's name, which identifies it: a trigger with this name is replaced under its id, keeping its order and collection; otherwise one is created.",
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "description": "Whether the trigger runs.",
+          "type": "boolean",
+          "default": true
+        },
+        "events": {
+          "description": "What starts the trigger. At least one.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "minItems": 1
+        },
+        "actions": {
+          "description": "The actions the trigger runs, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "name",
+        "events"
+      ],
       "additionalProperties": false
     },
     "event": {

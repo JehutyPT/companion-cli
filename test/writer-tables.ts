@@ -19,6 +19,7 @@ import { FIELDS as PAGE_FIELDS } from "../src/writers/page.ts";
 import {
   EVENT_KINDS,
   FIELDS as TRIGGER_FIELDS,
+  TRIGGERS_FIELDS,
 } from "../src/writers/trigger.ts";
 import {
   TOP_LEVEL_FIELDS as VARIABLES_FIELDS,
@@ -37,6 +38,7 @@ export interface WriterTables {
   stepFields: readonly string[];
   pageFields: readonly string[];
   triggerFields: readonly string[];
+  triggersFields: readonly string[];
   variablesFields: readonly string[];
   variableFields: readonly string[];
 }
@@ -52,6 +54,7 @@ export const WRITER_TABLES: WriterTables = {
   stepFields: ACTION_SETS,
   pageFields: PAGE_FIELDS,
   triggerFields: TRIGGER_FIELDS,
+  triggersFields: TRIGGERS_FIELDS,
   variablesFields: VARIABLES_FIELDS,
   variableFields: VARIABLE_FIELDS,
 };
@@ -73,6 +76,7 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("steps[]", tables.stepFields),
     ...under("page", tables.pageFields),
     ...under("trigger", tables.triggerFields),
+    ...under("triggers", tables.triggersFields),
     ...under("variables", tables.variablesFields),
     ...under("variables[]", tables.variableFields),
     ...tagged("action", tables.actionKinds),

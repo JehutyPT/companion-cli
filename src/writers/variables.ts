@@ -167,14 +167,14 @@ export function parseVariables(fields: Fields): CustomVariable[] {
 }
 
 /** What the writer needs from an existing `custom_variables` row. */
-interface StoredVariable {
+export interface StoredVariable {
   sortOrder: number | undefined;
   /** The stored `defaultValue`, when the row is persisted and has one. */
   persistedValue: { value: unknown } | undefined;
 }
 
 /** Reads a stored row's JSON, tolerating Companion's NUMERIC-affinity `value` column. */
-function readStored(value: unknown): StoredVariable {
+export function readStored(value: unknown): StoredVariable {
   const parsed = parseStoredJson(value);
   if (!parsed || typeof parsed !== "object") {
     return { sortOrder: undefined, persistedValue: undefined };
@@ -187,6 +187,28 @@ function readStored(value: unknown): StoredVariable {
       row["persistCurrentValue"] === true && Object.hasOwn(row, "defaultValue")
         ? { value: row["defaultValue"] }
         : undefined,
+  };
+}
+
+/**
+ * The stored `custom_variables` value for a variable: what both apply and
+ * export build. `stored` is the existing row, if any; `nextSortOrder` gives
+ * a new variable its sort order.
+ */
+export function buildVariableRow(
+  variable: CustomVariable,
+  stored: StoredVariable | undefined,
+  nextSortOrder: () => number,
+): Record<string, unknown> {
+  // Already persisted and staying persisted: keep Companion's current value.
+  const kept = variable.persistCurrentValue
+    ? stored?.persistedValue
+    : undefined;
+  return {
+    description: variable.description,
+    defaultValue: kept ? kept.value : variable.defaultValue,
+    persistCurrentValue: variable.persistCurrentValue,
+    sortOrder: stored?.sortOrder ?? nextSortOrder(),
   };
 }
 
@@ -215,16 +237,9 @@ export function writeVariables(
   let replaced = 0;
   for (const variable of variables) {
     const stored = existing.get(variable.name);
-    // Already persisted and staying persisted: keep Companion's current value.
-    const kept = variable.persistCurrentValue
-      ? stored?.persistedValue
-      : undefined;
-    const value = JSON.stringify({
-      description: variable.description,
-      defaultValue: kept ? kept.value : variable.defaultValue,
-      persistCurrentValue: variable.persistCurrentValue,
-      sortOrder: stored?.sortOrder ?? next++,
-    });
+    const value = JSON.stringify(
+      buildVariableRow(variable, stored, () => next++),
+    );
     if (stored) {
       update.run(value, variable.name);
       replaced++;

@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -175,6 +175,20 @@ actions:                                   # optional, default []; the same acti
 
 A trigger with the same name (compared exactly) is replaced under its control id, keeping its position in the trigger list and its collection (if that collection is disabled in Companion, the trigger does not run even with `enabled: true`; a collection that no longer exists is dropped by Companion at startup); everything else in it is replaced, including its notes and any condition. Otherwise a new trigger is added after the others. Two existing triggers with the name refuse the apply. Every variable an event watches or an action uses must already exist. Conditions, other event types and local variables are not supported; `condition` and any other unknown field are refused.
 
+`triggers.yaml` creates or replaces several triggers in one apply:
+
+```yaml
+kind: triggers
+triggers:                                  # required, at least one
+  - name: Reset counter                    # each entry is a kind: trigger body, without kind
+    events: [ { event: startup, delay: 0 } ]
+  - name: Tick
+    events: [ { event: interval, seconds: 5 } ]
+    actions: [ { action: increment, variable: sk_presses } ]
+```
+
+Each entry is validated, checked and written exactly as a `kind: trigger` file, in list order and in one transaction, so new triggers are added in that order. Errors name the entry, for example `triggers[1].events[0].seconds`. Two entries with the same name are refused. Triggers the file does not name are untouched.
+
 Applying a variable replaces its definition, with one exception. Companion keeps a persisted variable's current value in `defaultValue`, so when a variable is already persisted and the file still says `persist: true`, its stored value is kept. A new variable, `persist: false`, or switching persist on takes the file's `default`.
 
 ### Validate
@@ -234,7 +248,17 @@ A read command copies the database and its WAL files to a temporary directory, c
 {"database": "...", "variables": [{"name": "fx_counter", "defaultValue": 0, "currentValue": "3", "persistCurrentValue": false, "description": "Counter", "sortOrder": 0}], "values": "live"}
 ```
 
-**Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
+**Name patterns.** Every name argument is a case-sensitive glob over the whole name: `*` matches any run of characters and `?` exactly one; nothing else is special. A pattern without `*` or `?` is an exact name. Several patterns list their union, and for `list` no match prints only the header (or an empty list) with exit 0. Quote patterns so the shell does not expand them.
+
+**Export.** `export` prints stored content as a description file that `apply` accepts, on the same snapshot read path ([ADR 0006](docs/adr/0006-export-apply-symmetry.md)):
+
+```sh
+companion-cli export variables ['fx_*' ...]       # kind: variables
+companion-cli export trigger 'Reset counter'      # kind: trigger, one exact name
+companion-cli export triggers ['Reset*' ...]      # kind: triggers
+```
+
+The YAML starts with two comment lines, the [schema](#schema-and-editor-setup) modeline and `# companion-cli export: <kind> (<count>)`; `--json` prints the same description as one JSON document. Variables come in sort order, then name, with all four fields; triggers in sort order, then id. The round-trip promise: applying an export to the same database changes nothing (`apply --dry-run` reports `no changes`, generated ids aside), and exporting again prints the same bytes. Each item is proved before it is printed: the writer's own parse, check and build must reproduce the stored row. Anything the description format cannot express (a condition, a disabled event, an expression option in a pass-through action, notes, local variables, …) refuses the item with `export_unsupported`, naming the stored field and the [support matrix](docs/support-matrix.md) area in `hint`; a stored item that apply's checks would refuse (a trigger watching a deleted variable, two selected triggers with one name) fails with `check_failed`. Export is all or nothing: if any selected item is refused, nothing is printed, and with several refusals `items` lists each. With no patterns every item is exported; an exact name that matches nothing, patterns matching nothing, or nothing to export at all is `not_found`.
 
 **Errors.** Without `--json` a failure is one `error: <message>` line on stderr, exit 1 (exit 2 for a bad command line). With `--json` anywhere on a read command's line, every failure, a bad command line included, is instead one document on stdout and nothing on stderr, with the same exit code:
 
@@ -242,7 +266,7 @@ A read command copies the database and its WAL files to a temporary directory, c
 {"error": {"code": "database_not_found", "message": "database not found: /path/db.sqlite", "hint": "pass --db <path>, or check that Companion 5.1 has been run once"}}
 ```
 
-`message` is the stderr line without `error: `. `path` (a description field path) and `hint` (the next step) appear when they apply. `items` (one entry per refused item, when a command refuses several) is reserved for later commands. `backup` is the backup directory when an `apply` failed after taking one, and `committed: true` says the write was committed before the failure (`restart_failed`): do not retry it. Codes are stable: new ones may be added, none is renamed or removed.
+`message` is the stderr line without `error: `. `path` (a description field path; for `export`, the refused item's stored field) and `hint` (the next step) appear when they apply. `items` is a list of `{message, path}`, one per refused item, when `export` refuses several. `backup` is the backup directory when an `apply` failed after taking one, and `committed: true` says the write was committed before the failure (`restart_failed`): do not retry it. Codes are stable: new ones may be added, none is renamed or removed.
 
 | Code | When |
 | --- | --- |
@@ -260,6 +284,7 @@ A read command copies the database and its WAL files to a temporary directory, c
 | `backup_failed` | `apply`: the backup could not be written; nothing written |
 | `write_failed` | `apply`: the database could not be opened for writing, or the write or its integrity check failed and was rolled back; nothing committed. `backup` is set (a dry run has neither `backup` nor a hint). If the rollback also failed the hint says to restore from the backup |
 | `restart_failed` | `apply`: the write committed but Companion did not start again; `committed: true` and `backup` are set |
+| `export_unsupported` | `export` met stored content the description format cannot express; `hint` names the support-matrix area |
 | `unexpected` | anything else: a bug in the tool |
 
 `apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code, and its hint says to start Companion manually and, for `write_failed`, repeats what the original hint said about the database. The REST commands keep their plain stderr errors for now.

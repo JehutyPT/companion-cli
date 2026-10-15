@@ -36,6 +36,7 @@ import {
   checkVariablesExist,
   nextSortOrder,
   parseVariableName,
+  plural,
   type TaggedKind,
   taggedKind,
   type TaggedSpec,
@@ -180,20 +181,34 @@ actions:
 `,
 ];
 
-function parseTrigger(fields: Fields): TriggerPlan {
-  rejectUnknownFields(fields, FIELDS, "");
-  const name = expectNonEmptyString(requireField(fields, "name", ""), "name");
+/**
+ * Parses one trigger body (a `kind: trigger` description without `kind`).
+ * `parent` is the body's path: "" for a `kind: trigger` file, `triggers[2]`
+ * for an entry of a `kind: triggers` file.
+ */
+export function parseTrigger(fields: Fields, parent = ""): TriggerPlan {
+  rejectUnknownFields(fields, FIELDS, parent);
+  const name = expectNonEmptyString(
+    requireField(fields, "name", parent),
+    fieldPath(parent, "name"),
+  );
   const enabled = Object.hasOwn(fields, "enabled")
-    ? expectBoolean(fields["enabled"], "enabled")
+    ? expectBoolean(fields["enabled"], fieldPath(parent, "enabled"))
     : true;
-  const list = expectList(requireField(fields, "events", ""), "events");
+  const eventsPath = fieldPath(parent, "events");
+  const list = expectList(requireField(fields, "events", parent), eventsPath);
   if (list.length === 0)
-    throw new ValidationError("events", "must list at least one event");
+    throw new ValidationError(eventsPath, "must list at least one event");
   const events = list.map((item, index) => {
-    const path = fieldPath("events", index);
+    const path = fieldPath(eventsPath, index);
     return EVENTS.parse(expectMapping(item, path), path, undefined);
   });
-  return { name, enabled, events, actions: parseActionList(fields, "actions") };
+  return {
+    name,
+    enabled,
+    events,
+    actions: parseActionList(fields, "actions", parent),
+  };
 }
 
 /** A `controls` row Companion loads as a trigger: a JSON object of type "trigger". */
@@ -239,13 +254,16 @@ interface Target {
   nextSortOrder: number;
 }
 
-/** Finds the trigger with the name, refusing when several have it. */
-function readTarget(db: DatabaseSync, name: string): Target {
+/**
+ * Finds the trigger with the name, refusing when several have it. `path` is
+ * the description field holding the name.
+ */
+function readTarget(db: DatabaseSync, name: string, path = "name"): Target {
   const triggers = readTriggers(db);
   const named = triggers.filter((trigger) => trigger.options["name"] === name);
   if (named.length > 1) {
     throw new CheckError(
-      "name",
+      path,
       `${named.length} triggers with the same name ${JSON.stringify(name)} (${named
         .map((trigger) => trigger.id)
         .sort()
@@ -261,23 +279,39 @@ function readTarget(db: DatabaseSync, name: string): Target {
   };
 }
 
-function checkTrigger(db: DatabaseSync, plan: TriggerPlan): void {
+/** The writer's checks for one trigger body at `parent` ("" or `triggers[2]`). */
+export function checkTrigger(
+  db: DatabaseSync,
+  plan: TriggerPlan,
+  parent = "",
+): void {
+  const eventsPath = fieldPath(parent, "events");
   checkVariablesExist(db, [
     ...plan.events.flatMap((spec, index) =>
-      EVENTS.references(spec, fieldPath("events", index)),
+      EVENTS.references(spec, fieldPath(eventsPath, index)),
     ),
-    ...actionVariableReferences(plan.actions, "actions"),
+    ...actionVariableReferences(plan.actions, fieldPath(parent, "actions")),
   ]);
-  readTarget(db, plan.name);
+  readTarget(db, plan.name, fieldPath(parent, "name"));
 }
 
-function writeTrigger(db: DatabaseSync, plan: TriggerPlan): string {
-  const { existing, nextSortOrder } = readTarget(db, plan.name);
-  const kept = existing?.options ?? {};
-  const sortOrder =
-    typeof kept["sortOrder"] === "number" ? kept["sortOrder"] : nextSortOrder;
-  const collectionId = kept["collectionId"];
-  const value = JSON.stringify({
+/** What a replace keeps from the stored trigger's options. */
+export interface KeptTriggerOptions {
+  sortOrder: number;
+  /** Kept when set; `undefined` and `null` are left out. */
+  collectionId: unknown;
+}
+
+/**
+ * The stored trigger control for a plan: what both apply and export build.
+ * Event and action ids are fresh (ADR 0005 masks them when comparing).
+ */
+export function buildTriggerControl(
+  plan: TriggerPlan,
+  kept: KeptTriggerOptions,
+): Fields {
+  const { sortOrder, collectionId } = kept;
+  return {
     type: "trigger",
     options: {
       name: plan.name,
@@ -295,24 +329,137 @@ function writeTrigger(db: DatabaseSync, plan: TriggerPlan): string {
       return { id: newId(), type, enabled: true, options };
     }),
     localVariables: [],
-  });
+  };
+}
+
+/**
+ * Writes one trigger at `parent` ("" or `triggers[2]`); returns its control
+ * id and whether it was created.
+ */
+function writeOne(
+  db: DatabaseSync,
+  plan: TriggerPlan,
+  parent = "",
+): { id: string; created: boolean } {
+  const { existing, nextSortOrder } = readTarget(
+    db,
+    plan.name,
+    fieldPath(parent, "name"),
+  );
+  const kept = existing?.options ?? {};
+  const value = JSON.stringify(
+    buildTriggerControl(plan, {
+      sortOrder:
+        typeof kept["sortOrder"] === "number"
+          ? kept["sortOrder"]
+          : nextSortOrder,
+      collectionId: kept["collectionId"],
+    }),
+  );
 
   if (existing) {
     db.prepare("UPDATE controls SET value = ? WHERE id = ?").run(
       value,
       existing.id,
     );
-    return `trigger ${JSON.stringify(plan.name)}: replaced ${existing.id}`;
+    return { id: existing.id, created: false };
   }
   const id = freshId((candidate) => controlExists(db, candidate), "trigger:");
   db.prepare("INSERT INTO controls (id, value) VALUES (?, ?)").run(id, value);
-  return `trigger ${JSON.stringify(plan.name)}: created ${id}`;
+  return { id, created: true };
+}
+
+function writeTrigger(db: DatabaseSync, plan: TriggerPlan): string {
+  const { id, created } = writeOne(db, plan);
+  return `trigger ${JSON.stringify(plan.name)}: ${created ? "created" : "replaced"} ${id}`;
 }
 
 export const triggerWriter: Writer<TriggerPlan> = {
   kind: "trigger",
-  parse: parseTrigger,
-  check: checkTrigger,
+  parse: (fields) => parseTrigger(fields),
+  check: (db, plan) => checkTrigger(db, plan),
   describe: (plan) => `trigger ${JSON.stringify(plan.name)}`,
   write: writeTrigger,
+};
+
+/**
+ * Triggers writer: creates or replaces several triggers in one apply.
+ *
+ *   kind: triggers
+ *   triggers:                  # required, non-empty
+ *     - name: Reset counter    # each entry is a `kind: trigger` body
+ *       events: [ { event: startup } ]
+ *
+ * Each entry is parsed, checked and written exactly as a `kind: trigger`
+ * file, in list order and in the pipeline's one transaction, so new triggers
+ * get increasing sort orders. Two entries with the same name are refused.
+ * Triggers the file does not name are untouched.
+ */
+export const TRIGGERS_FIELDS = ["triggers"] as const;
+
+export const TRIGGERS_FIELD_SCHEMAS: Record<
+  (typeof TRIGGERS_FIELDS)[number],
+  FieldSchema
+> = {
+  triggers: requiredField(
+    "The triggers to create or replace, in order. At least one; names must be distinct.",
+    list(ref("triggerBody"), {
+      minItems: 1,
+      $comment: "Not expressible here: names must be distinct.",
+    }),
+  ),
+};
+
+/** What a triggers file does: the kind's `description` in the schema. */
+export const TRIGGERS_DOC =
+  "Creates or replaces several triggers in one apply, each exactly as a `kind: trigger` file would. Triggers the file does not name are untouched.";
+
+/** YAML examples of a triggers file, as the schema shows them. */
+export const TRIGGERS_EXAMPLES = [
+  `kind: triggers
+triggers:
+  - name: Reset counter
+    events: [ { event: startup, delay: 0 } ]
+    actions: [ { action: set, variable: fx_counter, value: 0 } ]
+  - name: Tick
+    events: [ { event: interval, seconds: 5 } ]
+    actions: [ { action: increment, variable: fx_counter } ]
+`,
+];
+
+export function parseTriggers(fields: Fields): TriggerPlan[] {
+  rejectUnknownFields(fields, TRIGGERS_FIELDS, "");
+  const list = expectList(requireField(fields, "triggers", ""), "triggers");
+  if (list.length === 0)
+    throw new ValidationError("triggers", "must list at least one trigger");
+  const seen = new Map<string, string>();
+  return list.map((item, index) => {
+    const path = fieldPath("triggers", index);
+    const plan = parseTrigger(expectMapping(item, path), path);
+    const first = seen.get(plan.name);
+    if (first !== undefined)
+      throw new ValidationError(
+        fieldPath(path, "name"),
+        `duplicate trigger name ${JSON.stringify(plan.name)} (also at ${first})`,
+      );
+    seen.set(plan.name, path);
+    return plan;
+  });
+}
+
+export const triggersWriter: Writer<TriggerPlan[]> = {
+  kind: "triggers",
+  parse: parseTriggers,
+  describe: (plans) => plural(plans.length, "trigger"),
+  check: (db, plans) =>
+    plans.forEach((plan, index) =>
+      checkTrigger(db, plan, fieldPath("triggers", index)),
+    ),
+  write: (db, plans) => {
+    let created = 0;
+    plans.forEach((plan, index) => {
+      if (writeOne(db, plan, fieldPath("triggers", index)).created) created++;
+    });
+    return `triggers: ${created} created, ${plans.length - created} replaced`;
+  },
 };

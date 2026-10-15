@@ -10,6 +10,7 @@ export const DESCRIPTION_KINDS = [
   "button",
   "page",
   "trigger",
+  "triggers",
 ] as const;
 export type DescriptionKind = (typeof DESCRIPTION_KINDS)[number];
 
