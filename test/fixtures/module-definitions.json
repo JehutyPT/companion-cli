@@ -1,0 +1,452 @@
+{
+  "actions": {
+    "internal": {
+      "wait": {
+        "label": "Wait",
+        "description": "Wait for a specified amount of time",
+        "options": [
+          {
+            "type": "expression",
+            "label": "Time expression (ms)",
+            "id": "time",
+            "default": "1000",
+            "disableAutoExpression": true,
+            "allowInvalidValues": true
+          }
+        ],
+        "hasLearn": false,
+        "optionsSupportExpressions": true,
+        "sortKey": null,
+        "hasLifecycleFunctions": false,
+        "actionHasResult": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "entityType": "action",
+        "showInvert": false,
+        "feedbackType": null,
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsToMonitorForInvalidations": null
+      },
+      "custom_log": {
+        "label": "Write to companion log",
+        "options": [
+          {
+            "type": "textinput",
+            "label": "Message",
+            "id": "message",
+            "useVariables": "internalParser"
+          }
+        ],
+        "optionsSupportExpressions": true,
+        "sortKey": null,
+        "hasLifecycleFunctions": false,
+        "hasLearn": false,
+        "actionHasResult": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "entityType": "action",
+        "showInvert": false,
+        "feedbackType": null,
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsToMonitorForInvalidations": null
+      }
+    },
+    "mixer-conn-id-1": {
+      "busMute": {
+        "entityType": "action",
+        "label": "Bus - Mute",
+        "sortKey": null,
+        "description": "Mutes the specified Bus",
+        "options": [
+          {
+            "id": "bus",
+            "label": "Bus",
+            "expressionDescription": "Valid Values: 'A1' to 'B3', or 'Selected'",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": "A1",
+            "choices": [
+              {
+                "id": "A1",
+                "label": "A1"
+              },
+              {
+                "id": "A2",
+                "label": "A2"
+              },
+              {
+                "id": "A3",
+                "label": "A3"
+              },
+              {
+                "id": "A4",
+                "label": "A4"
+              },
+              {
+                "id": "A5",
+                "label": "A5"
+              },
+              {
+                "id": "B1",
+                "label": "B1"
+              },
+              {
+                "id": "B2",
+                "label": "B2"
+              },
+              {
+                "id": "B3",
+                "label": "B3"
+              },
+              {
+                "id": "Selected",
+                "label": "Selected"
+              }
+            ]
+          },
+          {
+            "id": "type",
+            "label": "Type",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": "Toggle",
+            "choices": [
+              {
+                "id": "Toggle",
+                "label": "Toggle"
+              },
+              {
+                "id": "Mute",
+                "label": "Mute"
+              },
+              {
+                "id": "Unmute",
+                "label": "Unmute"
+              }
+            ]
+          }
+        ],
+        "optionsToMonitorForInvalidations": null,
+        "hasLifecycleFunctions": false,
+        "hasLearn": false,
+        "actionHasResult": false,
+        "showInvert": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "feedbackType": null,
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsSupportExpressions": true
+      },
+      "recorderGain": {
+        "entityType": "action",
+        "label": "Recorder - Gain",
+        "sortKey": null,
+        "description": "Set Recorder Gain",
+        "options": [
+          {
+            "id": "value",
+            "label": "Volume",
+            "description": "-60 to 12",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "number",
+            "default": 0,
+            "min": -60,
+            "max": 12,
+            "width": 0,
+            "allowNull": false
+          }
+        ],
+        "optionsToMonitorForInvalidations": null,
+        "hasLifecycleFunctions": false,
+        "hasLearn": false,
+        "actionHasResult": false,
+        "showInvert": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "feedbackType": null,
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsSupportExpressions": true
+      },
+      "stripGain": {
+        "entityType": "action",
+        "label": "Strip - Gain",
+        "sortKey": null,
+        "description": "Control the Gain on a Strip",
+        "options": [
+          {
+            "id": "strip",
+            "label": "Strip",
+            "expressionDescription": "Valid Values: 1 to 8, or 'Selected'",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": 1,
+            "choices": [
+              {
+                "id": "Selected",
+                "label": "Selected"
+              }
+            ]
+          },
+          {
+            "id": "adjustment",
+            "label": "Adjustment",
+            "expressionDescription": "Valid Values: 'Set', 'Increase', or 'Decrease'",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": "Set",
+            "choices": [
+              {
+                "id": "Set",
+                "label": "Set"
+              },
+              {
+                "id": "Increase",
+                "label": "Increase"
+              },
+              {
+                "id": "Decrease",
+                "label": "Decrease"
+              }
+            ]
+          },
+          {
+            "id": "fade",
+            "label": "Fade time in ms",
+            "description": "0 for instant",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "number",
+            "default": 0,
+            "min": 0,
+            "max": 60000,
+            "step": 1,
+            "width": 0,
+            "allowNull": false
+          },
+          {
+            "id": "value",
+            "label": "Gain",
+            "description": "-60 to +12 dB",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "number",
+            "default": 0,
+            "min": -60,
+            "max": 12,
+            "width": 0,
+            "allowNull": false
+          }
+        ],
+        "optionsToMonitorForInvalidations": null,
+        "hasLifecycleFunctions": false,
+        "hasLearn": false,
+        "actionHasResult": false,
+        "showInvert": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "feedbackType": null,
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsSupportExpressions": true
+      }
+    }
+  },
+  "feedbacks": {
+    "internal": {
+      "trigger_enabled": {
+        "feedbackType": "boolean",
+        "label": "Trigger: When enabled or disabled",
+        "feedbackStyle": {
+          "color": 16777215,
+          "bgcolor": 16711680
+        },
+        "showInvert": true,
+        "options": [
+          {
+            "type": "internal:trigger",
+            "label": "Trigger",
+            "id": "trigger_id"
+          },
+          {
+            "type": "dropdown",
+            "label": "Enable",
+            "id": "enable",
+            "default": "true",
+            "choices": [
+              {
+                "id": "true",
+                "label": "Yes"
+              },
+              {
+                "id": "false",
+                "label": "No"
+              }
+            ]
+          }
+        ],
+        "optionsSupportExpressions": false,
+        "sortKey": null,
+        "hasLifecycleFunctions": false,
+        "hasLearn": false,
+        "entityType": "feedback",
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "optionsToMonitorForInvalidations": null
+      }
+    },
+    "mixer-conn-id-1": {
+      "busEQ": {
+        "entityType": "feedback",
+        "label": "Bus - EQ",
+        "sortKey": null,
+        "description": "Indicates EQ status on Bus",
+        "options": [
+          {
+            "id": "bus",
+            "label": "Bus",
+            "expressionDescription": "Valid Values: 'A1' to 'B3', or 'Selected'",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": "A1",
+            "choices": [
+              {
+                "id": "A1",
+                "label": "A1"
+              },
+              {
+                "id": "A2",
+                "label": "A2"
+              },
+              {
+                "id": "A3",
+                "label": "A3"
+              },
+              {
+                "id": "A4",
+                "label": "A4"
+              },
+              {
+                "id": "A5",
+                "label": "A5"
+              },
+              {
+                "id": "B1",
+                "label": "B1"
+              },
+              {
+                "id": "B2",
+                "label": "B2"
+              },
+              {
+                "id": "B3",
+                "label": "B3"
+              },
+              {
+                "id": "Selected",
+                "label": "Selected"
+              }
+            ]
+          }
+        ],
+        "optionsToMonitorForInvalidations": null,
+        "feedbackType": "boolean",
+        "feedbackStyle": {
+          "color": 0,
+          "bgcolor": 16711680
+        },
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "hasLifecycleFunctions": true,
+        "hasLearn": false,
+        "showInvert": true,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "optionsSupportExpressions": true
+      },
+      "busMeters": {
+        "entityType": "feedback",
+        "label": "Bus - Meters",
+        "sortKey": null,
+        "description": "Bus Volume Meters",
+        "options": [
+          {
+            "id": "bus",
+            "label": "Bus",
+            "expressionDescription": "Valid Values: 'A1' to 'B3', or 'Selected'",
+            "disableAutoExpression": false,
+            "allowInvalidValues": false,
+            "type": "dropdown",
+            "width": 0,
+            "default": "A1",
+            "choices": [
+              {
+                "id": "A1",
+                "label": "A1"
+              },
+              {
+                "id": "A2",
+                "label": "A2"
+              },
+              {
+                "id": "A3",
+                "label": "A3"
+              },
+              {
+                "id": "A4",
+                "label": "A4"
+              },
+              {
+                "id": "A5",
+                "label": "A5"
+              },
+              {
+                "id": "B1",
+                "label": "B1"
+              },
+              {
+                "id": "B2",
+                "label": "B2"
+              },
+              {
+                "id": "B3",
+                "label": "B3"
+              },
+              {
+                "id": "Selected",
+                "label": "Selected"
+              }
+            ]
+          }
+        ],
+        "optionsToMonitorForInvalidations": null,
+        "feedbackType": "advanced",
+        "feedbackAffectedProperties": ["imageBuffer"],
+        "feedbackDisableStyleOverrides": false,
+        "feedbackStyleOverridesUnsupported": false,
+        "hasLifecycleFunctions": true,
+        "hasLearn": false,
+        "showInvert": false,
+        "showButtonPreview": false,
+        "supportsChildGroups": [],
+        "optionsSupportExpressions": true
+      }
+    }
+  }
+}

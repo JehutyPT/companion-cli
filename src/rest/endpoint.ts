@@ -48,18 +48,42 @@ export function userEnvFile(env: Env, homedir: string): string {
  */
 export function loadEndpoint(env: Env, dirs: ConfigDirs): CompanionEndpoint {
   const file = readEnvFiles(env, dirs);
-  const value = (name: string): string => {
-    const text = env[name] ?? file[name];
-    if (!text) {
-      throw new EndpointNotSetError(
-        `${name} is not set: set it in ${ENV_FILE}, ${userEnvFile(env, dirs.homedir)} or the environment`,
-      );
-    }
-    return text;
+  const rawUrl = setting("COMPANION_URL", env, file, dirs);
+  const apiKey = setting("COMPANION_API_KEY", env, file, dirs);
+  const url = checkUrl(rawUrl);
+  return {
+    base: url.origin + url.pathname.replace(/\/+$/, ""),
+    origin: url.origin,
+    apiKey,
   };
-  const rawUrl = value("COMPANION_URL");
-  const apiKey = value("COMPANION_API_KEY");
+}
 
+/**
+ * `COMPANION_URL` alone, resolved and checked as `loadEndpoint` does, for a
+ * command that needs no API key (`schema --connection`'s socket).
+ */
+export function loadCompanionUrl(env: Env, dirs: ConfigDirs): URL {
+  return checkUrl(setting("COMPANION_URL", env, readEnvFiles(env, dirs), dirs));
+}
+
+/** A required setting from `env`, else from the env file's variables. */
+function setting(
+  name: string,
+  env: Env,
+  file: Record<string, string | undefined>,
+  dirs: ConfigDirs,
+): string {
+  const text = env[name] ?? file[name];
+  if (!text) {
+    throw new EndpointNotSetError(
+      `${name} is not set: set it in ${ENV_FILE}, ${userEnvFile(env, dirs.homedir)} or the environment`,
+    );
+  }
+  return text;
+}
+
+/** `COMPANION_URL` parsed: an http(s) URL on the local machine. */
+function checkUrl(rawUrl: string): URL {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -76,11 +100,7 @@ export function loadEndpoint(env: Env, dirs: ConfigDirs): CompanionEndpoint {
       `COMPANION_URL host "${url.hostname}" is not local: only a local Companion is allowed (localhost, 127.0.0.1 or [::1])`,
     );
   }
-  return {
-    base: url.origin + url.pathname.replace(/\/+$/, ""),
-    origin: url.origin,
-    apiKey,
-  };
+  return url;
 }
 
 /**

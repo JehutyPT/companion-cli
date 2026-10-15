@@ -18,6 +18,10 @@ export const ERROR_CODES = [
   "write_failed",
   "restart_failed",
   "export_unsupported",
+  "unsupported_companion_build",
+  "companion_build_unknown",
+  "companion_not_running",
+  "companion_timeout",
   "unexpected",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

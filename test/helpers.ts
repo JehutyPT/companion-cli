@@ -178,6 +178,9 @@ export async function runCli(
       ...options,
       homedir: options.homedir ?? tempDir(),
       processControl: options.processControl ?? STOPPED_PROCESS_CONTROL,
+      // Never the real /Applications bundle: a test that needs one passes it.
+      companionBuildFile:
+        options.companionBuildFile ?? join(tempDir(), "missing-BUILD"),
     },
   );
   return { code, stdout, stderr };

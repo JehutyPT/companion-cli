@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages`, `find` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages`, `find` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `schema --connection` lists a connection's module actions and feedbacks from the running Companion, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -309,6 +309,10 @@ The YAML starts with two comment lines, the [schema](#schema-and-editor-setup) m
 | `write_failed` | `apply`: the database could not be opened for writing, or the write or its integrity check failed and was rolled back; nothing committed. `backup` is set (a dry run has neither `backup` nor a hint). If the rollback also failed the hint says to restore from the backup |
 | `restart_failed` | `apply`: the write committed but Companion did not start again; `committed: true` and `backup` are set |
 | `export_unsupported` | `export` met stored content the description format cannot express; `hint` names the support-matrix area |
+| `unsupported_companion_build` | `schema --connection`: the Companion app in `/Applications` is not build `5.1.0+9981-stable-257b325d09`, or the running Companion answered the socket in a way 5.1 does not |
+| `companion_build_unknown` | `schema --connection`: the app's `Resources/BUILD` file is missing or unreadable |
+| `companion_not_running` | `schema --connection`: Companion's socket refused the connection or closed it before answering |
+| `companion_timeout` | `schema --connection`: Companion did not answer within 5 s |
 | `unexpected` | anything else: a bug in the tool |
 
 `apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code, and its hint says to start Companion manually and, for `write_failed`, repeats what the original hint said about the database. The REST commands keep their plain stderr errors for now.
@@ -333,6 +337,27 @@ or map files to it in VS Code's `settings.json`, by URL or by a path to a checko
   }
 }
 ```
+
+### Module actions and feedbacks: `schema --connection`
+
+`companion-cli schema --connection <label> [--json]` lists one connection's module actions and feedbacks with their options, to write pass-through actions and feedbacks (`action: passthrough` / `feedback: passthrough`). `--connection internal` lists Companion's built-in ones.
+
+```
+connection "mixer" (vb-voicemeeter 2.1.0, id 0ZnJ2…)
+actions (3):
+  busMute       "Bus - Mute"  options: bus dropdown=A1 [A1,A2,A3,A4,A5,…], type dropdown=Toggle [Toggle,Mute,Unmute]
+  recorderGain  "Recorder - Gain"  options: value number=0 (-60..12)
+feedbacks (1):
+  busEQ  boolean "Bus - EQ"  options: bus dropdown=A1 [A1,A2,A3,A4,A5,…]
+use: {action: passthrough, connection: 0ZnJ2…, definition: <id>, options: {…}}
+use: {feedback: passthrough, connection: 0ZnJ2…, definition: <id>, options: {…}}
+```
+
+Each option is `<id> <type>=<default>`, then up to five choice ids and `(min..max)` when it has them. `--json` gives `{connection: {id, label, moduleId, moduleVersionId}, build, actions: [{id, label, description, options: [{id, type, label, default, choices, min, max}]}], feedbacks: [{id, label, description, feedbackType, options}]}`, with only those fields.
+
+Modules send these definitions to Companion when they start, and Companion keeps them in memory only, so this is a runtime command: it needs Companion running and reads no database (`--db` is a usage error). It reads `COMPANION_URL` like the REST commands below (same files, same loopback rule) but needs no API key, and talks to Companion's local tRPC WebSocket (`/trpc`, unauthenticated), the one Companion's web UI uses. It only subscribes and stops its subscriptions, never sends a query or a change, and sends no `Origin` header. Connection configuration and secrets are never printed.
+
+That socket is a private API, so before connecting the command checks the Companion app's build in `/Applications/Companion.app/Contents/Resources/BUILD` and refuses anything but `5.1.0+9981-stable-257b325d09`. Known limitation: the app in `/Applications` may not be the copy that is running. See [docs/companion-internals.md](docs/companion-internals.md#module-definitions).
 
 ### Usage census
 

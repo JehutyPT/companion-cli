@@ -1,6 +1,6 @@
 # AGENTS.md
 
-A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command with the variable, button, page and trigger writers (`kind: trigger` and `kind: triggers`), its `--dry-run` report and `--json` output (results and errors), the read commands `list variables`, `list triggers`, `list connections` and `list pages`, `find`, `export variables`, `export trigger` and `export triggers` (round-tripping, ADR 0006), `schema`, the usage `census`, and the REST helper's runtime commands, exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
+A CLI that configures a local Bitfocus Companion 5.1 install from description files: buttons, pages, triggers and custom variables. It writes Companion's SQLite database with Companion stopped, because Companion has no API for authoring controls. Status: early; the `apply` command with the variable, button, page and trigger writers (`kind: trigger` and `kind: triggers`), its `--dry-run` report and `--json` output (results and errors), the read commands `list variables`, `list triggers`, `list connections` and `list pages`, `find`, `export variables`, `export trigger` and `export triggers` (round-tripping, ADR 0006), `schema` (with `schema --connection`, which reads module definitions from the running Companion), the usage `census`, and the REST helper's runtime commands, exist (TypeScript on Node 22.18+, `node:sqlite`, YAML descriptions; see [ADR 0003](docs/adr/0003-typescript-node-sqlite-and-yaml-descriptions.md)). See [README.md](README.md) for components and usage.
 
 ## Reference
 
@@ -17,7 +17,7 @@ A CLI that configures a local Bitfocus Companion 5.1 install from description fi
 - **Validate before writing.** Parse and validate the whole description file, including locations against the grid size, before opening the database for writing.
 - **Refuse unknown database versions.** Only `page_config_version` 17 (Companion 5.1) is supported. Anything else is an error, not a best-effort write.
 - **Local development installs only.** Never target a production or remote Companion.
-- **REST for runtime actions only.** Presses, rotations, variable reads and sets, and status go through the REST API. Authoring goes through the database.
+- **REST for runtime actions only.** Presses, rotations, variable reads and sets, and status go through the REST API; module definitions (`schema --connection`) through the tRPC socket, subscribe-only. Authoring goes through the database.
 - **Secrets in `.env.local`.** `COMPANION_URL` and `COMPANION_API_KEY` live there (gitignored). Never commit a key; `.env.example` holds the names only.
 - **Do not touch the user's real Companion database during development.** Work on copies. Ask before applying anything to the live install.
 

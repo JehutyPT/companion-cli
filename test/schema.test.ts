@@ -484,13 +484,10 @@ describe("companion-cli schema", () => {
     assert.equal(`${result.stdout.join("\n")}\n`, renderSchema());
   });
 
-  it("refuses --db without --connection as a usage error", async () => {
+  it("refuses --db as a usage error", async () => {
     const result = await runCli(["schema", "--db", "x.sqlite"]);
     assert.equal(result.code, 2);
-    assert.match(
-      result.stderr.join("\n"),
-      /--db is only valid with --connection/,
-    );
+    assert.match(result.stderr.join("\n"), /schema reads no database/);
   });
 
   it("reports usage errors as JSON under --json", async () => {

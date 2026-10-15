@@ -42,6 +42,11 @@ import {
   redact,
 } from "./rest/endpoint.ts";
 import { DEFAULT_REST_WAIT_MS, waitForRest } from "./rest/wait.ts";
+import {
+  connectionSchema,
+  connectionSchemaJson,
+  renderConnectionSchema,
+} from "./connection-schema.ts";
 import { descriptionSchema } from "./schema.ts";
 import { writers } from "./writers/index.ts";
 import { parseVariableName } from "./writers/shared.ts";
@@ -147,7 +152,7 @@ const LIST_SYNOPSIS = [
   `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`,
   ...LIST_FLAGS.map((flag) => `[--${flag}]`),
 ].join(" ");
-const SCHEMA_SYNOPSIS = "schema [--json]";
+const SCHEMA_SYNOPSIS = "schema [--connection <label>] [--json]";
 const CENSUS_SYNOPSIS = "census [--db <path-to-db.sqlite>] [--json]";
 const FIND_SYNOPSIS =
   'find --variable <pattern> | --connection <pattern> | "<text>" [--db <path-to-db.sqlite>] [--json]';
@@ -207,6 +212,12 @@ export const HELP = [
   "skips this, and so does --db: another database's values are not Companion's.",
   "schema prints the JSON Schema (draft 2020-12) of description files, for",
   "editors and validators. It reads no database; --json gives the same output.",
+  "schema --connection prints one connection's module actions and feedbacks",
+  "with their options (internal: Companion's built-in ones), for pass-through",
+  "actions and feedbacks. They exist only in the running Companion, so it",
+  "reads them over Companion's local socket (COMPANION_URL; no API key), after",
+  "checking that the Companion app in /Applications is build",
+  "5.1.0+9981-stable-257b325d09. It only subscribes; it changes nothing.",
   "census counts how the database uses buttons, steps, styles, actions,",
   "feedbacks, local variables, triggers and custom variables, to show what",
   "the description format covers. It prints counts and keys (types, option",
@@ -250,6 +261,10 @@ export interface CliOptions extends ApplyOptions {
   restTimeoutMs?: number;
   /** Interval between `apply`'s REST probes after a restart, in ms. Defaults to 500. */
   restPollIntervalMs?: number;
+  /** The installed Companion's `Resources/BUILD`, for `schema --connection`. */
+  companionBuildFile?: string;
+  /** Each socket wait of `schema --connection`, in ms. Defaults to 5000. */
+  socketTimeoutMs?: number;
 }
 
 /**
@@ -313,8 +328,23 @@ async function runRead(
   const json = hasJsonFlag(argv);
   try {
     if (commandWord(argv) === "schema") {
-      if (parseSchema(argv) === "help") io.stdout(HELP);
-      else io.stdout(JSON.stringify(descriptionSchema(), null, 2));
+      const parsed = parseSchema(argv);
+      if (parsed === "help") io.stdout(HELP);
+      else if (parsed === "schema")
+        io.stdout(JSON.stringify(descriptionSchema(), null, 2));
+      else {
+        const schema = await connectionSchema(parsed.connection, {
+          env: options.env ?? process.env,
+          dirs: {
+            cwd: options.cwd ?? process.cwd(),
+            homedir: options.homedir ?? homedir(),
+          },
+          buildFile: options.companionBuildFile,
+          timeoutMs: options.socketTimeoutMs,
+        });
+        if (json) io.stdout(connectionSchemaJson(schema));
+        else for (const line of renderConnectionSchema(schema)) io.stdout(line);
+      }
       return EXIT_OK;
     }
     if (commandWord(argv) === "validate") {
@@ -485,18 +515,38 @@ function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
 }
 
 /**
- * Checks a `schema` command line. The schema is JSON either way, so `--json`
- * changes nothing; `--db` belongs to `--connection` (#22).
+ * Checks a `schema` command line. The description schema is JSON either way,
+ * so `--json` changes nothing for it. `--connection` reads the running
+ * Companion, never a database, so `--db` is refused either way.
  */
-function parseSchema(argv: readonly string[]): "help" | "schema" {
-  const parsed = parseDbFlags(argv);
-  if (parsed === "help") return "help";
-  if (parsed.positionals.length > 1) {
-    throw usageFailure("schema takes no arguments");
+function parseSchema(
+  argv: readonly string[],
+): "help" | "schema" | { connection: string } {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        db: { type: "string" },
+        connection: { type: "string" },
+        json: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
   }
-  if (parsed.db !== undefined)
-    throw usageFailure("--db is only valid with --connection");
-  return "schema";
+  const { values, positionals } = parsed;
+  if (values.help) return "help";
+  if (positionals.length > 1) throw usageFailure("schema takes no arguments");
+  if (values.db !== undefined)
+    throw usageFailure("schema reads no database: --db is not valid with it");
+  if (values.connection === undefined) return "schema";
+  if (values.connection === "")
+    throw usageFailure("--connection needs a label");
+  return { connection: values.connection };
 }
 
 /** Parses a `census` command line. Throws a `usage` CliError on a bad one. */
@@ -524,6 +574,7 @@ function parseDbFlags(
       strict: true,
       options: {
         db: { type: "string" },
+        connection: { type: "string" },
         json: { type: "boolean" },
         help: { type: "boolean", short: "h" },
       },
@@ -640,6 +691,8 @@ async function runApply(
       cwd,
       restTimeoutMs: _timeout,
       restPollIntervalMs,
+      companionBuildFile: _buildFile,
+      socketTimeoutMs: _socketTimeout,
       ...applyOptions
     } = options;
     const request = { descriptionPath: file, dbPath: db, writers };
