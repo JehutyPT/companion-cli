@@ -8,6 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import {
@@ -27,8 +28,10 @@ import {
   runCli,
   setup,
   type TableDump,
+  writeDescription,
 } from "./helpers.ts";
 import {
+  type Cells,
   type PageContent,
   pageContent,
   seededPageId,
@@ -220,5 +223,96 @@ describe("SKAARHOJ test page: refusals leave the database byte-identical", () =>
       /^error: buttons\[\d+\]\.[\w.[\]]+: unknown custom variable "sk_/,
     );
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
+  });
+});
+
+/**
+ * #44: page 99 holding the captured controls exactly as the prototype (and
+ * every CLI before #23) stored them: internal actions without `children`.
+ */
+async function pre23Fixture(): Promise<FixtureEnv> {
+  const env = seededFixture();
+  await applyBoth(env);
+  const raw = JSON.parse(
+    readFileSync(
+      new URL("./fixtures/skaarhoj-page20.json", import.meta.url),
+      "utf8",
+    ),
+  ) as PageContent;
+  const db = new DatabaseSync(env.dbPath);
+  const stored = JSON.parse(
+    String(
+      db.prepare("SELECT value FROM pages WHERE id = '99'").get()?.["value"],
+    ),
+  ) as { controls: Cells };
+  let next = 0;
+  const freshId = () => `Pre23Id${String(next++).padStart(14, "0")}`;
+  for (const [row, columns] of Object.entries(stored.controls)) {
+    for (const [column, id] of Object.entries(columns)) {
+      const value = JSON.stringify(raw.controls[`${row}/${column}`]).replaceAll(
+        '"<id>"',
+        () => JSON.stringify(freshId()),
+      );
+      db.prepare("UPDATE controls SET value = ? WHERE id = ?").run(value, id);
+    }
+  }
+  db.close();
+  return env;
+}
+
+function exportPage(env: FixtureEnv) {
+  return runCli(["export", "page", "99", "--db", env.dbPath], {
+    tmpdir: env.tmpdir,
+  });
+}
+
+function dryRun(env: FixtureEnv, file: string) {
+  return runCli(["apply", file, "--db", env.dbPath, "--dry-run"], {
+    tmpdir: env.tmpdir,
+  });
+}
+
+describe("SKAARHOJ test page: a page stored before #23 (internal actions without children)", () => {
+  it("exports, and re-applying the export changes nothing an export can see", async () => {
+    const env = await pre23Fixture();
+    const exported = await exportPage(env);
+    assert.equal(exported.code, 0, exported.stderr.join("\n"));
+    const yaml = exported.stdout.map((line) => `${line}\n`).join("");
+    const file = writeDescription(env.dir, yaml, "export.yaml");
+    const dry = await dryRun(env, file);
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(dry.stdout[1], "no changes", dry.stdout.join("\n"));
+    const applied = await apply(env, file);
+    assert.equal(applied.code, 0, applied.stderr.join("\n"));
+    const again = await exportPage(env);
+    assert.deepEqual(again.stdout, exported.stdout);
+  });
+
+  it("dry-runs the example unchanged as no changes", async () => {
+    const env = await pre23Fixture();
+    const dry = await dryRun(env, PAGE_FILE);
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(dry.stdout[1], "no changes", dry.stdout.join("\n"));
+  });
+
+  it("dry-runs the example without apiStyle as 47 changed cells, naming canModifyStyleInApis", async () => {
+    const env = await pre23Fixture();
+    const file = writeDescription(
+      env.dir,
+      readFileSync(PAGE_FILE, "utf8").replaceAll(/^ *apiStyle: true\n/gm, ""),
+      "no-api-style.yaml",
+    );
+    const dry = await dryRun(env, file);
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(dry.stdout[1], "controls: 47 added, 0 replaced, 47 removed");
+    const cells = dry.stdout.filter((line) => line.startsWith("  ~ 99:"));
+    assert.equal(cells.length, 1, dry.stdout.join("\n"));
+    const changes = cells[0]?.split(", cell ") ?? [];
+    assert.equal(changes.length, 47);
+    for (const change of changes)
+      assert.match(
+        change,
+        /bank:\S+ -> bank:\S+ \(changed: options\.canModifyStyleInApis\)$/,
+      );
   });
 });

@@ -1110,6 +1110,53 @@ describe("export page: full entities (#23)", () => {
     await exportRoundTrip(env, ["page", "1"]);
   });
 
+  it("exports internal entities stored without children (pre-#23) like children: {}, and dry-runs the export as no changes (#44)", async () => {
+    /** Every empty `children` on an entity removed, at any depth. */
+    const withoutEmptyChildren = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(withoutEmptyChildren);
+      if (value === null || typeof value !== "object") return value;
+      const entries = Object.entries(value).filter(
+        ([key, child]) =>
+          !(
+            key === "children" &&
+            child !== null &&
+            typeof child === "object" &&
+            Object.keys(child).length === 0
+          ),
+      );
+      return Object.fromEntries(
+        entries.map(([key, child]) => [key, withoutEmptyChildren(child)]),
+      );
+    };
+    const canonical = setup({}, fullEntities);
+    const env = setup({}, (db) => {
+      fullEntities(db);
+      mutate(db, "controls", A, (value) => withoutEmptyChildren(value));
+    });
+    const db = new DatabaseSync(env.dbPath, { readOnly: true });
+    const stored = String(
+      db.prepare("SELECT value FROM controls WHERE id = ?").get(A)?.["value"],
+    );
+    db.close();
+    assert.equal(stored.includes('"children":{}'), false);
+    assert.ok(stored.includes('"connectionId":"internal"'));
+    const args = ["page", "1", "--button", "0/0"];
+    const yaml = ok(await exportFrom(env, args));
+    assert.equal(yaml, ok(await exportFrom(canonical, args)));
+    const dry = await runCli(
+      [
+        "apply",
+        writeDescription(env.dir, yaml, "export.yaml"),
+        "--db",
+        env.dbPath,
+        "--dry-run",
+      ],
+      { tmpdir: env.tmpdir },
+    );
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(dry.stdout[1], "no changes", dry.stdout.join("\n"));
+  });
+
   it("names the stored path of an unknown key nested in children", async () => {
     const env = setup(
       {},

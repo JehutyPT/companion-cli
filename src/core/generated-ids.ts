@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { fieldPath } from "./validate.ts";
 
 /**
  * Ids the writers generate, which are not changes in a dry run (ADR 0005).
@@ -14,6 +15,9 @@ import { isDeepStrictEqual } from "node:util";
  *  - the same, at any depth, for the entities in an entity's
  *    `children.<group>` lists;
  *  - `events[i].id` (trigger events).
+ *
+ * An internal entity without `children` also compares as `children: {}`
+ * (ADR 0005, rule 4; #44).
  *
  * Nothing else is masked: never anything under an entry's `options`, where a
  * connection id or another nanoid may be the very value a description changes.
@@ -52,12 +56,17 @@ function maskEntries(
 
 /**
  * An action or feedback with its `id`, its style overrides' `overrideId`s
- * and, recursively, its `children` entities' ids masked.
+ * and, recursively, its `children` entities' ids masked. An internal entity
+ * without `children` compares as `children: {}`: Companion's `asEntityModel`
+ * gives it that, the writers store it since #23, and every earlier writer
+ * (and the Python prototype) left it out of internal actions (#44).
  */
 function maskEntity(entry: unknown): unknown {
   const masked = maskKey(entry, "id");
   if (!isObject(masked)) return masked;
   const result: Record<string, unknown> = { ...masked };
+  if (masked["connectionId"] === "internal" && !("children" in masked))
+    result["children"] = {};
   if ("styleOverrides" in masked)
     result["styleOverrides"] = maskEntries(
       masked["styleOverrides"],
@@ -99,6 +108,45 @@ export function maskGeneratedIds(control: unknown): unknown {
   }
   if ("events" in control) masked["events"] = maskEntries(control["events"]);
   return masked;
+}
+
+/**
+ * The stored paths where two values differ (`options.canModifyStyleInApis`,
+ * `steps.0.action_sets.down[1]`), in key order, stopping after `limit`. A list
+ * whose length differs is one path; so is a key only one side has.
+ */
+function differingPaths(
+  a: unknown,
+  b: unknown,
+  limit: number,
+  path = "",
+  found: string[] = [],
+): string[] {
+  if (found.length >= limit) return found;
+  if (Array.isArray(a) && Array.isArray(b) && a.length === b.length) {
+    a.forEach((item, index) =>
+      differingPaths(item, b[index], limit, fieldPath(path, index), found),
+    );
+  } else if (isObject(a) && isObject(b)) {
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      differingPaths(a[key], b[key], limit, fieldPath(path, key), found);
+    }
+  } else if (!isDeepStrictEqual(a, b)) {
+    found.push(path || "(the whole value)");
+  }
+  return found;
+}
+
+/**
+ * Where two control values differ once generated ids are masked: at most
+ * `limit` stored paths, for the dry run's report of a replaced control.
+ */
+export function controlDifferences(
+  a: unknown,
+  b: unknown,
+  limit: number,
+): string[] {
+  return differingPaths(maskGeneratedIds(a), maskGeneratedIds(b), limit);
 }
 
 /** Whether two control values are equal once generated ids are masked. */

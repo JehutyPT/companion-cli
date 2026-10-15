@@ -168,7 +168,7 @@ describe("apply --dry-run: text report", () => {
     );
   });
 
-  it("button: replacing an occupied cell lists + new id, - old id and the page cell", async () => {
+  it("button: replacing an occupied cell lists + new id, - old id and the page cell, naming what differs", async () => {
     const env = setup();
     const file = BUTTON_YAML("Go");
 
@@ -180,7 +180,7 @@ describe("apply --dry-run: text report", () => {
       `  + ${newId}`,
       `  - ${FIXTURE_CONTROL_A}`,
       "pages: 0 added, 1 replaced, 0 removed",
-      `  ~ 1: cell 0/0 ${FIXTURE_CONTROL_A} -> ${newId}`,
+      `  ~ 1: cell 0/0 ${FIXTURE_CONTROL_A} -> ${newId} (changed: options.canModifyStyleInApis, feedbacks, style.layers[3].text.value)`,
     ]);
   });
 
@@ -216,7 +216,7 @@ describe("apply --dry-run: text report", () => {
       `  + ${newId}`,
       `  - ${oldId}`,
       "pages: 0 added, 1 replaced, 0 removed",
-      `  ~ 1: cell 0/0 ${oldId} -> ${newId}`,
+      `  ~ 1: cell 0/0 ${oldId} -> ${newId} (changed: style.layers[3].text.value)`,
     ]);
   });
 
@@ -257,7 +257,9 @@ describe("apply --dry-run: text report", () => {
     assert.equal(result.stdout[4], "pages: 0 added, 1 replaced, 0 removed");
     assert.match(
       result.stdout[5] ?? "",
-      new RegExp(`^  ~ 1: cell 0/0 ${BANK} -> ${BANK}$`),
+      new RegExp(
+        `^  ~ 1: cell 0/0 ${BANK} -> ${BANK} \\(changed: style\\.layers\\[3\\]\\.text\\.value\\)$`,
+      ),
     );
     assert.equal(result.stdout.length, 7);
   });

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "./database.ts";
 import {
+  controlDifferences,
   equalButGeneratedIds,
   pageCells,
   pairRenamedControls,
@@ -237,7 +238,14 @@ export function diffTables(
       tables[name] = changes;
     }
   }
-  return { diff: { tables }, lines: renderTables(tables, renamed) };
+  const controls = {
+    before: before.get("controls") ?? new Map<string, StoredRow>(),
+    after: after.get("controls") ?? new Map<string, StoredRow>(),
+  };
+  return {
+    diff: { tables },
+    lines: renderTables(tables, renamed, controls),
+  };
 }
 
 function cellText(value: unknown): string {
@@ -267,11 +275,49 @@ function addedPageDetail(value: unknown): string[] {
   return parts;
 }
 
-/** The name change and every changed cell of a replaced page. */
+/** The `controls` rows before and after the write. */
+interface ControlRows {
+  before: TableRows;
+  after: TableRows;
+}
+
+/** How many differing paths a replaced cell's line names. */
+const CELL_DIFFERENCES = 3;
+
+/**
+ * ` (changed: …)`: where the control a cell held differs from the one that
+ * replaces it, generated ids masked; empty unless the cell held a control
+ * before and after.
+ */
+function cellDifferences(
+  oldId: unknown,
+  newId: unknown,
+  controls: ControlRows,
+): string {
+  if (typeof oldId !== "string" || typeof newId !== "string") return "";
+  const oldRow = controls.before.get(oldId);
+  const newRow = controls.after.get(newId);
+  if (!oldRow || !newRow) return "";
+  const paths = controlDifferences(
+    oldRow.value,
+    newRow.value,
+    CELL_DIFFERENCES + 1,
+  );
+  if (paths.length === 0) return "";
+  const shown = paths.slice(0, CELL_DIFFERENCES);
+  if (paths.length > CELL_DIFFERENCES) shown.push("…");
+  return ` (changed: ${shown.join(", ")})`;
+}
+
+/**
+ * The name change and every changed cell of a replaced page; a cell whose
+ * control was replaced names where the two controls differ.
+ */
 function changedPageDetail(
   before: unknown,
   after: unknown,
   renamed: ReadonlyMap<string, string>,
+  controls: ControlRows,
 ): string[] {
   const parts: string[] = [];
   const nameBefore = nameText(before);
@@ -286,8 +332,10 @@ function changedPageDetail(
   ].sort(compareCells);
   for (const cell of cells) {
     if (isDeepStrictEqual(comparable.get(cell), cellsAfter.get(cell))) continue;
+    const was = cellsBefore.get(cell);
+    const is = cellsAfter.get(cell);
     parts.push(
-      `cell ${cell} ${cellText(cellsBefore.get(cell))} -> ${cellText(cellsAfter.get(cell))}`,
+      `cell ${cell} ${cellText(was)} -> ${cellText(is)}${cellDifferences(was, is, controls)}`,
     );
   }
   return parts;
@@ -303,6 +351,7 @@ function line(mark: string, key: string, detail: string[]): string {
 function renderTables(
   tables: Record<string, TableChanges>,
   renamed: ReadonlyMap<string, string>,
+  controls: ControlRows,
 ): string[] {
   const lines: string[] = [];
   for (const [name, changes] of Object.entries(tables)) {
@@ -318,7 +367,9 @@ function renderTables(
         line(
           "~",
           row.key,
-          pages ? changedPageDetail(row.before, row.after, renamed) : [],
+          pages
+            ? changedPageDetail(row.before, row.after, renamed, controls)
+            : [],
         ),
       );
     }

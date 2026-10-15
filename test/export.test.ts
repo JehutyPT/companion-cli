@@ -27,6 +27,7 @@ import {
   rows,
   runCli,
   setup,
+  writeDescription,
 } from "./helpers.ts";
 
 describe("export variables", () => {
@@ -670,6 +671,38 @@ triggers:
       ((children["else_actions"] as Json[])[0] as Json)["store"],
       { type: "local", variable: "result", location: "$(this:location)" },
     );
+  });
+
+  it("exports trigger actions and conditions stored without children (pre-#23) like children: {} (#44)", async () => {
+    const name = "Startup set";
+    const strip = (list: unknown) =>
+      (list as Json[] | undefined)?.map(({ children: _, ...entity }) => entity);
+    const canonical = await triggerFixture();
+    const { env } = await changedTrigger(name, (value) => ({
+      ...value,
+      actions: strip(value["actions"]),
+      condition: strip(value["condition"]),
+    }));
+    const stored = JSON.stringify(
+      rows(dumpDatabase(env.dbPath), "controls").get(triggerId(env, name)),
+    );
+    assert.ok(stored.includes('"connectionId":"internal"'));
+    assert.equal(stored.includes('"children"'), false);
+    const args = ["trigger", name];
+    const yaml = ok(await exportFrom(env, args));
+    assert.equal(yaml, ok(await exportFrom(canonical, args)));
+    const dry = await runCli(
+      [
+        "apply",
+        writeDescription(env.dir, yaml, "export.yaml"),
+        "--db",
+        env.dbPath,
+        "--dry-run",
+      ],
+      { tmpdir: env.tmpdir },
+    );
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.equal(dry.stdout[1], "no changes", dry.stdout.join("\n"));
   });
 
   it("names a refused key's stored path inside a trigger action's children", async () => {
