@@ -696,7 +696,8 @@ plugin: { sleepTimer: 3600, mode: b, free: anything, dim: true, label: x, fancy:
           .error;
         assert.match(String(doc["message"]), /is not one of the choices/);
         assert.equal(fake.upgrades.length, 1);
-        assert.deepEqual(processes.calls, ["check"]);
+        // One listing locates the configuration folder, one finds the build.
+        assert.deepEqual(processes.calls, ["check", "check"]);
       },
     );
 

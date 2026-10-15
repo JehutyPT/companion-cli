@@ -134,7 +134,8 @@ for (const platform of ["darwin", "win32"] as const) {
     const missing =
       platform === "win32"
         ? "D:\\Repos\\cfg\\v5.1\\db.sqlite"
-        : "/nowhere/cfg/v5.1/db.sqlite";
+        : // macOS paths use host path rules.
+          join("/nowhere/cfg", "v5.1", "db.sqlite");
     const cases: Array<[string, Record<string, string>, boolean, string]> = [
       [
         "COMPANION_CONFIG_BASEDIR",
