@@ -1038,11 +1038,11 @@ describe("export command line", () => {
   const cases: [string[], string][] = [
     [
       ["export"],
-      "export needs a kind (variables or trigger or triggers or page or connection)",
+      "export needs a kind (variables or trigger or triggers or page or connection or surface)",
     ],
     [
       ["export", "pages"],
-      'unknown export kind "pages" (expected variables or trigger or triggers or page or connection)',
+      'unknown export kind "pages" (expected variables or trigger or triggers or page or connection or surface)',
     ],
     [["export", "trigger"], "export trigger takes exactly one trigger name"],
     [
@@ -1057,6 +1057,11 @@ describe("export command line", () => {
     [
       ["export", "connection", "a", "b"],
       "export connection takes exactly one connection: its label or id:<id>",
+    ],
+    [["export", "surface"], "export surface takes exactly one surface id"],
+    [
+      ["export", "surface", "a", "b"],
+      "export surface takes exactly one surface id",
     ],
   ];
   for (const [args, reason] of cases) {

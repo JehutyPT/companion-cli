@@ -15,6 +15,8 @@ export interface Lister<Item> {
   read(db: DatabaseSync): Item[];
   /** The name that name patterns match. */
   name(item: Item): string;
+  /** Every name patterns match, when more than `name` (an id and a name). */
+  names?(item: Item): string[];
   /** The text table's columns, in order. */
   readonly columns: readonly Column<Item>[];
   /** The item in the JSON document. */
@@ -86,7 +88,11 @@ export function list<Item>(
   const { database, value } = readDatabase(dbPath, options, (db) => ({
     items: lister
       .read(db)
-      .filter((item) => matchesNamePatterns(lister.name(item), patterns)),
+      .filter((item) =>
+        (lister.names?.(item) ?? [lister.name(item)]).some((name) =>
+          matchesNamePatterns(name, patterns),
+        ),
+      ),
     document: lister.document?.(db) ?? {},
   }));
   return { database, ...value };

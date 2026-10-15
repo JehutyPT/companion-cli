@@ -2,6 +2,7 @@ import { connectionsLister } from "./connections.ts";
 import { currentValues } from "./current-values.ts";
 import { listCommand, type ListCommand } from "./list.ts";
 import { pagesLister } from "./pages.ts";
+import { surfacesLister } from "./surfaces.ts";
 import { triggersLister } from "./triggers.ts";
 import { variablesLister } from "./variables.ts";
 
@@ -11,4 +12,5 @@ export const listCommands: Readonly<Record<string, ListCommand>> = {
   triggers: listCommand(triggersLister),
   connections: listCommand(connectionsLister),
   pages: listCommand(pagesLister),
+  surfaces: listCommand(surfacesLister),
 };

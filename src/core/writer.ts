@@ -13,19 +13,24 @@ export const DESCRIPTION_KINDS = [
   "trigger",
   "triggers",
   "connection",
+  "surface",
 ] as const;
 export type DescriptionKind = (typeof DESCRIPTION_KINDS)[number];
 
-/** A field definition of a connection's module, as REST API v2 returns it. */
+/**
+ * A config field definition from the running Companion: a connection module's
+ * (REST API v2) or a surface's (tRPC). An id, a type and its other keys.
+ */
 export type ConfigField = Readonly<Record<string, unknown>> & {
   readonly id: string;
   readonly type: string;
 };
 
 /**
- * What asking the running Companion for a connection's config fields gave:
- * the fields, or why there are none (not configured, not reachable, the
- * connection not running, refused).
+ * What asking the running Companion for config field definitions gave: the
+ * fields, or why there are none (not configured, not reachable, the
+ * connection not running or the surface not connected, another build,
+ * refused).
  */
 export type ConfigFieldsOutcome =
   | { available: true; fields: readonly ConfigField[] }
@@ -49,6 +54,12 @@ export interface WriterContext {
    * Outside live-install mode, unavailable without a request. Never throws.
    */
   configFields(connectionId: string): Promise<ConfigFieldsOutcome>;
+  /**
+   * A surface's config fields from the running Companion (the tRPC
+   * subscription `surfaces.watchSurfaces`). Outside live-install mode,
+   * unavailable without a request. Never throws.
+   */
+  surfaceConfigFields(surfaceId: string): Promise<ConfigFieldsOutcome>;
   /** A warning for stderr and the JSON documents' `warnings`. */
   warn(line: string): void;
 }

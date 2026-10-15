@@ -1,6 +1,6 @@
 /**
  * An in-process fake of Companion's tRPC WebSocket (`/trpc`), for
- * `schema --connection` (#22). It is a minimal RFC 6455 server (handshake,
+ * `schema --connection` (#22) and surface config fields (#32). It is a minimal RFC 6455 server (handshake,
  * unfragmented text frames, close frames; no extensions), so the tests need no
  * WebSocket dependency and never reach a real Companion.
  *
@@ -22,6 +22,8 @@ export interface FakeTrpcState {
   actions: Record<string, unknown>;
   /** `instances.definitions.feedbacks`' `definitions` map. */
   feedbacks: Record<string, unknown>;
+  /** `surfaces.watchSurfaces`' `info` map, by group id. */
+  surfaces: Record<string, unknown>;
   /** Paths answered with `started` and then nothing. */
   silent: Set<string>;
   /** Paths answered with a tRPC error reply. */
@@ -135,6 +137,7 @@ function emptyState(): FakeTrpcState {
     connections: {},
     actions: {},
     feedbacks: {},
+    surfaces: {},
     silent: new Set(),
     failing: new Set(),
     closeAfter: new Set(),
@@ -160,7 +163,9 @@ function respond(
         ? { type: "init", definitions: state.actions }
         : path === "instances.definitions.feedbacks"
           ? { type: "init", definitions: state.feedbacks }
-          : undefined;
+          : path === "surfaces.watchSurfaces"
+            ? [{ type: "init", info: state.surfaces }]
+            : undefined;
   if (
     payload === undefined ||
     (path !== undefined && state.failing.has(path))

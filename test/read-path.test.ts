@@ -273,12 +273,12 @@ describe("read commands: command line", () => {
     [
       "no kind",
       ["list"],
-      /^list needs a kind \(variables or triggers or connections or pages\)/,
+      /^list needs a kind \(variables or triggers or connections or pages or surfaces\)/,
     ],
     [
       "an unknown kind",
-      ["list", "surfaces"],
-      /^unknown list kind "surfaces" \(expected variables or triggers or connections or pages\)/,
+      ["list", "widgets"],
+      /^unknown list kind "widgets" \(expected variables or triggers or connections or pages or surfaces\)/,
     ],
     [
       "an empty pattern",
@@ -323,11 +323,11 @@ describe("read commands: command line", () => {
     }
     assert.match(
       USAGE,
-      /list variables\|triggers\|connections\|pages \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\] \[--no-current\] \|/,
+      /list variables\|triggers\|connections\|pages\|surfaces \[<pattern>\.\.\.\] \[--db <path-to-db\.sqlite>\] \[--json\] \[--no-current\] \|/,
     );
     assert.match(
       HELP,
-      /companion-cli list variables\|triggers\|connections\|pages/,
+      /companion-cli list variables\|triggers\|connections\|pages\|surfaces/,
     );
     assert.match(HELP, /--no-current\s+skips this/);
     assert.match(HELP, /write nothing,\s+never stop or start Companion/);

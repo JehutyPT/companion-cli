@@ -394,7 +394,7 @@ function failedPattern(
 }
 
 /** The JSON type of a value, for the strict rule. */
-function jsonType(value: unknown): string {
+export function jsonType(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "list";
   return typeof value === "object" ? "mapping" : typeof value;

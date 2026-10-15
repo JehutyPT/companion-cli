@@ -32,6 +32,7 @@ import {
   type TaggedKind,
   VALID_NAME,
 } from "./writers/shared.ts";
+import * as surface from "./writers/surface.ts";
 import * as trigger from "./writers/trigger.ts";
 import * as variables from "./writers/variables.ts";
 
@@ -117,6 +118,11 @@ export const KIND_SCHEMAS: Record<DescriptionKind, KindSchema> = {
     examples: connection.EXAMPLES,
     fields: connection.FIELD_SCHEMAS,
     extra: connection.EXTRA_SCHEMA,
+  },
+  surface: {
+    doc: surface.DOC,
+    examples: surface.EXAMPLES,
+    fields: surface.FIELD_SCHEMAS,
   },
 };
 

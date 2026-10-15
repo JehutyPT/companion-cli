@@ -501,6 +501,142 @@
         "connection"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: surface",
+      "description": "Changes one stored surface's name, enabled flag and config keys. Named config keys are merged; every other key, the surface's group settings and the other surfaces are untouched.",
+      "examples": [
+        {
+          "kind": "surface",
+          "surface": "skaarhoj:SK_RAWPANEL_123",
+          "name": "Desk panel",
+          "brightness": 80,
+          "transferInputs": {
+            "hwc_12": "skaarhoj_enc1"
+          },
+          "transferOutputs": {
+            "hwc_40_led": "$(custom:tally_pgm) == 1"
+          },
+          "plugin": {
+            "sleepTimer": 300
+          }
+        }
+      ],
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "surface"
+        },
+        "surface": {
+          "description": "The stored surface id, exactly (`companion-cli list surfaces`). The surface must exist; surfaces are never created.",
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "The surface's name in Companion.",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Whether Companion uses the surface.",
+          "type": "boolean"
+        },
+        "brightness": {
+          "description": "Brightness in percent, 0 to 100 (`config.brightness`).",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "rotation": {
+          "description": "Rotation (`config.rotation`): 0 (normal), \"surface-90\" (90 CCW), \"surface90\" (90 CW) or \"surface180\".",
+          "enum": [
+            0,
+            "surface-90",
+            "surface90",
+            "surface180"
+          ]
+        },
+        "xOffset": {
+          "description": "Horizontal offset in the grid (`config.xOffset`).",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "yOffset": {
+          "description": "Vertical offset in the grid (`config.yOffset`).",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "transferInputs": {
+          "description": "Transfer-variable inputs: `<id>: <custom variable>` sets `config.transfer_input_<id>`, the custom variable that receives the surface's value (\"\" for none). The variable must exist.",
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/variableName"
+              },
+              {
+                "const": ""
+              }
+            ]
+          }
+        },
+        "transferOutputs": {
+          "description": "Transfer-variable outputs: `<id>: <expression>` sets `config.transfer_output_<id>`, the expression whose value is sent to the surface. Its `$(custom:…)` references are checked.",
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "plugin": {
+          "description": "Surface-module settings: `<id>: <value>` sets `config.plugin_cfg_<id>`.",
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "config": {
+          "description": "Any other config key, set as given. A key with a named field (brightness, rotation, xOffset, yOffset, transfer_input_*, transfer_output_*, plugin_cfg_*) or `groupId` is refused.",
+          "type": "object",
+          "propertyNames": {
+            "minLength": 1,
+            "not": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "brightness",
+                    "rotation",
+                    "xOffset",
+                    "yOffset",
+                    "groupId"
+                  ]
+                },
+                {
+                  "pattern": "^(transfer_input_|transfer_output_|plugin_cfg_)"
+                }
+              ]
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "surface"
+      ],
+      "additionalProperties": false
     }
   ],
   "$defs": {

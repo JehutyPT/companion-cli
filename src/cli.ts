@@ -50,6 +50,7 @@ import {
   renderConnectionSchema,
 } from "./connection-schema.ts";
 import { descriptionSchema } from "./schema.ts";
+import { surfaceConfigFields } from "./surface-definitions.ts";
 import { writers } from "./writers/index.ts";
 import { parseVariableName } from "./writers/shared.ts";
 
@@ -209,10 +210,17 @@ export const HELP = [
   "validate ask it (REST settings below). Without them a key must already be",
   "stored with a value of the same type; --unchecked accepts any key with a",
   "warning. Secrets come only from environment variables and are never printed.",
+  "kind: surface checks config keys against the surface's config fields,",
+  "which only the running Companion knows, and only while the surface is",
+  "connected: without --db, apply, apply --dry-run and validate read them over",
+  "its local socket, as schema --connection does. Without them a key must",
+  "already be stored with a value of the same type; --unchecked accepts any",
+  "key with a warning.",
   "list prints the custom variables, triggers, connections (with the buttons",
-  "and triggers using each) or pages stored in the database, one line each.",
-  "Connection configuration and secrets are never printed. A pattern is a",
-  "case-sensitive glob over the whole name or label (* any",
+  "and triggers using each), pages or surfaces stored in the database, one",
+  "line each. Connection and surface configuration and secrets are never",
+  "printed. A pattern is a case-sensitive glob over the whole name or label",
+  "(a surface's id or name; * any",
   "run of characters, ? one character); several patterns list their union.",
   "export prints stored content as a description file (YAML, or JSON with",
   "--json) that apply accepts; applying it unchanged changes nothing. It",
@@ -276,9 +284,9 @@ export interface CliOptions extends ApplyOptions {
   restTimeoutMs?: number;
   /** Interval between `apply`'s REST probes after a restart, in ms. Defaults to 500. */
   restPollIntervalMs?: number;
-  /** The installed Companion's `Resources/BUILD`, for `schema --connection`. */
+  /** The installed Companion's `Resources/BUILD`, for `schema --connection` and surface config fields. */
   companionBuildFile?: string;
-  /** Each socket wait of `schema --connection`, in ms. Defaults to 5000. */
+  /** Each socket wait of `schema --connection` and of surface config fields, in ms. Defaults to 5000. */
   socketTimeoutMs?: number;
 }
 
@@ -799,9 +807,11 @@ async function runApply(
 const CONFIG_FIELDS_TIMEOUT_MS = 2000;
 
 /**
- * The writers' runtime: the environment, and the running Companion's config
- * fields through the REST settings. A missing or invalid REST setting makes
- * the fields unavailable, with the reason (the API key redacted).
+ * The writers' runtime: the environment, the running Companion's connection
+ * config fields through the REST settings (a missing or invalid REST setting
+ * makes them unavailable, with the reason, the API key redacted), and a
+ * surface's config fields from its socket (COMPANION_URL, after the build
+ * gate).
  */
 function writerRuntime(options: CliOptions): WriterRuntime {
   const env = options.env ?? process.env;
@@ -835,6 +845,15 @@ function writerRuntime(options: CliOptions): WriterRuntime {
               reason: redact(outcome.reason, endpoint.apiKey),
             };
       }),
+    surfaceConfigFields:
+      options.surfaceConfigFields ??
+      ((surfaceId) =>
+        surfaceConfigFields(surfaceId, {
+          env,
+          dirs,
+          buildFile: options.companionBuildFile,
+          timeoutMs: options.socketTimeoutMs,
+        })),
   };
 }
 

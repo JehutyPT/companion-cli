@@ -38,7 +38,8 @@ Verified by DB and main.js: the upgrade list `mee` has 16 steps and the target i
 | `controls` | `bank:<controlId>` (button) or `trigger:<controlId>` | control JSON, below |
 | `custom_variables` | variable name | `{description, defaultValue, persistCurrentValue, sortOrder}` |
 | `instances` | instance id | `InstanceConfig`: connections and surface instances, see [Connections](#connections); `kind: connection` rewrites one connection row |
-| `surfaces`, `surface_groups`, `surfaces_remote`, others | | not used by the tool yet |
+| `surfaces` | surface id (`streamdeck:CL12345`, `skaarhoj:SK_RAWPANEL_123`) | `SurfaceConfig`, see [Surfaces](#surfaces); `kind: surface` rewrites one row, `list surfaces` and `export surface` read them |
+| `surface_groups`, `surfaces_remote`, others | | not used by the tool yet |
 
 Verified by DB; `trigger:` prefix also by main.js (controls are upgraded with `id.startsWith("trigger:")` deciding trigger vs button).
 
@@ -220,6 +221,21 @@ How Companion itself updates a connection, from `Instance/Controller.ts` (`setCo
 | `static-text` | none: refused | |
 
 Field `regex` strings come from `@companion-module/host/validate`, whose source is not in the map. The tool compiles `/body/flags` as such and anything else as a plain pattern, and skips (with a warning) a regex it cannot compile. Unverified against source. A field type not in this table is accepted unchecked.
+
+## Surfaces
+
+Companion 5.1 keeps one `surfaces` row per surface it has seen, keyed by the surface id, from `Surface/Handler.ts` and `Surface/Config.ts` in the 5.1.0 main.js source map:
+
+```
+{ config: { brightness, rotation, xOffset, yOffset, groupId, …module keys },
+  groupConfig: { name, last_page_id, startup_page_id, use_last_page },
+  groupId?, enabled, name, type, integrationType, gridSize: {rows, columns}, layout? }
+```
+
+- `config.brightness` (0 to 100), `config.rotation` (`0`, `"surface-90"`, `"surface90"` or `"surface180"`), `config.xOffset` and `config.yOffset` are Companion's own. Every other config key is the surface module's: `transfer_input_<id>` (the custom variable receiving an input), `transfer_output_<id>` (the expression sent to an output) and `plugin_cfg_<id>` (a plugin setting) by prefix, and integration keys such as `canChangePage`.
+- `config.groupId` is `null` for a surface in its own automatic group; a manual group is a `surface_groups` row named by `groupId`. `groupConfig` holds the automatic group's page state. The tool supports neither group kind: it keeps both as stored and `export surface` refuses a grouped surface.
+- `enabled` missing reads as enabled. Names are free text and need not be unique.
+- **Config fields** exist only in the running Companion, and only while the surface is connected: the tRPC subscription `surfaces.watchSurfaces` sends an `init` map of surface groups, each with `surfaces: [{id, isConnected, configFields, …}]`. `kind: surface` reads it over the socket used by [Module definitions](#module-definitions), after the same build gate, and keeps only each field's `id`, `type` and the keys it checks. Field types are the connection field types plus `custom-variable` and `expression` (both strings). Verified by main.js; the tests use a fake socket.
 
 ## Module definitions
 

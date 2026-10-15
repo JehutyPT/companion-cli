@@ -217,15 +217,16 @@ An export refusal names the stored field it cannot express; this file says wheth
 
 | Item | Status | Field | Note |
 | --- | --- | --- | --- |
-| `name` | planned (#32) |  |  |
-| `enabled` | planned (#32) |  |  |
-| `Companion-owned config` | planned (#32) |  | merged |
-| `transfer_input_*` | planned (#32) |  |  |
-| `transfer_output_*` | planned (#32) |  |  |
-| `plugin_cfg_*` | planned (#32) |  |  |
-| `other config keys` | planned (#32) |  | merged |
-| `groupId` | unsupported |  |  |
-| `groupConfig` | unsupported |  |  |
+| `name` | supported | `kind: surface`, `surface.surface`, `surface.name` | an existing surface, by its stored id |
+| `enabled` | supported | `surface.enabled` |  |
+| `Companion-owned config` | supported | `surface.brightness`, `surface.rotation`, `surface.xOffset`, `surface.yOffset` | merged |
+| `transfer_input_*` | supported | `surface.transferInputs` | a custom variable, checked |
+| `transfer_output_*` | supported | `surface.transferOutputs` | an expression; $(custom:…) references checked |
+| `plugin_cfg_*` | supported | `surface.plugin` |  |
+| `other config keys` | supported | `surface.config` | merged; checked against the surface's config fields when it is connected |
+| `groupId` | unsupported |  | a surface in a manual group is refused on export |
+| `groupConfig` | unsupported |  | kept as stored, never exported |
+| `removing config keys` | unsupported |  |  |
 | `surface groups` | unsupported |  |  |
 | `outbound surfaces` | unsupported |  |  |
 | `creating or forgetting surfaces` | unsupported |  |  |

@@ -2,6 +2,7 @@ import type { WriterRegistry } from "../core/description.ts";
 import { buttonWriter } from "./button.ts";
 import { connectionWriter } from "./connection.ts";
 import { pageWriter } from "./page.ts";
+import { surfaceWriter } from "./surface.ts";
 import { triggersWriter, triggerWriter } from "./trigger.ts";
 import { variablesWriter } from "./variables.ts";
 
@@ -13,4 +14,5 @@ export const writers: WriterRegistry = {
   trigger: triggerWriter,
   triggers: triggersWriter,
   connection: connectionWriter,
+  surface: surfaceWriter,
 };

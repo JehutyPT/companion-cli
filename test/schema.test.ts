@@ -104,13 +104,47 @@ events:
   - { event: computer_locked }
   - { event: computer_unlocked }
 `,
+  "a surface with every field": `kind: surface
+surface: "skaarhoj:SK_1"
+name: ""
+enabled: false
+brightness: 0
+rotation: surface-90
+xOffset: -1
+yOffset: 2
+transferInputs: { hwc_1: enc_1, hwc_2: "" }
+transferOutputs: { hwc_3: "$(custom:a) + 1" }
+plugin: { sleep: 300, nested: { a: [1, null] } }
+config: { emulator_rows: 4, canChangePage: true }
+`,
+  "a surface with rotation 0 only": `kind: surface
+surface: s
+rotation: 0
+`,
 };
 
 /** Descriptions both the schema and the parser refuse. */
 const INVALID: Record<string, string> = {
   "a list at top level": "- kind: button\n",
   "missing kind": "variables: [{ name: a, default: 1 }]\n",
-  "unknown kind": "kind: surface\n",
+  "unknown kind": "kind: widget\n",
+  "a surface without its id": "kind: surface\nname: S\n",
+  "a surface brightness above 100":
+    "kind: surface\nsurface: s\nbrightness: 101\n",
+  "a surface rotation that is not a choice":
+    "kind: surface\nsurface: s\nrotation: 90\n",
+  "a surface fractional offset": "kind: surface\nsurface: s\nxOffset: 1.5\n",
+  "a surface transfer input that is not a variable name":
+    "kind: surface\nsurface: s\ntransferInputs: { a: my-var }\n",
+  "a surface transfer output that is not a string":
+    "kind: surface\nsurface: s\ntransferOutputs: { a: 1 }\n",
+  "a surface config key with a named field":
+    "kind: surface\nsurface: s\nconfig: { brightness: 1 }\n",
+  "a surface config transfer key":
+    "kind: surface\nsurface: s\nconfig: { transfer_input_a: v }\n",
+  "a surface config groupId":
+    "kind: surface\nsurface: s\nconfig: { groupId: g }\n",
+  "an unknown surface field": "kind: surface\nsurface: s\ngroupConfig: {}\n",
   "a kind that is not a string": "kind: 1\n",
   "unknown top-level field": `${BUTTON}notes: hi\n`,
   "unknown feedback field": `${BUTTON}feedbacks:

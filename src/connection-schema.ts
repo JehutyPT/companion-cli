@@ -109,8 +109,14 @@ export async function connectionSchema(
   }
 }
 
-/** The trimmed build string, which must be `SUPPORTED_BUILD`. */
-function checkBuild(path: string): string {
+/**
+ * The trimmed build string, which must be `SUPPORTED_BUILD`. `reader` names
+ * what reads the private API, for the refusal.
+ */
+export function checkBuild(
+  path: string,
+  reader = "schema --connection",
+): string {
   let build: string;
   try {
     build = readFileSync(path, "utf8").trim();
@@ -125,7 +131,7 @@ function checkBuild(path: string): string {
   }
   if (build !== SUPPORTED_BUILD) {
     throw new CliError(
-      `Companion build ${JSON.stringify(build)} is not supported: schema --connection reads a private API and needs ${SUPPORTED_BUILD}`,
+      `Companion build ${JSON.stringify(build)} is not supported: ${reader} reads a private API and needs ${SUPPORTED_BUILD}`,
       {
         code: "unsupported_companion_build",
         hint: `this command supports Companion ${SUPPORTED_BUILD} only`,

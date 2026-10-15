@@ -69,7 +69,7 @@ A short declarative file describing one page, button, trigger or set of variable
 _Avoid_: Config, preset (Companion uses "preset" for module-provided buttons)
 
 **Kind**:
-The top-level `kind` field of a description file (`variables`, `button`, `page`, `trigger`) that selects which writer applies it.
+The top-level `kind` field of a description file (`variables`, `button`, `page`, `trigger`, `triggers`, `connection`, `surface`) that selects which writer applies it.
 
 **Apply**:
 Validate a description file, stop Companion, back up the database, replace the described thing, check integrity and restart Companion.
@@ -91,4 +91,4 @@ _Avoid_: Stats, report, audit
 A copy of the database and its WAL files taken immediately before an apply.
 
 **REST helper**:
-The part of the tool that talks to a running Companion over its HTTP API, for runtime actions only: press, rotate, read or set a custom variable, read surface status. `list variables` also uses it to read each listed variable's current value, and still succeeds from the database when it cannot.
+The part of the tool that talks to a running Companion over its HTTP API, for runtime actions only: press, rotate, read or set a custom variable, read surface status. `list variables` also uses it to read each listed variable's current value, and still succeeds from the database when it cannot. Definitions that exist only in the running Companion (a connection's module actions and feedbacks, a surface's config fields) are read separately, over its tRPC socket, subscribe-only.

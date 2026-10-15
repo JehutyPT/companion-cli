@@ -14,6 +14,11 @@ export interface WriterRuntime {
    * in live-install mode. Omitted: REST is not configured.
    */
   configFields?: (connectionId: string) => Promise<ConfigFieldsOutcome>;
+  /**
+   * Asks the running Companion for a surface's config fields. Called only in
+   * live-install mode. Omitted: the Companion URL is not configured.
+   */
+  surfaceConfigFields?: (surfaceId: string) => Promise<ConfigFieldsOutcome>;
 }
 
 export interface ResolveInput {
@@ -23,6 +28,10 @@ export interface ResolveInput {
   /** Runs a reader on a read-only snapshot, after the version guard. */
   read: <T>(reader: (db: DatabaseSync) => T) => T;
 }
+
+/** Why there are no definitions with `--db`. */
+export const NOT_LIVE_REASON =
+  "--db names a database the running Companion does not use";
 
 /** The plan after the writer's `resolve` (when it has one), and its warnings. */
 export async function resolvePlan(
@@ -41,11 +50,20 @@ export async function resolvePlan(
       if (!live)
         return {
           available: false,
-          reason: "--db names a database the running Companion does not use",
+          reason: NOT_LIVE_REASON,
         };
       if (!runtime.configFields)
         return { available: false, reason: "REST is not configured" };
       return runtime.configFields(connectionId);
+    },
+    surfaceConfigFields: async (surfaceId) => {
+      if (!live) return { available: false, reason: NOT_LIVE_REASON };
+      if (!runtime.surfaceConfigFields)
+        return {
+          available: false,
+          reason: "the Companion URL is not configured",
+        };
+      return runtime.surfaceConfigFields(surfaceId);
     },
     warn: (line) => warnings.push(`warning: ${line}`),
   });
