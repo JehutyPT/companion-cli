@@ -19,6 +19,7 @@ import {
   validationJson,
 } from "./core/validate-command.ts";
 import { EXPORT_SYNOPSES, exportCommands } from "./export/index.ts";
+import { census, censusJson, renderCensus } from "./readers/census.ts";
 import { listCommands } from "./readers/index.ts";
 import type { ListCommand } from "./readers/list.ts";
 import {
@@ -145,12 +146,14 @@ const LIST_SYNOPSIS = [
   ...LIST_FLAGS.map((flag) => `[--${flag}]`),
 ].join(" ");
 const SCHEMA_SYNOPSIS = "schema [--json]";
+const CENSUS_SYNOPSIS = "census [--db <path-to-db.sqlite>] [--json]";
 const SYNOPSES = [
   APPLY_SYNOPSIS,
   VALIDATE_SYNOPSIS,
   LIST_SYNOPSIS,
   ...EXPORT_SYNOPSES,
   SCHEMA_SYNOPSIS,
+  CENSUS_SYNOPSIS,
   ...REST_TABLE.map(synopsis),
 ];
 
@@ -199,6 +202,11 @@ export const HELP = [
   "skips this, and so does --db: another database's values are not Companion's.",
   "schema prints the JSON Schema (draft 2020-12) of description files, for",
   "editors and validators. It reads no database; --json gives the same output.",
+  "census counts how the database uses buttons, steps, styles, actions,",
+  "feedbacks, local variables, triggers and custom variables, to show what",
+  "the description format covers. It prints counts and keys (types, option",
+  "keys, module and definition ids), never values, names, labels or",
+  "connection ids; --json leaves the database path out.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory or, if there is none, from ~/.config/companion-cli/.env.local",
@@ -260,6 +268,7 @@ const READ_COMMANDS: ReadonlySet<string> = new Set([
   "export",
   "validate",
   "schema",
+  "census",
 ]);
 
 /** Options that take their value as the next argument. */
@@ -300,6 +309,17 @@ async function runRead(
       }
       const result = validate({ ...parsed, writers }, options);
       io.stdout(json ? validationJson(result) : renderValidation(result));
+      return EXIT_OK;
+    }
+    if (commandWord(argv) === "census") {
+      const parsed = parseCensus(argv);
+      if (parsed === "help") {
+        io.stdout(HELP);
+        return EXIT_OK;
+      }
+      const document = census(parsed.dbPath, options);
+      if (json) io.stdout(censusJson(document));
+      else for (const line of renderCensus(document)) io.stdout(line);
       return EXIT_OK;
     }
     const parsed = parseRead(argv);
@@ -442,6 +462,33 @@ function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
  * changes nothing; `--db` belongs to `--connection` (#22).
  */
 function parseSchema(argv: readonly string[]): "help" | "schema" {
+  const parsed = parseDbFlags(argv);
+  if (parsed === "help") return "help";
+  if (parsed.positionals.length > 1) {
+    throw usageFailure("schema takes no arguments");
+  }
+  if (parsed.db !== undefined)
+    throw usageFailure("--db is only valid with --connection");
+  return "schema";
+}
+
+/** Parses a `census` command line. Throws a `usage` CliError on a bad one. */
+function parseCensus(
+  argv: readonly string[],
+): { dbPath: string | undefined } | "help" {
+  const parsed = parseDbFlags(argv);
+  if (parsed === "help") return "help";
+  if (parsed.positionals.length > 1) {
+    throw usageFailure("census takes no arguments");
+  }
+  if (parsed.db === "") throw usageFailure("--db needs a path");
+  return { dbPath: parsed.db };
+}
+
+/** Parses `--db`, `--json` and `--help` strictly, for commands with no other options. */
+function parseDbFlags(
+  argv: readonly string[],
+): { db: string | undefined; positionals: string[] } | "help" {
   let parsed;
   try {
     parsed = parseArgs({
@@ -459,10 +506,7 @@ function parseSchema(argv: readonly string[]): "help" | "schema" {
   }
   const { values, positionals } = parsed;
   if (values.help) return "help";
-  if (positionals.length > 1) throw usageFailure("schema takes no arguments");
-  if (values.db !== undefined)
-    throw usageFailure("--db is only valid with --connection");
-  return "schema";
+  return { db: values.db, positionals };
 }
 
 /** A usage error as a CliError, for commands that may print it as JSON. */

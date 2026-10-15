@@ -83,6 +83,10 @@ _Avoid_: Preview, simulation ("plan" is the parsed description)
 The checks an apply runs before it writes, and nothing else: against a read-only snapshot of a database, or the description file alone (*structure only*, `--no-db`). It reports the first refusal or that the file is valid, never what would change (that is the dry run).
 _Avoid_: Lint, check (a writer's `check` is one step of validating)
 
+**Usage census**:
+Counts of how a database uses what the description format does and does not cover (control types, button options, steps, styles, actions, feedbacks, local variables, triggers, custom variables), read from a snapshot. It prints counts and keys, never values, and orders the writer extensions. The user runs it on a copy of their own database; only a summary is shared.
+_Avoid_: Stats, report, audit
+
 **Backup**:
 A copy of the database and its WAL files taken immediately before an apply.
 

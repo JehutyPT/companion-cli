@@ -220,3 +220,7 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `surface groups` | unsupported |  |  |
 | `outbound surfaces` | unsupported |  |  |
 | `creating or forgetting surfaces` | unsupported |  |  |
+
+## Census
+
+Not yet run. The user runs `companion-cli census` on a copy of their database (see the README) and records here the date, the summary counts per area and the order of tickets #23–#27 it leads to, without module or definition lists.

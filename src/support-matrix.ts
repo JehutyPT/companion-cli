@@ -447,6 +447,14 @@ What the description format covers of what Companion 5.1 stores. Export and appl
 An export refusal names the stored field it cannot express; this file says whether that field is planned.
 `;
 
+/**
+ * The usage census note (#15), rendered as the last section. The user records
+ * it after running \`companion-cli census\` on a copy of their database: the
+ * date, the summary counts per area and the order of #23–#27 it led to. No
+ * module or definition lists: this file is public.
+ */
+export const CENSUS_NOTE = `Not yet run. The user runs \`companion-cli census\` on a copy of their database (see the README) and records here the date, the summary counts per area and the order of tickets #23–#27 it leads to, without module or definition lists.`;
+
 const code = (text: string) => `\`${text}\``;
 
 /** A cell's text, safe inside a Markdown table row. */
@@ -475,5 +483,6 @@ export function renderSupportMatrix(rows: readonly MatrixRow[]): string {
       ].join("\n") + "\n",
     ];
   });
-  return [HEADER, ...sections].join("\n");
+  const census = `## Census\n\n${CENSUS_NOTE}\n`;
+  return [HEADER, ...sections, census].join("\n");
 }

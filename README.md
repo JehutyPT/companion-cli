@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` and `export variables`, `export trigger` and `export triggers` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -312,6 +312,21 @@ or map files to it in VS Code's `settings.json`, by URL or by a path to a checko
   }
 }
 ```
+
+### Usage census
+
+`census` counts how a database uses what the description format does and does not cover, so that the writer extensions (#23–#27) are built in the order real content needs them. It reads a snapshot copy like the read commands above and is safe on the install's database, but run it on a copy of your own:
+
+```sh
+mkdir -p /tmp/census
+cp ~/Library/Application\ Support/companion/v5.1/db.sqlite* /tmp/census/
+companion-cli census --db /tmp/census/db.sqlite --json > census.json
+companion-cli census --db /tmp/census/db.sqlite           # the same counts as text
+```
+
+It counts control types (placed on a loaded page or not), button options against the writers' defaults, steps (count, hold actions, `runWhileHeld`), button styles against the writers' four-layer template, actions and feedbacks by module and definition (expression options, `disabled`, headlines, `upgradeIndex`, children, stored results, inversion, style overrides), local variables, trigger events, conditions, notes and collections, and custom variables. A count of something that can occur several times in one control is `{"controls": n, "occurrences": m}` in JSON, and `m in n controls` in text when the two differ. Unknown keys and types are counted under their name. Feedback subtypes (boolean, advanced, value) are not stored in the database, so feedbacks are counted by the list they sit in instead. The export self-check that would say how much exports cleanly does not exist yet, so `support` is `"not available"`.
+
+**The output holds no values**: no option values, texts, names, labels, notes, expressions, variable names, connection ids, `config` or `secrets`, and the JSON leaves out the database path (`"database": null`). It does name the modules (`moduleId`) and definitions (`<module>:<definitionId>`) the install uses, so keep the full output local: only a summary (counts per area and the resulting ticket order, no module or definition lists) goes into the public tracker and the census section of [docs/support-matrix.md](docs/support-matrix.md).
 
 ### Runtime commands (REST helper)
 

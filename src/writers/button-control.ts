@@ -421,8 +421,15 @@ export function isButtonControlId(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("bank:");
 }
 
-/** The prototype's `layers()`: canvas, background box, image and text. */
-function layers(text: string, background: number, textColor: number) {
+/**
+ * The prototype's `layers()`: canvas, background box, image and text. The
+ * census compares stored buttons against it.
+ */
+export function buttonLayers(
+  text: string,
+  background: number,
+  textColor: number,
+) {
   const geometry = () => ({
     enabled: prop(true),
     opacity: prop(100),
@@ -514,7 +521,7 @@ function buildButtonControl(plan: ButtonContent): Record<string, unknown> {
       ]),
     ),
     feedbacks: plan.feedbacks.map(buildFeedback),
-    style: { layers: layers(plan.text, plan.background, plan.textColor) },
+    style: { layers: buttonLayers(plan.text, plan.background, plan.textColor) },
   };
 }
 
