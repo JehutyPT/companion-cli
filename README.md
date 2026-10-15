@@ -584,6 +584,17 @@ Applying to the local install (live-install mode) quits and restarts Companion o
 3. If the backup has `db.sqlite-wal` and `db.sqlite-shm`, copy them over the install's too. If it does not, delete the install's own `db.sqlite-wal` and `db.sqlite-shm`: a newer WAL would otherwise replay onto the restored database.
 4. Start Companion.
 
+## Agent skill
+
+[`skills/companion-cli/SKILL.md`](skills/companion-cli/SKILL.md) teaches an agent (Claude Code, Codex or any other that reads `SKILL.md` files) the workflow: read, export, edit, validate, dry run, ask, apply, verify. It holds workflow and judgement only and points to `schema`, `--help`, this README and the support matrix for the facts. The repository copy is the source: link it into your skills directory rather than copying it, so it stays current with the CLI. From the repository root:
+
+```sh
+mkdir -p ~/.claude/skills && ln -s "$PWD/skills/companion-cli" ~/.claude/skills/companion-cli   # Claude Code
+mkdir -p ~/.agents/skills && ln -s "$PWD/skills/companion-cli" ~/.agents/skills/companion-cli   # Codex
+```
+
+`test/skill.test.ts` keeps the skill consistent with the CLI: every command and flag it names must be in the usage, and it must not name action, feedback, condition or event kinds, which belong to `schema`.
+
 ## Development
 
 `npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`), `npm run gen:schema` (regenerates `schema/description.schema.json` after a writer's fields or docs change). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install. The test bootstrap (`test/setup.ts`) points `HOME`, `USERPROFILE` and `APPDATA` at a temp directory and removes `LOCALAPPDATA` and `XDG_CONFIG_HOME`, so no test can reach the real profile.
