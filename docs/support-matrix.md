@@ -100,12 +100,12 @@ An export refusal names the stored field it cannot express; this file says wheth
 | `action.definitionId` | supported |  | from the action kind |
 | `action.connectionId` | supported |  | from the action kind |
 | `action.options` | supported |  | literal values |
-| `action.options (expression values)` | planned (#23) |  |  |
-| `action.disabled` | planned (#23) |  |  |
-| `action.headline` | planned (#23) |  |  |
-| `action.upgradeIndex` | planned (#23) |  |  |
-| `action.children` | planned (#23) |  |  |
-| `action.storeResult` | planned (#23) |  |  |
+| `action.options (expression values)` | supported | `action: passthrough.options` | an option `{expr: …}` |
+| `action.disabled` | supported | `action.disabled` |  |
+| `action.headline` | supported | `action.headline` |  |
+| `action.upgradeIndex` | supported | `action.upgradeIndex` | left out, Companion assumes the connection's current index |
+| `action.children` | supported | `action: passthrough.children` | on connection `internal` only; `{}` on every internal action |
+| `action.storeResult` | supported | `action: passthrough.store` | custom, local and page variable targets |
 
 ## Feedback
 
@@ -113,27 +113,27 @@ An export refusal names the stored field it cannot express; this file says wheth
 | --- | --- | --- | --- |
 | `bank_current_step` | supported | `feedback: step`, `feedback: step.step` |  |
 | `check_expression` | supported | `feedback: expression`, `feedback: expression.expression` |  |
-| `module feedback` | supported | `feedback: passthrough`, `feedback: passthrough.connection`, `feedback: passthrough.definition`, `feedback: passthrough.options` | any connection's boolean feedback, with literal options |
+| `module feedback` | supported | `feedback: passthrough`, `feedback: passthrough.connection`, `feedback: passthrough.definition`, `feedback: passthrough.options` | any connection's feedback, with literal options |
 | `feedbackType = "boolean"` | supported |  |  |
-| `feedbackType = "advanced"` | planned (#23) |  |  |
-| `feedbackType = "value"` | planned (#23) |  |  |
-| `feedbackType = "style-override"` | planned (#23) |  | the feedback list type of a layered button's style list |
+| `feedbackType = "advanced"` | supported | `feedback: passthrough` | pass-through, with `style` left out or as a list |
+| `feedbackType = "value"` | supported | `feedback: passthrough` | pass-through without `style` |
+| `feedbackType = "style-override"` | supported | `feedback: passthrough` | the feedback list type of a layered button's style list; pass-through |
 | `feedback.id` | supported |  | generated |
 | `feedback.type` | supported |  | always `feedback` |
 | `feedback.definitionId` | supported |  | from the feedback kind |
 | `feedback.connectionId` | supported |  | from the feedback kind |
 | `feedback.options` | supported |  | literal values |
-| `feedback.options (expression values)` | planned (#23) |  |  |
+| `feedback.options (expression values)` | supported | `feedback: passthrough.options` | an option `{expr: …}` |
 | `feedback.isInverted` | supported | `feedback.invert` |  |
-| `feedback.isInverted (expression)` | planned (#23) |  |  |
-| `feedback.styleOverrides` | supported | `feedback.style`, `feedback.style.background`, `feedback.style.textColor`, `feedback.style.text` | on `box0.color`, `text0.color` and `text0.text` |
-| `feedback.styleOverrides (empty)` | unsupported |  | a boolean feedback that overrides no style |
-| `feedback.styleOverrides (other element properties)` | planned (#23) |  |  |
-| `feedback.disabled` | planned (#23) |  |  |
-| `feedback.headline` | planned (#23) |  |  |
-| `feedback.upgradeIndex` | planned (#23) |  |  |
-| `feedback.children` | planned (#23) |  |  |
-| `feedback.variableName` | planned (#25) |  | names a feedback's value in a local-variables list |
+| `feedback.isInverted (expression)` | supported | `feedback.invert` | `invert: {expr: …}` |
+| `feedback.styleOverrides` | supported | `feedback.style`, `feedback.style.background`, `feedback.style.textColor`, `feedback.style.text` | the shortcuts, on `box0.color`, `text0.color` and `text0.text` |
+| `feedback.styleOverrides (empty)` | supported | `feedback.style` | `style` left out |
+| `feedback.styleOverrides (other element properties)` | supported | `feedback.style[].element`, `feedback.style[].property`, `feedback.style[].value` | `style` as a list of literal overrides, in stored order |
+| `feedback.disabled` | supported | `feedback.disabled` |  |
+| `feedback.headline` | supported | `feedback.headline` |  |
+| `feedback.upgradeIndex` | supported | `feedback.upgradeIndex` | left out, Companion assumes the connection's current index |
+| `feedback.children` | supported | `feedback: passthrough.children` | on connection `internal` only; `{}` on every internal feedback |
+| `feedback.variableName` | supported | `feedback.variableName` | stored as given; its use in local-variables lists is #25 |
 
 ## Local variable
 

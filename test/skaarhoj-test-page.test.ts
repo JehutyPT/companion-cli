@@ -35,6 +35,7 @@ import {
   seedEmptyPages,
   SKAARHOJ_VARIABLES,
   widenGrid,
+  withInternalChildren,
 } from "./skaarhoj-fixture.ts";
 
 const example = (name: string) =>
@@ -44,12 +45,14 @@ const example = (name: string) =>
 const VARIABLES_FILE = example("variables.yaml");
 const PAGE_FILE = example("page.yaml");
 
-const CAPTURE = JSON.parse(
-  readFileSync(
-    new URL("./fixtures/skaarhoj-page20.json", import.meta.url),
-    "utf8",
-  ),
-) as PageContent;
+const CAPTURE = withInternalChildren(
+  JSON.parse(
+    readFileSync(
+      new URL("./fixtures/skaarhoj-page20.json", import.meta.url),
+      "utf8",
+    ),
+  ) as PageContent,
+);
 
 function apply(env: FixtureEnv, file: string) {
   return runCli(["apply", file, "--db", env.dbPath], {

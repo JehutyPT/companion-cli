@@ -4,7 +4,7 @@
  * matrix and schema tests, so both compare against the same set.
  */
 import { tagged as taggedFields } from "../src/support-matrix.ts";
-import { ACTION_KINDS } from "../src/writers/actions.ts";
+import { ACTION_FIELDS, ACTION_KINDS } from "../src/writers/actions.ts";
 import {
   TOP_LEVEL_FIELDS as BUTTON_FIELDS,
   HOLD_FIELDS,
@@ -14,6 +14,7 @@ import {
   FEEDBACK_FIELDS,
   FEEDBACK_KINDS,
   STYLE_FIELDS,
+  STYLE_OVERRIDE_FIELD_SCHEMAS,
 } from "../src/writers/feedbacks.ts";
 import { FIELDS as CONNECTION_FIELDS } from "../src/writers/connection.ts";
 import { writers } from "../src/writers/index.ts";
@@ -34,10 +35,12 @@ import {
 export interface WriterTables {
   kinds: readonly string[];
   actionKinds: Record<string, { fields: readonly string[] }>;
+  actionFields: readonly string[];
   feedbackKinds: Record<string, { fields: readonly string[] }>;
   eventKinds: Record<string, { fields: readonly string[] }>;
   eventFields: readonly string[];
   styleFields: readonly string[];
+  styleOverrideFields: readonly string[];
   feedbackFields: readonly string[];
   buttonFields: readonly string[];
   stepFields: readonly string[];
@@ -54,10 +57,12 @@ export interface WriterTables {
 export const WRITER_TABLES: WriterTables = {
   kinds: Object.keys(writers),
   actionKinds: ACTION_KINDS,
+  actionFields: ACTION_FIELDS,
   feedbackKinds: FEEDBACK_KINDS,
   eventKinds: EVENT_KINDS,
   eventFields: EVENT_FIELDS,
   styleFields: Object.keys(STYLE_FIELDS),
+  styleOverrideFields: Object.keys(STYLE_OVERRIDE_FIELD_SCHEMAS),
   feedbackFields: FEEDBACK_FIELDS,
   buttonFields: BUTTON_FIELDS,
   stepFields: STEP_FIELDS,
@@ -95,9 +100,11 @@ export function writerFields(tables: WriterTables): Set<string> {
     ...under("connection", tables.connectionFields),
     ...under("surface", tables.surfaceFields),
     ...tagged("action", tables.actionKinds),
+    ...under("action", tables.actionFields),
     ...tagged("feedback", tables.feedbackKinds),
     ...under("feedback", tables.feedbackFields),
     ...under("feedback.style", tables.styleFields),
+    ...under("feedback.style[]", tables.styleOverrideFields),
     ...tagged("event", tables.eventKinds),
     ...under("event", tables.eventFields),
   ]);

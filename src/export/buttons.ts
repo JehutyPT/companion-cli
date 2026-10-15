@@ -9,7 +9,7 @@
  * `runWhileHeld`, and the feedbacks. Everything else is left to the caller's
  * self-check, which rebuilds the control with the writer's
  * `buildButtonControl` and refuses any difference (a changed `fontsize`, a
- * fifth layer, an action's `disabled`).
+ * fifth layer, an unknown key on an action).
  *
  * Emission: `text`, `background` and always `textColor`; `progression`,
  * `stepExpression`, `notes` and `apiStyle` only when they differ from the
@@ -34,8 +34,14 @@ import {
   PROGRESSIONS,
 } from "../writers/button-control.ts";
 import { buttonWriter } from "../writers/button.ts";
-import { STYLE_FIELDS } from "../writers/feedbacks.ts";
-import { exportAction, isOption } from "./actions.ts";
+import {
+  color,
+  entityListPath,
+  exportAction,
+  exportFeedback,
+  plainValue,
+  text,
+} from "./entities.ts";
 import {
   describeStored,
   REASON_UNSUPPORTED,
@@ -58,15 +64,6 @@ export function buttonArea(path: string): Area {
   if (path.startsWith("style")) return "style";
   if (path.startsWith("feedbacks")) return "feedback";
   return "button";
-}
-
-/** An action's or feedback's description field as its stored field. */
-function entityField(path: string): string {
-  return path
-    .replace(/\.variable$/, ".options.name")
-    .replace(/\.(value|by)$/, ".options.value")
-    .replace(/\.connection$/, ".connectionId")
-    .replace(/\.definition$/, ".definitionId");
 }
 
 /**
@@ -98,23 +95,25 @@ function holdStoredPath(
   if (rest === ".whileHeld") return `steps.${step}.options.runWhileHeld`;
   const actions = /^\.actions(\[\d+\].*)?$/.exec(rest);
   if (actions?.[1])
-    return entityField(`${sets}.${after}${actions[1]}`).replace(
-      /(action_sets\.\d+\[\d+\])\.expression$/,
-      "$1.options.value",
-    );
+    return `${sets}.${after}${entityListPath(hold?.["actions"], actions[1])}`;
   return `${sets}.${after}`;
 }
 
-/** The hold entry at `index` of a step's or the button's fields, if any. */
-function holdEntry(fields: unknown, index: number): Fields | undefined {
-  const list = isJsonObject(fields) ? fields["hold"] : undefined;
+/** The entry at `index` of a list field of `fields`, if it is a mapping. */
+function listEntry(
+  fields: unknown,
+  key: string,
+  index: number,
+): Fields | undefined {
+  const list = isJsonObject(fields) ? fields[key] : undefined;
   const entry = Array.isArray(list) ? (list[index] as unknown) : undefined;
   return isJsonObject(entry) ? entry : undefined;
 }
 
 /**
  * A button description field path (no prefix) as a stored control path.
- * `fields`, the description, resolves a hold entry to its duration.
+ * `fields`, the description, resolves a hold entry to its duration and an
+ * entity entry to its kind.
  */
 export function buttonStoredPath(field: string, fields: Fields = {}): string {
   const style = FIELD_PATHS[field];
@@ -123,97 +122,36 @@ export function buttonStoredPath(field: string, fields: Fields = {}): string {
   if (topHold)
     return holdStoredPath(
       0,
-      holdEntry(fields, Number(topHold[1])),
+      listEntry(fields, "hold", Number(topHold[1])),
       topHold[2] ?? "",
     );
   const stepHold = /^steps\[(\d+)\]\.hold\[(\d+)\](.*)$/.exec(field);
-  if (stepHold) {
-    const steps = fields["steps"];
-    const step = Array.isArray(steps)
-      ? (steps[Number(stepHold[1])] as unknown)
-      : undefined;
+  if (stepHold)
     return holdStoredPath(
       Number(stepHold[1]),
-      holdEntry(step, Number(stepHold[2])),
+      listEntry(
+        listEntry(fields, "steps", Number(stepHold[1])),
+        "hold",
+        Number(stepHold[2]),
+      ),
       stepHold[3] ?? "",
     );
-  }
   if (field === "hold") return "steps.0.action_sets";
   const stepHoldList = /^steps\[(\d+)\]\.hold$/.exec(field);
   if (stepHoldList) return `steps.${stepHoldList[1]}.action_sets`;
   const top = /^(down|up|rotate_left|rotate_right)(.*)$/.exec(field);
-  if (top) return entityField(`steps.0.action_sets.${top[1]}${top[2]}`);
+  if (top)
+    return `steps.0.action_sets.${top[1]}${entityListPath(fields[top[1] as string], top[2] ?? "")}`;
   const step =
     /^steps\[(\d+)\]\.?(down|up|rotate_left|rotate_right)?(.*)$/.exec(field);
-  if (step)
-    return step[2]
-      ? entityField(
-          `steps.${step[1]}.action_sets.${step[2]}${step[3]}`.replace(
-            /(action_sets\.\w+\[\d+\])\.expression$/,
-            "$1.options.value",
-          ),
-        )
-      : `steps.${step[1]}`;
+  if (step) {
+    if (!step[2]) return `steps.${step[1]}`;
+    const entry = listEntry(fields, "steps", Number(step[1]));
+    return `steps.${step[1]}.action_sets.${step[2]}${entityListPath(entry?.[step[2]], step[3] ?? "")}`;
+  }
   if (field.startsWith("feedbacks"))
-    return entityField(
-      field
-        .replace(/^(feedbacks\[\d+\])\.(step|expression)$/, "$1.options.$2")
-        .replace(/^(feedbacks\[\d+\])\.style.*$/, "$1.styleOverrides")
-        .replace(/^(feedbacks\[\d+\])\.invert$/, "$1.isInverted"),
-    );
-  if (field === "steps") return "steps";
-  return field.replace(/^(\w+)\[(\d+)\]\.expression$/, "$1[$2].options.value");
-}
-
-/** A wrapped, non-expression value at `path`, refused otherwise. */
-function plainValue(stored: unknown, path: string, area: Area): unknown {
-  if (!isOption(stored))
-    refuse(path, "is not a {value, isExpression} property", area);
-  if (stored.isExpression)
-    refuse(
-      path,
-      "is an expression, which the description format does not support here",
-      area,
-    );
-  return stored.value;
-}
-
-/** A stored color integer as `#RRGGBB`. */
-function color(value: unknown, path: string, area: Area): string {
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < 0 ||
-    value > 0xffffff
-  )
-    refuse(
-      path,
-      `is ${typeof value === "number" ? value : describeStored(value)}, not a 24-bit RGB color`,
-      area,
-    );
-  return `#${value.toString(16).toUpperCase().padStart(6, "0")}`;
-}
-
-/**
- * A stored button text as description text: literal backslash-n becomes a
- * line break. Refuses what `parseText` cannot give back.
- */
-function text(value: unknown, path: string, area: Area): string {
-  if (typeof value !== "string")
-    refuse(path, `is ${describeStored(value)}, not a string`, area);
-  if (value.includes("\n"))
-    refuse(
-      path,
-      "holds a line-feed character, which apply would store as a line break (\\n)",
-      area,
-    );
-  if (value.endsWith("\\n"))
-    refuse(
-      path,
-      "ends in a line break (\\n), which a description cannot keep: apply drops one trailing line break",
-      area,
-    );
-  return value.replaceAll("\\n", "\n");
+    return `feedbacks${entityListPath(fields["feedbacks"], field.slice("feedbacks".length))}`;
+  return field;
 }
 
 /** The index of the layer with `id`, refused when missing. */
@@ -235,140 +173,6 @@ function layerValue(
   const path = `style.layers[${index}].${property}`;
   const layer = layers[index] as Fields;
   return { value: plainValue(layer[property], path, "style"), path };
-}
-
-/** The style field a feedback override's element and property stand for. */
-function styleField(
-  elementId: unknown,
-  elementProperty: unknown,
-): keyof typeof STYLE_FIELDS | undefined {
-  return (Object.keys(STYLE_FIELDS) as (keyof typeof STYLE_FIELDS)[]).find(
-    (name) =>
-      STYLE_FIELDS[name][0] === elementId &&
-      STYLE_FIELDS[name][1] === elementProperty,
-  );
-}
-
-function exportStyle(overrides: unknown, path: string): Fields {
-  if (!Array.isArray(overrides))
-    refuse(
-      path,
-      `is ${describeStored(overrides)}; only boolean feedbacks, which override style, are supported`,
-      "feedback",
-    );
-  if (overrides.length === 0)
-    refuse(
-      path,
-      "is empty; a feedback that overrides no style is not supported",
-      "feedback",
-    );
-  const style: Fields = {};
-  overrides.forEach((override, index) => {
-    const at = `${path}[${index}]`;
-    if (!isJsonObject(override))
-      refuse(
-        at,
-        `is ${describeStored(override)}, not a style override`,
-        "feedback",
-      );
-    const name = styleField(override["elementId"], override["elementProperty"]);
-    if (name === undefined)
-      refuse(
-        at,
-        `overrides ${String(override["elementId"])}.${String(override["elementProperty"])}; only box0.color, text0.color and text0.text are supported`,
-        "feedback",
-      );
-    if (Object.hasOwn(style, name))
-      refuse(at, `overrides ${name} a second time`, "feedback");
-    const valuePath = `${at}.override`;
-    const value = plainValue(override["override"], valuePath, "style");
-    style[name] =
-      name === "text"
-        ? text(value, `${valuePath}.value`, "style")
-        : color(value, `${valuePath}.value`, "style");
-  });
-  return style;
-}
-
-/** The feedback kind and its fields, from the stored entity. */
-function feedbackKind(stored: Fields, path: string): Fields {
-  const { connectionId, definitionId } = stored;
-  const options = stored["options"];
-  if (!isJsonObject(options))
-    refuse(
-      `${path}.options`,
-      `is ${describeStored(options)}, not a mapping`,
-      "feedback",
-    );
-  const keys = Object.keys(options).sort();
-  if (connectionId === "internal" && definitionId === "bank_current_step") {
-    const { step, location } = options;
-    if (
-      keys.join() === "location,step" &&
-      isOption(step) &&
-      !step.isExpression &&
-      isOption(location) &&
-      !location.isExpression &&
-      location.value === "$(this:location)"
-    )
-      return { feedback: "step", step: step.value };
-  }
-  if (connectionId === "internal" && definitionId === "check_expression") {
-    const { expression } = options;
-    if (
-      keys.join() === "expression" &&
-      isOption(expression) &&
-      expression.isExpression &&
-      typeof expression.value === "string" &&
-      expression.value !== ""
-    )
-      return { feedback: "expression", expression: expression.value };
-  }
-  if (typeof connectionId !== "string" || connectionId === "")
-    refuse(`${path}.connectionId`, "is not a connection id", "feedback");
-  if (typeof definitionId !== "string" || definitionId === "")
-    refuse(`${path}.definitionId`, "is not a definition id", "feedback");
-  const plain: Fields = {};
-  for (const [key, option] of Object.entries(options)) {
-    const optionPath = `${path}.options.${key}`;
-    if (!isOption(option))
-      refuse(optionPath, "is not a {value, isExpression} option", "feedback");
-    if (option.isExpression)
-      refuse(
-        optionPath,
-        "is an expression, which the description format supports only in step and expression feedbacks",
-        "feedback",
-      );
-    plain[key] = option.value;
-  }
-  return {
-    feedback: "passthrough",
-    connection: connectionId,
-    definition: definitionId,
-    ...(Object.keys(plain).length > 0 ? { options: plain } : {}),
-  };
-}
-
-function exportFeedback(stored: unknown, path: string): Fields {
-  if (!isJsonObject(stored))
-    refuse(path, `is ${describeStored(stored)}, not a feedback`, "feedback");
-  const style = exportStyle(stored["styleOverrides"], `${path}.styleOverrides`);
-  const inverted = stored["isInverted"];
-  if (
-    !isOption(inverted) ||
-    inverted.isExpression ||
-    typeof inverted.value !== "boolean"
-  )
-    refuse(
-      `${path}.isInverted`,
-      "is not a plain true or false; only a fixed invert is supported",
-      "feedback",
-    );
-  return {
-    ...feedbackKind(stored, path),
-    style,
-    ...(inverted.value ? { invert: true } : {}),
-  };
 }
 
 type ActionSet = (typeof ACTION_SETS)[number];

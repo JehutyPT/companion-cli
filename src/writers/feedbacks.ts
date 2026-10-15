@@ -7,24 +7,42 @@ import {
   NON_EMPTY_STRING,
   ref,
   requiredField,
+  STRING,
 } from "../core/field-schema.ts";
 import {
   describeType,
-  expectBoolean,
   expectList,
   expectMapping,
   expectNonEmptyString,
+  expectString,
   fieldPath,
   type Fields,
   rejectUnknownFields,
   requireField,
 } from "../core/validate.ts";
+import {
+  buildChildGroups,
+  type ChildGroups,
+  childReferences,
+  parseChildGroups,
+} from "./children.ts";
 import { newId } from "./ids.ts";
 import {
   buildPassthrough,
+  CHILDREN_FIELD_SCHEMA,
+  CHILDREN_NEED_INTERNAL,
   customReferences,
+  ENTITY_FIELD_SCHEMAS,
+  ENTITY_FIELDS,
+  type EntityCommon,
+  entityJson,
+  type Option,
+  type Passthrough,
   PASSTHROUGH_FIELD_SCHEMAS,
+  parseBooleanOrExpression,
   parseColor,
+  parseEntityCommon,
+  parseOptionValue,
   parsePassthrough,
   parseText,
   prop,
@@ -49,9 +67,19 @@ import {
  *     definition: some_feedback_id
  *     options: { input: 1 }                      # optional, default {}
  *     style: { text: "LIVE" }
+ *   - feedback: passthrough                      # an advanced feedback: literal overrides
+ *     connection: FixtureConnectionAAAA
+ *     definition: some_advanced_feedback
+ *     style:
+ *       - { element: text0, property: size, value: 24 }
+ *       - { element: box0, property: color, value: { expr: "$(custom:fx_color)" } }
  *
- * `style` overrides only the given fields while the feedback holds. Shapes:
- * docs/companion-internals.md, "Feedbacks".
+ * `style` overrides only the given fields while the feedback holds; without
+ * it the feedback overrides nothing (advanced and value feedbacks). `invert`
+ * may be `{expr: …}`. Every entry also takes `headline`, `disabled`,
+ * `upgradeIndex` and `variableName`; a pass-through on connection `internal`
+ * takes `children` (children.ts). Shapes: docs/companion-internals.md,
+ * "Feedbacks".
  */
 
 /** What a feedback's parse needs to know about the control it belongs to. */
@@ -142,32 +170,62 @@ export const FEEDBACK_KINDS = {
     }),
   }),
   /** Any connection's feedback, written literally. Not checked against the database. */
-  passthrough: defineKind({
-    doc: "Any connection's boolean feedback, written literally: connection, definition and options are not checked against the database.",
-    fieldSchemas: PASSTHROUGH_FIELD_SCHEMAS,
-    parse: parsePassthrough,
-    references: () => [],
-    build: buildPassthrough,
+  passthrough: defineKind<PassthroughFeedback>({
+    doc: "Any connection's feedback (boolean, advanced or value), written literally: connection, definition and options are not checked against the database.",
+    fieldSchemas: {
+      ...PASSTHROUGH_FIELD_SCHEMAS,
+      children: CHILDREN_FIELD_SCHEMA,
+    },
+    schema: CHILDREN_NEED_INTERNAL,
+    parse: (fields, path, context) => ({
+      ...parsePassthrough(fields, path),
+      children: parseChildGroups(fields, path, context),
+    }),
+    references: ({ children }, path) =>
+      childReferences(children, fieldPath(path, "children")),
+    build: (payload) => ({
+      ...buildPassthrough(payload),
+      ...(payload.children
+        ? { children: buildChildGroups(payload.children) }
+        : {}),
+    }),
   }),
 };
+
+/** A pass-through feedback's payload. */
+interface PassthroughFeedback extends Passthrough {
+  children: ChildGroups | undefined;
+}
 
 const FEEDBACKS = taggedKinds<FeedbackContext>("feedback")(FEEDBACK_KINDS);
 
 /** Fields every feedback entry accepts besides its kind's own. */
-export const FEEDBACK_FIELDS = ["style", "invert"] as const;
+export const FEEDBACK_FIELDS = [
+  "style",
+  "invert",
+  "variableName",
+  ...ENTITY_FIELDS,
+] as const;
 
 export const FEEDBACK_FIELD_SCHEMAS: Record<
   (typeof FEEDBACK_FIELDS)[number],
   FieldSchema
 > = {
-  style: requiredField(
-    "The style fields to override while the feedback holds.",
+  style: field(
+    "What the feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides. Left out, it overrides nothing.",
     ref("style"),
   ),
-  invert: field("Holds while the condition is false instead.", {
-    ...BOOLEAN,
-    default: false,
-  }),
+  invert: field(
+    "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+    {
+      anyOf: [{ ...BOOLEAN, default: false }, ref("expression")],
+    },
+  ),
+  variableName: field(
+    "Companion's `variableName` on the feedback, stored when given; not checked.",
+    STRING,
+  ),
+  ...ENTITY_FIELD_SCHEMAS,
 };
 
 /**
@@ -188,17 +246,49 @@ export const STYLE_FIELD_SCHEMAS: Record<StyleField, FieldSchema> = {
   text: field("The button text.", ref("text")),
 };
 
-/** Given style fields, as stored (colors as integers, text with literal backslash-n). */
-export type StyleOverrides = Partial<Record<StyleField, number | string>>;
+/** One stored style override, before its id is generated. */
+export interface StyleOverride {
+  elementId: string;
+  elementProperty: string;
+  override: Option;
+}
 
-/** A parsed feedback entry: its kind and payload, style and invert flag. */
-export type FeedbackSpec = TaggedSpec<typeof FEEDBACK_KINDS> & {
-  style: StyleOverrides;
-  invert: boolean;
+/** A parsed style: the overrides in stored order and the `$(custom:…)` references in its text. */
+interface ParsedStyle {
+  overrides: StyleOverride[];
+  references: VariableReference[];
+}
+
+/** The fields of one literal override in a `style` list. */
+export const STYLE_OVERRIDE_FIELD_SCHEMAS: Record<
+  "element" | "property" | "value",
+  FieldSchema
+> = {
+  element: requiredField(
+    "The style element's id, for example `box0` or `text0`; not checked.",
+    NON_EMPTY_STRING,
+  ),
+  property: requiredField(
+    "The element's property, for example `color` or `size`, or the property of an advanced feedback's result; not checked.",
+    NON_EMPTY_STRING,
+  ),
+  value: requiredField(
+    'The value, stored as given (colors as integers), or `{expr: "<expression>"}`. Not checked, except that `$(custom:…)` references in a plain `text0` `text` value are checked against the database.',
+    ref("optionValue"),
+  ),
 };
 
-function parseStyle(value: unknown, path: string): StyleOverrides {
-  const fields = expectMapping(value, path);
+/** A parsed feedback entry: its kind and payload, and the fields every entry takes. */
+export type FeedbackSpec = TaggedSpec<typeof FEEDBACK_KINDS> & {
+  style: ParsedStyle;
+  invert: Option;
+  variableName: string | undefined;
+  common: EntityCommon;
+};
+
+const TEXT_OVERRIDE = STYLE_FIELDS.text;
+
+function parseStyleMapping(fields: Fields, path: string): ParsedStyle {
   rejectUnknownFields(fields, STYLE_FIELD_NAMES, path);
   if (Object.keys(fields).length === 0) {
     throw new ValidationError(
@@ -206,30 +296,89 @@ function parseStyle(value: unknown, path: string): StyleOverrides {
       `must set at least one of ${STYLE_FIELD_NAMES.join(", ")}`,
     );
   }
-  const style: StyleOverrides = {};
+  const overrides: StyleOverride[] = [];
+  const references: VariableReference[] = [];
   for (const name of STYLE_FIELD_NAMES) {
-    const parse = STYLE_FIELDS[name][2];
-    if (Object.hasOwn(fields, name))
-      style[name] = parse(fields[name], fieldPath(path, name));
+    if (!Object.hasOwn(fields, name)) continue;
+    const [elementId, elementProperty, parse] = STYLE_FIELDS[name];
+    const fieldName = fieldPath(path, name);
+    const value = parse(fields[name], fieldName);
+    overrides.push({ elementId, elementProperty, override: prop(value) });
+    if (typeof value === "string")
+      references.push(...customReferences(value, fieldName));
   }
-  return style;
+  return { overrides, references };
 }
 
-function parseFeedback(
-  item: unknown,
+function parseStyleList(items: unknown[], path: string): ParsedStyle {
+  const overrides: StyleOverride[] = [];
+  const references: VariableReference[] = [];
+  items.forEach((item, index) => {
+    const itemPath = fieldPath(path, index);
+    const fields = expectMapping(item, itemPath);
+    rejectUnknownFields(
+      fields,
+      Object.keys(STYLE_OVERRIDE_FIELD_SCHEMAS),
+      itemPath,
+    );
+    const text = (key: string) =>
+      expectNonEmptyString(
+        requireField(fields, key, itemPath),
+        fieldPath(itemPath, key),
+      );
+    const elementId = text("element");
+    const elementProperty = text("property");
+    const valuePath = fieldPath(itemPath, "value");
+    const override = parseOptionValue(
+      requireField(fields, "value", itemPath),
+      valuePath,
+    );
+    overrides.push({ elementId, elementProperty, override });
+    if (
+      elementId === TEXT_OVERRIDE[0] &&
+      elementProperty === TEXT_OVERRIDE[1] &&
+      !override.isExpression &&
+      typeof override.value === "string"
+    )
+      references.push(...customReferences(override.value, valuePath));
+  });
+  return { overrides, references };
+}
+
+/** `style`: a mapping of shortcuts or a list of literal overrides; none when left out. */
+function parseStyle(fields: Fields, path: string): ParsedStyle {
+  if (!Object.hasOwn(fields, "style")) return { overrides: [], references: [] };
+  const value = fields["style"];
+  const stylePath = fieldPath(path, "style");
+  if (Array.isArray(value)) return parseStyleList(value, stylePath);
+  if (value !== null && typeof value === "object")
+    return parseStyleMapping(value as Fields, stylePath);
+  throw new ValidationError(
+    stylePath,
+    `must be a mapping or a list, got ${describeType(value)}`,
+  );
+}
+
+/** Parses one feedback entry at `path`. */
+export function parseFeedback(
+  fields: Fields,
   path: string,
   context: FeedbackContext,
 ): FeedbackSpec {
-  const fields = expectMapping(item, path);
   const spec = FEEDBACKS.parse(fields, path, context, FEEDBACK_FIELDS);
-  const style = parseStyle(
-    requireField(fields, "style", path),
-    fieldPath(path, "style"),
-  );
   const invert = Object.hasOwn(fields, "invert")
-    ? expectBoolean(fields["invert"], fieldPath(path, "invert"))
-    : false;
-  return { ...spec, style, invert };
+    ? parseBooleanOrExpression(fields["invert"], fieldPath(path, "invert"))
+    : prop(false);
+  const variableName = Object.hasOwn(fields, "variableName")
+    ? expectString(fields["variableName"], fieldPath(path, "variableName"))
+    : undefined;
+  return {
+    ...spec,
+    style: parseStyle(fields, path),
+    invert,
+    variableName,
+    common: parseEntityCommon(fields, path),
+  };
 }
 
 /**
@@ -244,52 +393,52 @@ export function parseFeedbackList(
 ): FeedbackSpec[] {
   if (!Object.hasOwn(fields, key)) return [];
   const path = fieldPath(parent, key);
-  return expectList(fields[key], path).map((item, index) =>
-    parseFeedback(item, fieldPath(path, index), context),
-  );
+  return expectList(fields[key], path).map((item, index) => {
+    const itemPath = fieldPath(path, index);
+    return parseFeedback(expectMapping(item, itemPath), itemPath, context);
+  });
 }
 
 /**
- * The custom variables a list of feedbacks uses, in file order: references
- * in expressions and in style text. Pass-through options are not inspected.
- * `key` is the list's path.
+ * The custom variables one feedback uses: references in its expression, its
+ * children and its style text. Pass-through options are not inspected.
+ */
+export function feedbackReferences(
+  spec: FeedbackSpec,
+  path: string,
+): VariableReference[] {
+  return [...FEEDBACKS.references(spec, path), ...spec.style.references];
+}
+
+/**
+ * The custom variables a list of feedbacks uses, in file order. `key` is the
+ * list's path.
  */
 export function feedbackVariableReferences(
   feedbacks: readonly FeedbackSpec[],
   key: string,
 ): VariableReference[] {
-  return feedbacks.flatMap((spec, index) => {
-    const path = fieldPath(key, index);
-    const text = spec.style.text;
-    return [
-      ...FEEDBACKS.references(spec, path),
-      ...(typeof text === "string"
-        ? customReferences(text, fieldPath(fieldPath(path, "style"), "text"))
-        : []),
-    ];
-  });
+  return feedbacks.flatMap((spec, index) =>
+    feedbackReferences(spec, fieldPath(key, index)),
+  );
 }
 
-/** Companion 5.1 boolean feedback JSON with fresh ids. */
+/** Companion 5.1 feedback JSON with fresh ids. */
 export function buildFeedback(spec: FeedbackSpec): Record<string, unknown> {
-  return {
-    type: "feedback",
-    id: newId(),
-    ...FEEDBACKS.build(spec),
-    isInverted: prop(spec.invert),
-    styleOverrides: STYLE_FIELD_NAMES.flatMap((name) => {
-      const value = spec.style[name];
-      if (value === undefined) return [];
-      const [elementId, elementProperty] = STYLE_FIELDS[name];
-      return [
-        {
-          overrideId: newId(),
-          elementId,
-          elementProperty,
-          override: prop(value),
-        },
-      ];
-    }),
-    children: {},
-  };
+  return entityJson(
+    "feedback",
+    newId(),
+    FEEDBACKS.build(spec),
+    {
+      isInverted: spec.invert,
+      styleOverrides: spec.style.overrides.map((override) => ({
+        overrideId: newId(),
+        ...override,
+      })),
+      ...(spec.variableName === undefined
+        ? {}
+        : { variableName: spec.variableName }),
+    },
+    spec.common,
+  );
 }

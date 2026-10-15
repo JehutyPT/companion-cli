@@ -42,6 +42,7 @@ import {
   seedEmptyPages,
   SKAARHOJ_VARIABLES,
   widenGrid,
+  withInternalChildren,
 } from "./skaarhoj-fixture.ts";
 
 describe("export page: the standard fixture", () => {
@@ -208,12 +209,14 @@ describe("export page: a page apply wrote with every button feature", () => {
   });
 });
 
-const CAPTURE = JSON.parse(
-  readFileSync(
-    new URL("./fixtures/skaarhoj-page20.json", import.meta.url),
-    "utf8",
-  ),
-) as PageContent & { page: Json & { controls: Cells } };
+const CAPTURE = withInternalChildren(
+  JSON.parse(
+    readFileSync(
+      new URL("./fixtures/skaarhoj-page20.json", import.meta.url),
+      "utf8",
+    ),
+  ) as PageContent & { page: Json & { controls: Cells } },
+);
 
 /** `value` with every `<id>` placeholder `id` or `overrideId` given a fresh id. */
 function freshIds(value: unknown): unknown {
@@ -461,85 +464,6 @@ const REFUSALS: RefusalCase[] = [
     path: "steps.0.action_sets.rotate_left",
     area: "button option",
     item: "options.rotaryActions = false with rotate actions",
-  },
-  {
-    label: "a feedback without style overrides",
-    change: withFeedback({ styleOverrides: [] }),
-    cell: "0/0",
-    id: A,
-    reason:
-      "feedbacks[0].styleOverrides is empty; a feedback that overrides no style is not supported",
-    path: "feedbacks[0].styleOverrides",
-    area: "feedback",
-    item: "feedback.styleOverrides (empty)",
-  },
-  {
-    label: "an override of another property",
-    change: withFeedback({
-      styleOverrides: [
-        {
-          overrideId: "FixtureOverrideAAAAAA",
-          elementId: "text0",
-          elementProperty: "fontsize",
-          override: literal(50),
-        },
-      ],
-    }),
-    cell: "0/0",
-    id: A,
-    reason:
-      "feedbacks[0].styleOverrides[0] overrides text0.fontsize; only box0.color, text0.color and text0.text are supported",
-    path: "feedbacks[0].styleOverrides[0]",
-    area: "feedback",
-    item: "feedback.styleOverrides (other element properties)",
-  },
-  {
-    label: "an advanced feedback",
-    change: withFeedback({
-      definitionId: "some_feedback",
-      connectionId: "FixtureConnectionAAAA",
-      options: {},
-      isInverted: undefined,
-    }),
-    cell: "0/0",
-    id: A,
-    reason:
-      "feedbacks[0].styleOverrides is missing; only boolean feedbacks, which override style, are supported",
-    path: "feedbacks[0].styleOverrides",
-    area: "feedback",
-    item: 'feedbackType = "advanced"',
-  },
-  {
-    label: "a disabled action",
-    change: control(A, (value) => {
-      (downList(value)[0] as Json)["disabled"] = true;
-    }),
-    cell: "0/0",
-    id: A,
-    reason:
-      "steps.0.action_sets.down[0].disabled is set, which the description format does not support yet",
-    path: "steps.0.action_sets.down[0].disabled",
-    area: "action",
-    item: "action.disabled",
-  },
-  {
-    label: "an expression option on a module action",
-    change: control(A, (value) => {
-      downList(value).push({
-        type: "action",
-        id: "FixtureActionBBBBBBBB",
-        definitionId: "some_action",
-        connectionId: "FixtureConnectionAAAA",
-        options: { path: { value: "$(custom:fx_label)", isExpression: true } },
-      });
-    }),
-    cell: "0/0",
-    id: A,
-    reason:
-      "steps.0.action_sets.down[1].options.path is an expression, which the description format supports only in set, expression, increment and decrement actions",
-    path: "steps.0.action_sets.down[1].options.path",
-    area: "action",
-    item: "action.options (expression values)",
   },
   {
     label: "a text ending in a stored line break",
@@ -1005,6 +929,263 @@ describe("export page: button options and hold actions (#24)", () => {
     assert.deepEqual(
       normaliseControls(dumpDatabase(copy.dbPath)),
       normaliseControls(dumpDatabase(expected.dbPath)),
+    );
+  });
+});
+
+const expr = (value: unknown) => ({ value, isExpression: true });
+
+/** A module action as Companion stores it: no `children` key. */
+const moduleAction = (id: string, extra: Json = {}) => ({
+  type: "action",
+  id,
+  definitionId: "some_action",
+  connectionId: "FixtureConnectionAAAA",
+  options: {},
+  upgradeIndex: 0,
+  ...extra,
+});
+
+/**
+ * Control A with every #23 entity field, shaped as Companion 5.1 stores it
+ * (`asEntityModel`): `children` on internal entities only, an internal
+ * `logic_if` two levels deep holding empty groups, every store type, an
+ * advanced feedback with no overrides, a `text0.size` override and an
+ * expression `isInverted`. Some entities have no `upgradeIndex`.
+ */
+const fullEntities = control(A, (value) => {
+  const down = downList(value);
+  down.push(
+    moduleAction("FixtureActionModule01", {
+      options: { path: expr("$(custom:fx_label)"), mode: literal(2) },
+      headline: "Query",
+      disabled: true,
+      upgradeIndex: -1,
+      storeResult: {
+        type: "custom-variable",
+        variableName: literal("fx_label"),
+        createIfNotExists: false,
+      },
+    }),
+    {
+      type: "action",
+      id: "FixtureActionLogicIf1",
+      definitionId: "logic_if",
+      connectionId: "internal",
+      options: {},
+      children: {
+        condition: [
+          {
+            type: "feedback",
+            id: "FixtureFeedbackCond01",
+            definitionId: "check_expression",
+            connectionId: "internal",
+            options: { expression: expr("$(custom:fx_counter) > 1") },
+            isInverted: literal(false),
+            // Companion creates every feedback with `styleOverrides: []`.
+            styleOverrides: [],
+            children: {},
+          },
+        ],
+        actions: [
+          {
+            type: "action",
+            id: "FixtureActionLogicIf2",
+            definitionId: "logic_if",
+            connectionId: "internal",
+            options: {},
+            disabled: false,
+            children: { condition: [], actions: [], else_actions: [] },
+          },
+          moduleAction("FixtureActionModule02", {
+            storeResult: {
+              type: "local-variable",
+              location: literal("$(this:location)"),
+              variableName: literal("result"),
+            },
+          }),
+        ],
+        else_actions: [
+          moduleAction("FixtureActionModule03", {
+            storeResult: {
+              type: "page-variable",
+              page: literal("1"),
+              variableName: expr("'v' + 1"),
+            },
+          }),
+          moduleAction("FixtureActionModule04", {
+            storeResult: {
+              type: "custom-variable",
+              variableName: literal("fx_created"),
+              createIfNotExists: true,
+            },
+          }),
+        ],
+      },
+    },
+  );
+  value["feedbacks"] = [
+    {
+      type: "feedback",
+      id: "FixtureFeedbackAdv001",
+      definitionId: "advanced_feedback",
+      connectionId: "FixtureConnectionAAAA",
+      options: { input: literal(1) },
+      isInverted: literal(false),
+      styleOverrides: [],
+      variableName: "fb_value",
+      headline: "Advanced",
+      upgradeIndex: 3,
+    },
+    {
+      type: "feedback",
+      id: "FixtureFeedbackSize01",
+      definitionId: "tally",
+      connectionId: "FixtureConnectionAAAA",
+      options: {},
+      isInverted: expr("$(custom:fx_counter) == 0"),
+      styleOverrides: [
+        {
+          overrideId: "FixtureOverrideSize01",
+          elementId: "text0",
+          elementProperty: "size",
+          override: literal(24),
+        },
+        {
+          overrideId: "FixtureOverrideColor1",
+          elementId: "box0",
+          elementProperty: "color",
+          override: expr("0xff0000"),
+        },
+      ],
+      disabled: true,
+    },
+  ];
+});
+
+/** The refusal `export page 1 --json` gives. */
+async function refusalOf(env: ReturnType<typeof setup>): Promise<Json> {
+  const result = await exportFrom(env, ["page", "1", "--json"]);
+  assert.equal(result.code, 1, result.stdout.join("\n"));
+  return (JSON.parse(result.stdout[0] as string) as Json)["error"] as Json;
+}
+
+describe("export page: full entities (#23)", () => {
+  it("round-trips a Companion-shaped button with every entity field", async () => {
+    const env = setup({}, fullEntities);
+    const yaml = await exportRoundTrip(env, ["page", "1", "--button", "0/0"]);
+    const fields = parse(yaml) as Json;
+    const down = fields["down"] as Json[];
+    assert.deepEqual(down[1], {
+      action: "passthrough",
+      connection: "FixtureConnectionAAAA",
+      definition: "some_action",
+      options: { path: { expr: "$(custom:fx_label)" }, mode: 2 },
+      store: { type: "custom", variable: "fx_label" },
+      headline: "Query",
+      disabled: true,
+      upgradeIndex: -1,
+    });
+    const children = (down[2] as Json)["children"] as Json;
+    assert.deepEqual(Object.keys(children), [
+      "condition",
+      "actions",
+      "else_actions",
+    ]);
+    assert.deepEqual(
+      ((children["else_actions"] as Json[])[1] as Json)["store"],
+      { type: "custom", variable: "fx_created", create: true },
+    );
+    const feedbacks = fields["feedbacks"] as Json[];
+    // No overrides: the entry leaves style out, which apply stores as [].
+    assert.equal((feedbacks[0] as Json)["style"], undefined);
+    assert.equal((feedbacks[0] as Json)["variableName"], "fb_value");
+    assert.deepEqual((feedbacks[1] as Json)["invert"], {
+      expr: "$(custom:fx_counter) == 0",
+    });
+    assert.deepEqual((feedbacks[1] as Json)["style"], [
+      { element: "text0", property: "size", value: 24 },
+      { element: "box0", property: "color", value: { expr: "0xff0000" } },
+    ]);
+    await exportRoundTrip(env, ["page", "1"]);
+  });
+
+  it("names the stored path of an unknown key nested in children", async () => {
+    const env = setup(
+      {},
+      control(A, (value) => {
+        downList(value).push({
+          type: "action",
+          id: "FixtureActionLogicIf1",
+          definitionId: "logic_if",
+          connectionId: "internal",
+          options: {},
+          children: {
+            actions: [moduleAction("FixtureActionModule01", { foo: 1 })],
+          },
+        });
+      }),
+    );
+    const error = await refusalOf(env);
+    assert.equal(
+      error["path"],
+      "steps.0.action_sets.down[1].children.actions[0].foo",
+    );
+    assert.match(String(error["message"]), /does not support yet/);
+  });
+
+  it("refuses children on a module feedback, naming the path", async () => {
+    const env = setup(
+      {},
+      withFeedback({
+        connectionId: "FixtureConnectionAAAA",
+        definitionId: "f",
+        styleOverrides: [],
+        children: { x: [] },
+      }),
+    );
+    const error = await refusalOf(env);
+    assert.equal(error["path"], "feedbacks[0].children");
+    assert.match(
+      String(error["message"]),
+      /only allowed on connection internal/,
+    );
+  });
+
+  it("refuses a plain option value that reads as an expression", async () => {
+    const env = setup(
+      {},
+      control(A, (value) => {
+        downList(value).push(
+          moduleAction("FixtureActionModule01", {
+            options: { x: literal({ expr: "1" }) },
+          }),
+        );
+      }),
+    );
+    const error = await refusalOf(env);
+    assert.equal(error["path"], "steps.0.action_sets.down[1].options.x.value");
+    assert.match(String(error["message"]), /exactly the key expr/);
+  });
+
+  it("refuses a custom-variable store without a boolean createIfNotExists", async () => {
+    const env = setup(
+      {},
+      control(A, (value) => {
+        downList(value).push(
+          moduleAction("FixtureActionModule01", {
+            storeResult: {
+              type: "custom-variable",
+              variableName: literal("fx_label"),
+            },
+          }),
+        );
+      }),
+    );
+    const error = await refusalOf(env);
+    assert.equal(
+      error["path"],
+      "steps.0.action_sets.down[1].storeResult.createIfNotExists",
     );
   });
 });

@@ -93,6 +93,39 @@ steps:
   - {}
   - hold: [{ after: 500, whileHeld: false, actions: [] }]
 `,
+  "feedback without style": `${BUTTON}feedbacks: [{ feedback: expression, expression: "1" }]\n`,
+  "an empty style list": `${BUTTON}feedbacks: [{ feedback: expression, expression: "1", style: [] }]\n`,
+  "full entities (#23)": `${BUTTON}down:
+  - { action: set, variable: v, value: 1, headline: "", disabled: true, upgradeIndex: -1 }
+  - action: passthrough
+    connection: internal
+    definition: logic_if
+    options: { a: { expr: "1 + 1" }, b: { not: expr }, c: { expr: x, y: 1 } }
+    children:
+      condition:
+        - { feedback: passthrough, connection: c, definition: d, style: [] }
+      actions:
+        - action: passthrough
+          connection: internal
+          definition: logic_if
+          children: { actions: [], else_actions: [] }
+      else_actions: []
+  - { action: passthrough, connection: c, definition: d, store: { type: custom, variable: v, create: true } }
+  - { action: passthrough, connection: c, definition: d, store: { type: custom, variable: { expr: x } } }
+  - { action: passthrough, connection: c, definition: d, store: { type: local, variable: v, location: "$(this:location)" } }
+  - { action: passthrough, connection: c, definition: d, store: { type: page, variable: { expr: x }, page: { expr: y } } }
+feedbacks:
+  - feedback: passthrough
+    connection: c
+    definition: d
+    invert: { expr: "1 == 1" }
+    variableName: out
+    headline: h
+    style:
+      - { element: text0, property: size, value: 24 }
+      - { element: box0, property: color, value: { expr: "$(custom:c)" } }
+  - { feedback: step, step: 1, invert: true, disabled: false }
+`,
   "a page with no buttons": `kind: page
 page: 3
 name: Empty
@@ -253,12 +286,31 @@ background: "#000000"
   "steps with top-level rotate_right": `${BUTTON}rotate_right: []\nsteps: [{}]\n`,
   "empty steps": `${BUTTON}steps: []\n`,
   "unknown step field": `${BUTTON}steps: [{ feedbacks: [] }]\n`,
-  "feedback without style": `${BUTTON}feedbacks: [{ feedback: expression, expression: "1" }]\n`,
   "empty style": `${BUTTON}feedbacks: [{ feedback: expression, expression: "1", style: {} }]\n`,
   "unknown style field": `${BUTTON}feedbacks: [{ feedback: expression, expression: "1", style: { size: 1 } }]\n`,
   "wrong feedback": `${BUTTON}feedbacks: [{ feedback: toggle, style: { text: x } }]\n`,
   "step 0": `${BUTTON}feedbacks: [{ feedback: step, step: 0, style: { text: x } }]\n`,
   "a string invert": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: { text: x }, invert: "yes" }]\n`,
+  "an invert expression that is not a string": `${BUTTON}feedbacks: [{ feedback: step, step: 1, invert: { expr: 1 } }]\n`,
+  "an expression option that is not a string": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, options: { a: { expr: 1 } } }]\n`,
+  "children on a module action": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, children: {} }]\n`,
+  "children on a module feedback": `${BUTTON}feedbacks: [{ feedback: passthrough, connection: c, definition: d, children: {} }]\n`,
+  "children on a named action": `${BUTTON}down: [{ action: set, variable: v, value: 1, children: {} }]\n`,
+  "an empty child group name": `${BUTTON}down: [{ action: passthrough, connection: internal, definition: d, children: { "": [] } }]\n`,
+  "a child that is neither action nor feedback": `${BUTTON}down: [{ action: passthrough, connection: internal, definition: d, children: { a: [{ event: startup }] } }]\n`,
+  "a child group that is a mapping": `${BUTTON}down: [{ action: passthrough, connection: internal, definition: d, children: { a: {} } }]\n`,
+  "an unknown store type": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, store: { type: trigger, variable: v } }]\n`,
+  "a local store without location": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, store: { type: local, variable: v } }]\n`,
+  "a page store with create": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, store: { type: page, variable: v, page: "1", create: true } }]\n`,
+  "a custom store with a bad name": `${BUTTON}down: [{ action: passthrough, connection: c, definition: d, store: { type: custom, variable: "a b" } }]\n`,
+  "a store on a named action": `${BUTTON}down: [{ action: set, variable: v, value: 1, store: { type: custom, variable: v } }]\n`,
+  "a fractional upgradeIndex": `${BUTTON}down: [{ action: decrement, variable: v, upgradeIndex: 1.5 }]\n`,
+  "a numeric headline": `${BUTTON}down: [{ action: decrement, variable: v, headline: 1 }]\n`,
+  "a string disabled": `${BUTTON}feedbacks: [{ feedback: step, step: 1, disabled: "no" }]\n`,
+  "a style override without property": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: [{ element: text0, value: 1 }] }]\n`,
+  "a style override with an empty element": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: [{ element: "", property: size, value: 1 }] }]\n`,
+  "a style override with an unknown field": `${BUTTON}feedbacks: [{ feedback: step, step: 1, style: [{ element: text0, property: size, value: 1, x: 1 }] }]\n`,
+  "a numeric variableName": `${BUTTON}feedbacks: [{ feedback: step, step: 1, variableName: 1 }]\n`,
   "a page without buttons": "kind: page\npage: 1\nname: P\n",
   "an empty page name": "kind: page\npage: 1\nname: ''\nbuttons: []\n",
   "a page button with a full location": `kind: page
@@ -365,6 +417,7 @@ function schemaFields(schema: Json): Set<string> {
         branches.every((branch) => props(branch).includes(name)),
     );
   };
+  const actionCommon = commonTo("action");
   const feedbackCommon = commonTo("feedback");
   const eventCommon = commonTo("event");
   return new Set([
@@ -381,10 +434,12 @@ function schemaFields(schema: Json): Set<string> {
     ...under("variables[]", props(defs["variable"] as Json)),
     ...under("steps[]", props(defs["step"] as Json)),
     ...under("hold[]", props(defs["hold"] as Json)),
-    ...tagged("action"),
+    ...tagged("action", actionCommon),
+    ...under("action", actionCommon),
     ...tagged("feedback", feedbackCommon),
     ...under("feedback", feedbackCommon),
-    ...under("feedback.style", props(defs["style"] as Json)),
+    ...under("feedback.style", props(defs["styleShortcuts"] as Json)),
+    ...under("feedback.style[]", props(defs["styleOverride"] as Json)),
     ...tagged("event", eventCommon),
     ...under("event", eventCommon),
   ]);

@@ -18,7 +18,7 @@ import {
   readTriggers,
   type StoredTrigger,
 } from "../writers/trigger.ts";
-import { exportAction } from "./actions.ts";
+import { entityListPath, exportAction } from "./entities.ts";
 import {
   describeStored,
   type Exporter,
@@ -41,8 +41,13 @@ function area(path: string): Area {
 const SAME_NAME_OPTIONS =
   "delay|seconds|time|date|days|latitude|longitude|offset";
 
-/** A description field path of a trigger body as a stored path. */
-function storedPath(field: string): string {
+/**
+ * A description field path of a trigger body as a stored path. `body`, the
+ * description, resolves each action entry's kind.
+ */
+function storedPath(field: string, body: Fields): string {
+  if (field.startsWith("actions["))
+    return `actions${entityListPath(body["actions"], field.slice("actions".length))}`;
   return field
     .replace(/^(name|enabled)$/, "options.$1")
     .replace(
@@ -55,10 +60,7 @@ function storedPath(field: string): string {
     .replace(
       new RegExp(`^(events\\[\\d+\\])\\.(${SAME_NAME_OPTIONS})(?=$|\\[)`),
       "$1.options.$2",
-    )
-    .replace(/^(actions\[\d+\])\.variable$/, "$1.options.name")
-    .replace(/^(actions\[\d+\])\.(value|expression|by)$/, "$1.options.value")
-    .replace(/^(actions\[\d+\])\.options\./, "$1.options.");
+    );
 }
 
 function integerOption(
@@ -228,7 +230,7 @@ function entry(db: DatabaseSync, trigger: StoredTrigger): Fields {
     parse: () => parseTrigger(body),
     check: (plan) => checkTrigger(db, plan),
     build: (plan) => buildTriggerControl(plan, { sortOrder, collectionId }),
-    storedPath,
+    storedPath: (field) => storedPath(field, body),
     area,
   });
   return body;

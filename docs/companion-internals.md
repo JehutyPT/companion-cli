@@ -110,9 +110,20 @@ Increment: `"value": {"isExpression": true, "value": "$(this:current) + 1"}`.
 
 Verified by DB, prototype and main.js: in 5.1 the upgrade rewrites `custom_variable_set_expression` into `custom_variable_set_value` with `options.value = {isExpression: true, …}`; the older `math_operation` style actions are folded into it too. Over REST, presses on the prototype page incremented `sk_presses` and encoders counted up and down.
 
+### Common entity fields
+
+Actions and feedbacks share Companion's `EntityModel` (main.js `asEntityModel`, and the entity factory that makes new ones):
+
+- `options`: each `{value, isExpression}`; any option may hold an expression (`isExpression: true`, `value` the expression text).
+- `headline?` (string), `disabled?` (boolean), `upgradeIndex` (integer, `-1` or the connection's `lastUpgradeIndex`; absent on some older rows).
+- `children`: stored on every entity of connection `internal` (`{}` at minimum) and on no other; `asEntityModel` drops the children of module entities. Each key is a group (`logic_if` has `condition`, `actions` and `else_actions`) holding a list of actions or feedbacks, nested to any depth.
+- Actions add `storeResult?`: `{type: "custom-variable", variableName, createIfNotExists}`, `{type: "local-variable", location, variableName}` or `{type: "page-variable", page, variableName}`, where `variableName`, `location` and `page` are `{value, isExpression}` and `createIfNotExists` a boolean.
+
+The entity factory creates every feedback with `isInverted: {value: false, isExpression: false}` and `styleOverrides: []`, in any list (button feedbacks, trigger conditions, `children` groups). The CLI writes these fields from #23 (`headline`, `disabled`, `upgradeIndex`, `store`, `children` and `{expr: …}` option values on description entries). Verified by main.js; not yet observed in a live Companion.
+
 ## Feedbacks
 
-Feedbacks live at control level (`feedbacks`, a list), not per step. Every feedback the CLI writes is a boolean feedback with this shape; the kinds differ only in `definitionId`, `connectionId` and `options`:
+Feedbacks live at control level (`feedbacks`, a list), not per step. A feedback has this shape; the kinds differ in `definitionId`, `connectionId` and `options`, and the fields of [common entity fields](#common-entity-fields) apply (`children` only on internal ones):
 
 ```json
 {"type": "feedback", "id": "<nanoid>", "definitionId": "bank_current_step",
@@ -137,7 +148,8 @@ Feedbacks live at control level (`feedbacks`, a list), not per step. Every feedb
 
   Verified by main.js: the internal feedback definition `check_expression` ("Variable: Check boolean expression", `feedbackType: "boolean"`, `showInvert: true`) has one option, `id: "expression"` of `type: "expression"`; the definition sets `optionsSupportExpressions: true`, and for such definitions the option parser sets `forceExpression` on `type: "expression"` options, so this value is always evaluated as an expression (definitions without `optionsSupportExpressions` do not get that branch). Companion's own upgrade code builds this feedback as `options: {expression: qs(...)}`, where `qs(t)` returns `{value: t, isExpression: true}`.
 - **Pass-through** (any connection): `definitionId` is the module's feedback id, `connectionId` the connection id, and each option is wrapped as `{"value": <v>, "isExpression": false}`, the same as pass-through actions. Observed in main.js: module feedbacks carry the same `type`, `definitionId`, `connectionId`, `options`, `isInverted` and `styleOverrides` fields as internal ones. Valid definition ids and options are the module's own and are not checked.
-- **`isInverted`** is a wrapped boolean (`{"value": true, "isExpression": false}` inverts the condition); the boolean feedbacks above declare `showInvert: true` in main.js.
+- **`isInverted`** is a wrapped boolean (`{"value": true, "isExpression": false}` inverts the condition), or an expression; the boolean feedbacks above declare `showInvert: true` in main.js.
+- **Subtypes.** A definition's `feedbackType` (`boolean`, `advanced`, `value`, `style-override`) is not stored on the entity. An advanced feedback's `styleOverrides` name the property of the module's result in `override`; a value feedback may store `variableName` (string). Any element and property may be overridden (for example `text0` / `size`), and `styleOverrides` may be empty. The CLI writes them all through `feedback: passthrough` with `style` as a list of `{element, property, value}`.
 
 `bank_current_step` rows written by the CLI loaded and rendered in the live run. Companion loading and rendering the `check_expression` and pass-through rows the CLI writes is not yet observed: the SKAARHOJ test page has neither.
 

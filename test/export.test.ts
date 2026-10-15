@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import type { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import { parseDocument } from "yaml";
+import { parse, parseDocument } from "yaml";
 import { USAGE } from "../src/cli.ts";
 import { SCHEMA_MODELINE } from "../src/schema.ts";
 import {
@@ -536,33 +536,176 @@ triggers:
           ...value,
           actions: (value["actions"] as Json[]).map((action) => ({
             ...action,
-            disabled: true,
+            foo: true,
           })),
         }),
-        "actions[0].disabled is set, which the description format does not support yet",
-        "action",
-      ],
-      [
-        "an expression option outside the variable actions",
-        'Var "quoted" # hash',
-        (value) => ({
-          ...value,
-          actions: (value["actions"] as Json[]).map((action, index) =>
-            index === 1
-              ? {
-                  ...action,
-                  options: {
-                    ...(action["options"] as Json),
-                    path: { value: "$(custom:fx_label)", isExpression: true },
-                  },
-                }
-              : action,
-          ),
-        }),
-        "actions[1].options.path is an expression, which the description format supports only in set, expression, increment and decrement actions",
+        "actions[0].foo is set, which the description format does not support yet",
         "action",
       ],
     ];
+  it("round-trips trigger actions with expression options, disabled, headline, upgradeIndex, children and a store (#23)", async () => {
+    const { env } = await changedTrigger('Var "quoted" # hash', (value) => ({
+      ...value,
+      actions: [
+        ...(value["actions"] as Json[]).map((action) => ({
+          ...action,
+          disabled: true,
+          headline: "Kept",
+          upgradeIndex: 2,
+        })),
+        {
+          type: "action",
+          id: "TriggerActionModule01",
+          definitionId: "some_action",
+          connectionId: "FixtureConnectionAAAA",
+          options: {
+            path: { value: "$(custom:fx_label)", isExpression: true },
+          },
+          storeResult: {
+            type: "page-variable",
+            page: { value: "1", isExpression: false },
+            variableName: { value: "result", isExpression: false },
+          },
+        },
+        {
+          type: "action",
+          id: "TriggerActionLogicIf1",
+          definitionId: "logic_if",
+          connectionId: "internal",
+          options: {},
+          children: {
+            condition: [],
+            actions: [
+              {
+                type: "action",
+                id: "TriggerActionLogicIf2",
+                definitionId: "logic_if",
+                connectionId: "internal",
+                options: {},
+                children: {
+                  condition: [
+                    {
+                      type: "feedback",
+                      id: "TriggerFeedbackDepth2",
+                      definitionId: "tally",
+                      connectionId: "FixtureConnectionAAAA",
+                      options: {},
+                      isInverted: {
+                        value: "$(custom:fx_counter) > 0",
+                        isExpression: true,
+                      },
+                      styleOverrides: [
+                        {
+                          overrideId: "TriggerOverrideDepth2",
+                          elementId: "text0",
+                          elementProperty: "size",
+                          override: { value: 12, isExpression: false },
+                        },
+                      ],
+                      variableName: "tally_value",
+                    },
+                  ],
+                  actions: [
+                    {
+                      type: "action",
+                      id: "TriggerActionModule02",
+                      definitionId: "some_action",
+                      connectionId: "FixtureConnectionAAAA",
+                      options: {},
+                      storeResult: {
+                        type: "custom-variable",
+                        variableName: {
+                          value: "fx_label",
+                          isExpression: false,
+                        },
+                        createIfNotExists: false,
+                      },
+                    },
+                  ],
+                  else_actions: [],
+                },
+              },
+            ],
+            else_actions: [
+              {
+                type: "action",
+                id: "TriggerActionModule03",
+                definitionId: "some_action",
+                connectionId: "FixtureConnectionAAAA",
+                options: {},
+                storeResult: {
+                  type: "local-variable",
+                  location: { value: "$(this:location)", isExpression: false },
+                  variableName: { value: "result", isExpression: false },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }));
+    const yaml = await exportRoundTrip(env, ["trigger", 'Var "quoted" # hash']);
+    const actions = (parse(yaml) as Json)["actions"] as Json[];
+    assert.equal((actions[0] as Json)["disabled"], true);
+    assert.deepEqual((actions.at(-2) as Json)["options"], {
+      path: { expr: "$(custom:fx_label)" },
+    });
+    const children = (actions.at(-1) as Json)["children"] as Json;
+    const depth2 = ((children["actions"] as Json[])[0] as Json)[
+      "children"
+    ] as Json;
+    assert.deepEqual((depth2["condition"] as Json[])[0], {
+      feedback: "passthrough",
+      connection: "FixtureConnectionAAAA",
+      definition: "tally",
+      invert: { expr: "$(custom:fx_counter) > 0" },
+      style: [{ element: "text0", property: "size", value: 12 }],
+      variableName: "tally_value",
+    });
+    assert.deepEqual(((depth2["actions"] as Json[])[0] as Json)["store"], {
+      type: "custom",
+      variable: "fx_label",
+    });
+    assert.deepEqual(
+      ((children["else_actions"] as Json[])[0] as Json)["store"],
+      { type: "local", variable: "result", location: "$(this:location)" },
+    );
+  });
+
+  it("names a refused key's stored path inside a trigger action's children", async () => {
+    const { env } = await changedTrigger('Var "quoted" # hash', (value) => ({
+      ...value,
+      actions: [
+        {
+          type: "action",
+          id: "TriggerActionLogicIf1",
+          definitionId: "logic_if",
+          connectionId: "internal",
+          options: {},
+          children: {
+            else_actions: [
+              {
+                type: "action",
+                id: "TriggerActionModule01",
+                definitionId: "d",
+                connectionId: "FixtureConnectionAAAA",
+                options: {},
+                children: {},
+              },
+            ],
+          },
+        },
+      ],
+    }));
+    const json = await exportFrom(env, [
+      "trigger",
+      'Var "quoted" # hash',
+      "--json",
+    ]);
+    assert.equal(json.code, 1);
+    const { error } = JSON.parse(json.stdout[0] as string);
+    assert.equal(error.path, "actions[0].children.else_actions[0].children");
+  });
   for (const [label, name, change, reason, area] of refusals) {
     it(`refuses ${label}`, async () => {
       const { env, id } = await changedTrigger(name, change);

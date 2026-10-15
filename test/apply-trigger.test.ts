@@ -137,6 +137,7 @@ const FULL_ACTIONS = [
     definitionId: "custom_variable_set_value",
     connectionId: "internal",
     options: { name: prop("fx_label"), value: prop("reset") },
+    children: {},
   },
   {
     type: "action",
@@ -147,6 +148,7 @@ const FULL_ACTIONS = [
       name: prop("fx_counter"),
       value: prop("$(this:current) + 1", true),
     },
+    children: {},
   },
   {
     type: "action",
@@ -157,6 +159,7 @@ const FULL_ACTIONS = [
       name: prop("fx_gap"),
       value: prop("$(custom:fx_counter) * 2", true),
     },
+    children: {},
   },
   {
     type: "action",

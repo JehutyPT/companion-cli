@@ -2,13 +2,19 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
   field,
   type FieldSchema,
+  integer,
   NON_EMPTY_STRING,
+  ref,
   requiredField,
   type SchemaFragment,
+  STRING,
 } from "../core/field-schema.ts";
 import {
+  expectBoolean,
+  expectInteger,
   expectJsonValue,
   expectMapping,
   expectNonEmptyString,
@@ -24,7 +30,7 @@ import {
  * Companion shapes and rules shared by several writers. Writers (button.ts,
  * page.ts, trigger.ts, variables.ts) never import from a sibling writer; they share code
  * through this module and the other non-writer modules: ids.ts, actions.ts,
- * feedbacks.ts and button-control.ts.
+ * feedbacks.ts, children.ts and button-control.ts.
  */
 
 /** A wrapped option value, as Companion stores options in layers, actions and feedbacks. */
@@ -118,9 +124,129 @@ export function parseText(value: unknown, field: string): string {
 }
 
 /**
+ * An expression in a description: a mapping with exactly the key `expr`,
+ * holding the expression text. Stored as `{value: <text>, isExpression: true}`.
+ */
+export function isExpressionMapping(
+  value: unknown,
+): value is { expr: unknown } {
+  return (
+    isJsonObject(value) &&
+    Object.keys(value).length === 1 &&
+    Object.hasOwn(value, "expr")
+  );
+}
+
+function parseExpressionMapping(value: { expr: unknown }, field: string) {
+  return prop(expectString(value.expr, fieldPath(field, "expr")), true);
+}
+
+/**
+ * A pass-through option value: `{expr: "<expression>"}` is an expression,
+ * anything else a plain JSON value.
+ */
+export function parseOptionValue(value: unknown, field: string): Option {
+  if (isExpressionMapping(value)) return parseExpressionMapping(value, field);
+  expectJsonValue(value, field);
+  return prop(value);
+}
+
+/** A string or `{expr: "<expression>"}`, as stored. */
+export function parseStringOrExpression(value: unknown, field: string): Option {
+  if (isExpressionMapping(value)) return parseExpressionMapping(value, field);
+  return prop(expectString(value, field));
+}
+
+/** A boolean or `{expr: "<expression>"}`, as stored. */
+export function parseBooleanOrExpression(
+  value: unknown,
+  field: string,
+): Option {
+  if (isExpressionMapping(value)) return parseExpressionMapping(value, field);
+  return prop(expectBoolean(value, field));
+}
+
+/**
+ * Fields every action and feedback entry accepts, whatever its kind
+ * (Companion's `EntityModelBase`). Each is stored only when given.
+ */
+export const ENTITY_FIELD_SCHEMAS: Record<
+  "headline" | "disabled" | "upgradeIndex",
+  FieldSchema
+> = {
+  headline: field(
+    "A label Companion's editor shows for the entry. Stored only when given.",
+    STRING,
+  ),
+  disabled: field(
+    "Whether Companion skips the entry. Stored only when given.",
+    BOOLEAN,
+  ),
+  upgradeIndex: field(
+    "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+    integer(),
+  ),
+};
+
+export const ENTITY_FIELDS = Object.keys(ENTITY_FIELD_SCHEMAS) as Array<
+  keyof typeof ENTITY_FIELD_SCHEMAS
+>;
+
+/** The common entity fields given in an entry. */
+export interface EntityCommon {
+  headline?: string;
+  disabled?: boolean;
+  upgradeIndex?: number;
+}
+
+export function parseEntityCommon(fields: Fields, path: string): EntityCommon {
+  const common: EntityCommon = {};
+  if (Object.hasOwn(fields, "headline"))
+    common.headline = expectString(
+      fields["headline"],
+      fieldPath(path, "headline"),
+    );
+  if (Object.hasOwn(fields, "disabled"))
+    common.disabled = expectBoolean(
+      fields["disabled"],
+      fieldPath(path, "disabled"),
+    );
+  if (Object.hasOwn(fields, "upgradeIndex"))
+    common.upgradeIndex = expectInteger(
+      fields["upgradeIndex"],
+      fieldPath(path, "upgradeIndex"),
+    );
+  return common;
+}
+
+/**
+ * An entry's stored JSON around its kind's body: `extra` (a feedback's
+ * fields), `children` exactly when the connection is `internal`, as Companion
+ * stores entities (`{}` unless the body has child groups), and the common
+ * fields when given.
+ */
+export function entityJson(
+  type: "action" | "feedback",
+  id: string,
+  { children, ...body }: EntityBody,
+  extra: Record<string, unknown>,
+  common: EntityCommon,
+): Record<string, unknown> {
+  return {
+    type,
+    id,
+    ...body,
+    ...extra,
+    ...(body.connectionId === "internal" ? { children: children ?? {} } : {}),
+    ...common,
+  };
+}
+
+/**
  * A pass-through action or feedback: any connection's definition, written
  * literally. Connection ids, definition ids and option values are not checked
- * against the database, and option values are stored as plain values.
+ * against the database. An option value `{expr: "<expression>"}` is stored as
+ * an expression.
  */
 export const PASSTHROUGH_FIELD_SCHEMAS: Record<string, FieldSchema> = {
   connection: requiredField(
@@ -132,21 +258,35 @@ export const PASSTHROUGH_FIELD_SCHEMAS: Record<string, FieldSchema> = {
     NON_EMPTY_STRING,
   ),
   options: field(
-    "The definition's options, each stored as a plain (non-expression) value; not checked.",
+    'The definition\'s options, not checked. Each value is stored as a plain value, except `{expr: "<expression>"}`, which is stored as an expression.',
     {
       type: "object",
-      additionalProperties: { $ref: "#/$defs/jsonValue" },
+      additionalProperties: { $ref: "#/$defs/optionValue" },
       default: {},
     },
   ),
 };
 
-export const PASSTHROUGH_FIELDS = Object.keys(PASSTHROUGH_FIELD_SCHEMAS);
+/** `children` on a pass-through entry; `#/$defs/children` describes the groups. */
+export const CHILDREN_FIELD_SCHEMA: FieldSchema = field(
+  "Child entries by group, for internal entities that have them (such as `logic_if`). Only on connection `internal`: Companion discards the children of other connections' entities.",
+  ref("children"),
+);
+
+/** A pass-through entry with `children` must be on connection `internal`. */
+export const CHILDREN_NEED_INTERNAL: SchemaFragment = {
+  dependentSchemas: {
+    children: {
+      $comment: "`children` only on connection `internal`.",
+      properties: { connection: { const: "internal" } },
+    },
+  },
+};
 
 export interface Passthrough {
   connection: string;
   definition: string;
-  options: Fields;
+  options: Record<string, Option>;
 }
 
 export function parsePassthrough(fields: Fields, path: string): Passthrough {
@@ -154,32 +294,34 @@ export function parsePassthrough(fields: Fields, path: string): Passthrough {
   const options = Object.hasOwn(fields, "options")
     ? expectMapping(fields["options"], optionsPath)
     : {};
-  expectJsonValue(options, optionsPath);
-  return {
-    connection: expectNonEmptyString(
-      requireField(fields, "connection", path),
-      fieldPath(path, "connection"),
-    ),
-    definition: expectNonEmptyString(
-      requireField(fields, "definition", path),
-      fieldPath(path, "definition"),
-    ),
-    options,
-  };
+  const connection = expectNonEmptyString(
+    requireField(fields, "connection", path),
+    fieldPath(path, "connection"),
+  );
+  const definition = expectNonEmptyString(
+    requireField(fields, "definition", path),
+    fieldPath(path, "definition"),
+  );
+  const parsed = Object.fromEntries(
+    Object.entries(options).map(([key, value]) => [
+      key,
+      parseOptionValue(value, fieldPath(optionsPath, key)),
+    ]),
+  );
+  if (Object.hasOwn(fields, "children") && connection !== "internal")
+    throw new ValidationError(
+      fieldPath(path, "children"),
+      `is only allowed on connection internal, not "${connection}": Companion discards the children of other connections' entities`,
+    );
+  return { connection, definition, options: parsed };
 }
 
 export function buildPassthrough({
   connection,
   definition,
   options,
-}: Passthrough) {
-  return {
-    definitionId: definition,
-    connectionId: connection,
-    options: Object.fromEntries(
-      Object.entries(options).map(([key, value]) => [key, prop(value)]),
-    ),
-  };
+}: Passthrough): EntityBody {
+  return { definitionId: definition, connectionId: connection, options };
 }
 
 /** A `$(custom:<name>)` reference, or an action's target variable, with the field it came from. */
@@ -228,6 +370,10 @@ export interface EntityBody {
   definitionId: string;
   connectionId: string;
   options: Record<string, Option>;
+  /** An action's `storeResult`, when given. */
+  storeResult?: Record<string, unknown>;
+  /** Built child groups, when given; `entityJson` stores `{}` otherwise on internal entities. */
+  children?: Record<string, Record<string, unknown>[]>;
 }
 
 /**

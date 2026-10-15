@@ -1073,6 +1073,52 @@
       ],
       "additionalProperties": false
     },
+    "expression": {
+      "description": "A Companion expression instead of a plain value: `{expr: \"<expression>\"}`, stored as `{value: <expression>, isExpression: true}`.",
+      "type": "object",
+      "properties": {
+        "expr": {
+          "description": "The expression text; not checked.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "additionalProperties": false
+    },
+    "optionValue": {
+      "description": "A plain JSON value, or `{expr: …}` (a mapping with exactly the key `expr`) for an expression. A plain mapping with exactly the key `expr` cannot be written.",
+      "if": {
+        "type": "object",
+        "properties": {
+          "expr": {
+            "description": "Any value: the expression text when a string."
+          }
+        },
+        "required": [
+          "expr"
+        ],
+        "maxProperties": 1
+      },
+      "then": {
+        "$ref": "#/$defs/expression"
+      },
+      "else": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "stringOrExpression": {
+      "description": "A string, or `{expr: …}` for an expression.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/expression"
+        }
+      ]
+    },
     "action": {
       "description": "An action, tagged with `action`. Only `$(custom:…)` references and named variables are checked against the database; pass-through actions are written literally and not checked.",
       "oneOf": [
@@ -1096,6 +1142,20 @@
                 "number",
                 "boolean"
               ]
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1122,6 +1182,20 @@
               "description": "A Companion expression, for example `$(custom:fx_counter) * 2`. `$(custom:…)` references in it are checked against the database.",
               "type": "string",
               "minLength": 1
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1150,6 +1224,20 @@
               "minimum": 1,
               "maximum": 9007199254740991,
               "default": 1
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1177,6 +1265,20 @@
               "minimum": 1,
               "maximum": 9007199254740991,
               "default": 1
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1189,6 +1291,16 @@
           "type": "object",
           "title": "action: passthrough",
           "description": "Any connection's action, written literally: connection, definition and options are not checked against the database.",
+          "dependentSchemas": {
+            "children": {
+              "$comment": "`children` only on connection `internal`.",
+              "properties": {
+                "connection": {
+                  "const": "internal"
+                }
+              }
+            }
+          },
           "properties": {
             "action": {
               "description": "Selects the passthrough action.",
@@ -1205,12 +1317,34 @@
               "minLength": 1
             },
             "options": {
-              "description": "The definition's options, each stored as a plain (non-expression) value; not checked.",
+              "description": "The definition's options, not checked. Each value is stored as a plain value, except `{expr: \"<expression>\"}`, which is stored as an expression.",
               "type": "object",
               "additionalProperties": {
-                "$ref": "#/$defs/jsonValue"
+                "$ref": "#/$defs/optionValue"
               },
               "default": {}
+            },
+            "store": {
+              "description": "Where Companion stores the action's result (`storeResult`). Left out, the result is discarded.",
+              "$ref": "#/$defs/store"
+            },
+            "children": {
+              "description": "Child entries by group, for internal entities that have them (such as `logic_if`). Only on connection `internal`: Companion discards the children of other connections' entities.",
+              "$ref": "#/$defs/children"
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -1223,7 +1357,7 @@
       ]
     },
     "feedback": {
-      "description": "A boolean feedback, tagged with `feedback`, that overrides the button's style while it holds.",
+      "description": "A feedback, tagged with `feedback`, that overrides the button's style while it holds.",
       "oneOf": [
         {
           "type": "object",
@@ -1242,19 +1376,43 @@
               "$comment": "Not expressible here: the step must be at most the number of the button's steps (1 without `steps`)."
             },
             "style": {
-              "description": "The style fields to override while the feedback holds.",
+              "description": "What the feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides. Left out, it overrides nothing.",
               "$ref": "#/$defs/style"
             },
             "invert": {
-              "description": "Holds while the condition is false instead.",
-              "type": "boolean",
-              "default": false
+              "description": "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "default": false
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "variableName": {
+              "description": "Companion's `variableName` on the feedback, stored when given; not checked.",
+              "type": "string"
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
             "feedback",
-            "step",
-            "style"
+            "step"
           ],
           "additionalProperties": false
         },
@@ -1273,26 +1431,60 @@
               "minLength": 1
             },
             "style": {
-              "description": "The style fields to override while the feedback holds.",
+              "description": "What the feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides. Left out, it overrides nothing.",
               "$ref": "#/$defs/style"
             },
             "invert": {
-              "description": "Holds while the condition is false instead.",
-              "type": "boolean",
-              "default": false
+              "description": "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "default": false
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "variableName": {
+              "description": "Companion's `variableName` on the feedback, stored when given; not checked.",
+              "type": "string"
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
             "feedback",
-            "expression",
-            "style"
+            "expression"
           ],
           "additionalProperties": false
         },
         {
           "type": "object",
           "title": "feedback: passthrough",
-          "description": "Any connection's boolean feedback, written literally: connection, definition and options are not checked against the database.",
+          "description": "Any connection's feedback (boolean, advanced or value), written literally: connection, definition and options are not checked against the database.",
+          "dependentSchemas": {
+            "children": {
+              "$comment": "`children` only on connection `internal`.",
+              "properties": {
+                "connection": {
+                  "const": "internal"
+                }
+              }
+            }
+          },
           "properties": {
             "feedback": {
               "description": "Selects the passthrough feedback.",
@@ -1309,34 +1501,183 @@
               "minLength": 1
             },
             "options": {
-              "description": "The definition's options, each stored as a plain (non-expression) value; not checked.",
+              "description": "The definition's options, not checked. Each value is stored as a plain value, except `{expr: \"<expression>\"}`, which is stored as an expression.",
               "type": "object",
               "additionalProperties": {
-                "$ref": "#/$defs/jsonValue"
+                "$ref": "#/$defs/optionValue"
               },
               "default": {}
             },
+            "children": {
+              "description": "Child entries by group, for internal entities that have them (such as `logic_if`). Only on connection `internal`: Companion discards the children of other connections' entities.",
+              "$ref": "#/$defs/children"
+            },
             "style": {
-              "description": "The style fields to override while the feedback holds.",
+              "description": "What the feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides. Left out, it overrides nothing.",
               "$ref": "#/$defs/style"
             },
             "invert": {
-              "description": "Holds while the condition is false instead.",
-              "type": "boolean",
-              "default": false
+              "description": "Holds while the condition is false instead: true or false, or `{expr: …}`.",
+              "anyOf": [
+                {
+                  "type": "boolean",
+                  "default": false
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "variableName": {
+              "description": "Companion's `variableName` on the feedback, stored when given; not checked.",
+              "type": "string"
+            },
+            "headline": {
+              "description": "A label Companion's editor shows for the entry. Stored only when given.",
+              "type": "string"
+            },
+            "disabled": {
+              "description": "Whether Companion skips the entry. Stored only when given.",
+              "type": "boolean"
+            },
+            "upgradeIndex": {
+              "description": "Where the connection's upgrade scripts start for this entry. Left out, Companion fills in the connection's current index when it loads; stored exactly when given.",
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
             }
           },
           "required": [
             "feedback",
             "connection",
-            "definition",
-            "style"
+            "definition"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "children": {
+      "description": "Child entries by group name (for example `actions` and `else_actions` of `logic_if`), in order. Each child is an action or a feedback entry; a group may be empty.",
+      "type": "object",
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/action"
+            },
+            {
+              "$ref": "#/$defs/feedback"
+            }
+          ]
+        }
+      }
+    },
+    "store": {
+      "description": "Where Companion stores an action's result, selected by `type`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "store: custom",
+          "description": "Companion's `custom-variable` result target.",
+          "properties": {
+            "type": {
+              "description": "Stores into a custom-variable.",
+              "const": "custom"
+            },
+            "variable": {
+              "description": "The custom variable, by name (without `custom:`), or an expression. A name must exist in the database unless `create` is true.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/variableName"
+                },
+                {
+                  "$ref": "#/$defs/expression"
+                }
+              ]
+            },
+            "create": {
+              "description": "Create the variable when it does not exist.",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "type",
+            "variable"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "store: local",
+          "description": "Companion's `local-variable` result target.",
+          "properties": {
+            "type": {
+              "description": "Stores into a local-variable.",
+              "const": "local"
+            },
+            "variable": {
+              "description": "The local variable's name, or an expression; not checked.",
+              "$ref": "#/$defs/stringOrExpression"
+            },
+            "location": {
+              "description": "The button whose local variable it is, for example `$(this:location)`, or an expression; not checked.",
+              "$ref": "#/$defs/stringOrExpression"
+            }
+          },
+          "required": [
+            "type",
+            "variable",
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "store: page",
+          "description": "Companion's `page-variable` result target.",
+          "properties": {
+            "type": {
+              "description": "Stores into a page-variable.",
+              "const": "page"
+            },
+            "variable": {
+              "description": "The page variable's name, or an expression; not checked.",
+              "$ref": "#/$defs/stringOrExpression"
+            },
+            "page": {
+              "description": "The page, as text, or an expression; not checked.",
+              "$ref": "#/$defs/stringOrExpression"
+            }
+          },
+          "required": [
+            "type",
+            "variable",
+            "page"
           ],
           "additionalProperties": false
         }
       ]
     },
     "style": {
+      "description": "What a feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides in stored order.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/styleShortcuts"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/styleOverride"
+          }
+        }
+      ]
+    },
+    "styleShortcuts": {
       "type": "object",
       "description": "The style fields a feedback overrides; at least one. The others keep the button's own style.",
       "minProperties": 1,
@@ -1354,6 +1695,32 @@
           "$ref": "#/$defs/text"
         }
       },
+      "additionalProperties": false
+    },
+    "styleOverride": {
+      "type": "object",
+      "description": "One literal style override: an element's property and its value.",
+      "properties": {
+        "element": {
+          "description": "The style element's id, for example `box0` or `text0`; not checked.",
+          "type": "string",
+          "minLength": 1
+        },
+        "property": {
+          "description": "The element's property, for example `color` or `size`, or the property of an advanced feedback's result; not checked.",
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "description": "The value, stored as given (colors as integers), or `{expr: \"<expression>\"}`. Not checked, except that `$(custom:…)` references in a plain `text0` `text` value are checked against the database.",
+          "$ref": "#/$defs/optionValue"
+        }
+      },
+      "required": [
+        "element",
+        "property",
+        "value"
+      ],
       "additionalProperties": false
     },
     "triggerBody": {

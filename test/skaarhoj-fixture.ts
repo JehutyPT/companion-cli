@@ -90,3 +90,29 @@ export function pageContent(
   );
   return { page: { ...stored, controls: strippedCells }, controls, variables };
 }
+
+/**
+ * `value` with `children: {}` on every internal action or feedback that
+ * lacks it, as Companion stores entities (`asEntityModel`) and the writers
+ * do since #23. The prototype wrote internal actions without `children`, so
+ * the reproduction tests compare against the capture in this form; the
+ * committed capture stays exactly what the prototype wrote.
+ */
+export function withInternalChildren<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(withInternalChildren) as T;
+  if (value === null || typeof value !== "object") return value;
+  const object = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      withInternalChildren(child as unknown),
+    ]),
+  );
+  const isEntity = object["type"] === "action" || object["type"] === "feedback";
+  if (
+    isEntity &&
+    object["connectionId"] === "internal" &&
+    !("children" in object)
+  )
+    object["children"] = {};
+  return object as T;
+}

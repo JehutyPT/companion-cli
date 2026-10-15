@@ -58,7 +58,19 @@ An action set keyed by a duration in milliseconds, run when the button has been 
 One operation run by a button or trigger, identified by a connection id and a definition id (for example `internal` / `custom_variable_set_value`).
 
 **Feedback**:
-A condition evaluated by Companion that overrides parts of a button's style while it holds (for example `bank_current_step`).
+A condition evaluated by Companion that overrides parts of a button's style while it holds (for example `bank_current_step`). Its definition's subtype (boolean, advanced, value, style-override) is not stored; an advanced feedback's style overrides name properties of the module's result.
+
+**Entity**:
+An action or a feedback: what the two share in Companion's stored shape (options, `headline`, `disabled`, `upgradeIndex`, `children`). _Avoid_: item, step (a step is something else).
+
+**Expression option**:
+An entity option, store field or `invert` holding an expression that Companion evaluates, rather than a plain value. Written `{expr: "…"}` in a description; stored as `{value, isExpression: true}`.
+
+**Child group**:
+A named list of entities nested inside an `internal` entity (for example `logic_if`'s `condition`, `actions` and `else_actions`). Written as `children` in a description. Only internal entities have them.
+
+**Store**:
+Where an action puts its result: a custom, local or page variable. Written as `store` in a description; stored as `storeResult`.
 
 **Trigger**:
 A control with no location that runs actions when one of its events occurs (startup, variable change, interval and others) and its condition holds. The tool identifies a trigger by its name.

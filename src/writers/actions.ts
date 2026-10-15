@@ -1,5 +1,6 @@
 import { ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
   field,
   type FieldSchema,
   integer,
@@ -10,21 +11,39 @@ import {
 } from "../core/field-schema.ts";
 import {
   describeType,
+  expectBoolean,
   expectList,
   expectMapping,
   expectNonEmptyString,
   expectPositiveInteger,
+  expectString,
   fieldPath,
   type Fields,
+  rejectUnknownFields,
   requireField,
 } from "../core/validate.ts";
+import {
+  buildChildGroups,
+  type ChildGroups,
+  childReferences,
+  parseChildGroups,
+} from "./children.ts";
+import type { FeedbackContext } from "./feedbacks.ts";
 import { newId } from "./ids.ts";
 import {
   buildPassthrough,
+  CHILDREN_FIELD_SCHEMA,
+  CHILDREN_NEED_INTERNAL,
   customReferences,
+  ENTITY_FIELDS,
+  type EntityCommon,
+  entityJson,
   type Option,
+  type Passthrough,
   PASSTHROUGH_FIELD_SCHEMAS,
+  parseEntityCommon,
   parsePassthrough,
+  parseStringOrExpression,
   parseVariableName,
   prop,
   type TaggedKind,
@@ -52,7 +71,7 @@ import {
  */
 
 /** One kind of action. Adding an action means adding one entry to ACTION_KINDS. */
-type ActionKind<P> = TaggedKind<P>;
+type ActionKind<P> = TaggedKind<P, FeedbackContext>;
 
 const VARIABLE_FIELD = requiredField(
   "The custom variable to set, by name (without `custom:`). It must exist in the database.",
@@ -167,19 +186,63 @@ export const ACTION_KINDS = {
     references: () => [],
     value: ({ by }) => prop(`$(this:current) - ${by}`, true),
   }),
-  passthrough: taggedKind({
+  passthrough: taggedKind<PassthroughAction, FeedbackContext>({
     doc: "Any connection's action, written literally: connection, definition and options are not checked against the database.",
-    fieldSchemas: PASSTHROUGH_FIELD_SCHEMAS,
-    parse: parsePassthrough,
-    references: () => [],
-    build: buildPassthrough,
+    fieldSchemas: {
+      ...PASSTHROUGH_FIELD_SCHEMAS,
+      store: field(
+        "Where Companion stores the action's result (`storeResult`). Left out, the result is discarded.",
+        ref("store"),
+      ),
+      children: CHILDREN_FIELD_SCHEMA,
+    },
+    schema: CHILDREN_NEED_INTERNAL,
+    parse: (fields, path, context) => ({
+      ...parsePassthrough(fields, path),
+      store: parseStore(fields, path),
+      children: parseChildGroups(fields, path, context),
+    }),
+    references: ({ store, children }, path) => [
+      ...(store ? storeReferences(store, fieldPath(path, "store")) : []),
+      ...childReferences(children, fieldPath(path, "children")),
+    ],
+    build: (payload) => ({
+      ...buildPassthrough(payload),
+      ...(payload.store ? { storeResult: buildStore(payload.store) } : {}),
+      ...(payload.children
+        ? { children: buildChildGroups(payload.children) }
+        : {}),
+    }),
   }),
 };
 
-const ACTIONS = taggedKinds("action")(ACTION_KINDS);
+const ACTIONS = taggedKinds<FeedbackContext>("action")(ACTION_KINDS);
 
-/** A parsed action entry: its kind name and that kind's payload. */
-export type ActionSpec = TaggedSpec<typeof ACTION_KINDS>;
+/** Fields every action entry accepts besides its kind's own. */
+export const ACTION_FIELDS = ENTITY_FIELDS;
+
+/** A parsed action entry: its kind name, that kind's payload and the common fields. */
+export type ActionSpec = TaggedSpec<typeof ACTION_KINDS> & {
+  common: EntityCommon;
+};
+
+/**
+ * What an action's children see of the control: a `feedback: step` child of
+ * an action is not checked against the button's number of steps.
+ */
+const ACTION_CONTEXT: FeedbackContext = { stepCount: Number.MAX_SAFE_INTEGER };
+
+/** Parses one action entry at `path`. */
+export function parseAction(
+  fields: Fields,
+  path: string,
+  context: FeedbackContext = ACTION_CONTEXT,
+): ActionSpec {
+  return {
+    ...ACTIONS.parse(fields, path, context, ACTION_FIELDS),
+    common: parseEntityCommon(fields, path),
+  };
+}
 
 /**
  * Parses an optional action list such as `down`; a missing field is an empty
@@ -194,25 +257,156 @@ export function parseActionList(
   const path = fieldPath(parent, key);
   return expectList(fields[key], path).map((item, index) => {
     const itemPath = fieldPath(path, index);
-    return ACTIONS.parse(expectMapping(item, itemPath), itemPath, undefined);
+    return parseAction(expectMapping(item, itemPath), itemPath);
   });
+}
+
+/** The custom variables one action uses (its children's included). */
+export function actionReferences(
+  spec: ActionSpec,
+  path: string,
+): VariableReference[] {
+  return ACTIONS.references(spec, path);
 }
 
 /**
  * The custom variables a list of actions uses, in file order: each internal
- * action's target and the references in set values and expressions.
- * Pass-through actions are not inspected. `key` is the list's path.
+ * action's target and the references in set values and expressions, a
+ * pass-through action's `store` custom variable, and its children's.
+ * Pass-through options are not inspected. `key` is the list's path.
  */
 export function actionVariableReferences(
   actions: readonly ActionSpec[],
   key: string,
 ): VariableReference[] {
   return actions.flatMap((spec, index) =>
-    ACTIONS.references(spec, fieldPath(key, index)),
+    actionReferences(spec, fieldPath(key, index)),
   );
 }
 
 /** Companion 5.1 action JSON with a fresh id. */
 export function buildAction(spec: ActionSpec): Record<string, unknown> {
-  return { type: "action", id: newId(), ...ACTIONS.build(spec) };
+  return entityJson("action", newId(), ACTIONS.build(spec), {}, spec.common);
+}
+
+/** A pass-through action's payload. */
+interface PassthroughAction extends Passthrough {
+  store: StoreSpec | undefined;
+  children: ChildGroups | undefined;
+}
+
+/**
+ * `store`: Companion's `storeResult`, one of three targets. Each string
+ * field is a string or `{expr: …}`.
+ */
+export const STORE_KIND_SCHEMAS = {
+  custom: {
+    variable: requiredField(
+      "The custom variable, by name (without `custom:`), or an expression. A name must exist in the database unless `create` is true.",
+      { anyOf: [ref("variableName"), ref("expression")] },
+    ),
+    create: field("Create the variable when it does not exist.", {
+      ...BOOLEAN,
+      default: false,
+    }),
+  },
+  local: {
+    variable: requiredField(
+      "The local variable's name, or an expression; not checked.",
+      ref("stringOrExpression"),
+    ),
+    location: requiredField(
+      "The button whose local variable it is, for example `$(this:location)`, or an expression; not checked.",
+      ref("stringOrExpression"),
+    ),
+  },
+  page: {
+    variable: requiredField(
+      "The page variable's name, or an expression; not checked.",
+      ref("stringOrExpression"),
+    ),
+    page: requiredField(
+      "The page, as text, or an expression; not checked.",
+      ref("stringOrExpression"),
+    ),
+  },
+} as const satisfies Record<string, Record<string, FieldSchema>>;
+
+type StoreType = keyof typeof STORE_KIND_SCHEMAS;
+const STORE_TYPES = Object.keys(STORE_KIND_SCHEMAS) as StoreType[];
+
+/** The stored `storeResult.type` of each `store.type`. */
+export const STORED_STORE_TYPES: Record<StoreType, string> = {
+  custom: "custom-variable",
+  local: "local-variable",
+  page: "page-variable",
+};
+
+type StoreSpec =
+  | { type: "custom"; variable: Option; create: boolean }
+  | { type: "local"; variable: Option; location: Option }
+  | { type: "page"; variable: Option; page: Option };
+
+function parseStore(fields: Fields, path: string): StoreSpec | undefined {
+  if (!Object.hasOwn(fields, "store")) return undefined;
+  const storePath = fieldPath(path, "store");
+  const store = expectMapping(fields["store"], storePath);
+  const typePath = fieldPath(storePath, "type");
+  const type = expectString(requireField(store, "type", storePath), typePath);
+  if (!(STORE_TYPES as string[]).includes(type))
+    throw new ValidationError(
+      typePath,
+      `unknown store type "${type}" (expected one of: ${STORE_TYPES.join(", ")})`,
+    );
+  const storeType = type as StoreType;
+  rejectUnknownFields(
+    store,
+    ["type", ...Object.keys(STORE_KIND_SCHEMAS[storeType])],
+    storePath,
+  );
+  const text = (key: string) =>
+    parseStringOrExpression(
+      requireField(store, key, storePath),
+      fieldPath(storePath, key),
+    );
+  const variable = text("variable");
+  switch (storeType) {
+    case "custom": {
+      if (!variable.isExpression)
+        parseVariableName(variable.value, fieldPath(storePath, "variable"));
+      const create = Object.hasOwn(store, "create")
+        ? expectBoolean(store["create"], fieldPath(storePath, "create"))
+        : false;
+      return { type: storeType, variable, create };
+    }
+    case "local":
+      return { type: storeType, variable, location: text("location") };
+    case "page":
+      return { type: storeType, variable, page: text("page") };
+  }
+}
+
+/** A named custom variable that `create` does not create must exist. */
+function storeReferences(store: StoreSpec, path: string): VariableReference[] {
+  if (store.type !== "custom" || store.create || store.variable.isExpression)
+    return [];
+  return [
+    { field: fieldPath(path, "variable"), name: String(store.variable.value) },
+  ];
+}
+
+function buildStore(store: StoreSpec): Record<string, unknown> {
+  const type = STORED_STORE_TYPES[store.type];
+  switch (store.type) {
+    case "custom":
+      return {
+        type,
+        variableName: store.variable,
+        createIfNotExists: store.create,
+      };
+    case "local":
+      return { type, location: store.location, variableName: store.variable };
+    case "page":
+      return { type, page: store.page, variableName: store.variable };
+  }
 }

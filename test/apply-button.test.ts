@@ -142,12 +142,17 @@ function prototypeLayers(text: string, bg: number, fg: number): Json[] {
   ];
 }
 
+/**
+ * An internal set action as stored. Since #23 every internal entity stores
+ * `children: {}`, as Companion does; module entities store none.
+ */
 const setVar = (name: string, value: string, isExpression = false) => ({
   type: "action",
   id: "<id>",
   definitionId: "custom_variable_set_value",
   connectionId: "internal",
   options: { name: prop(name), value: { value, isExpression } },
+  children: {},
 });
 
 const emptyStep = {
@@ -1410,7 +1415,7 @@ ${feedbacks}`;
     ]);
   });
 
-  it("writes a pass-through feedback with wrapped options", async () => {
+  it("writes a pass-through feedback with wrapped options, without children on a module connection (#23)", async () => {
     const feedbacks = await feedbacksOf(
       withFeedbacks(`  - feedback: passthrough
     connection: FixtureConnectionAAAA
@@ -1442,7 +1447,6 @@ ${feedbacks}`;
             override: prop("LIVE"),
           },
         ],
-        children: {},
       },
       {
         type: "feedback",
@@ -1459,7 +1463,6 @@ ${feedbacks}`;
             override: prop(""),
           },
         ],
-        children: {},
       },
     ]);
   });
@@ -1538,6 +1541,261 @@ ${feedbacks}`;
 `),
     );
     assert.equal(feedbacks.length, 1);
+  });
+});
+
+describe("apply button: full entities (#23)", () => {
+  const withEntities = (body: string) => `kind: button
+location: { page: 1, row: 0, column: 2 }
+text: full
+background: "#000080"
+${body}`;
+
+  it("writes expression options, headline, disabled and upgradeIndex on actions", async () => {
+    const control = await appliedControl(
+      withEntities(`down:
+  - action: passthrough
+    connection: FixtureConnectionAAAA
+    definition: send
+    options: { plain: 1, computed: { expr: "$(custom:fx_counter) + 1" } }
+    headline: Send it
+    disabled: true
+    upgradeIndex: -1
+  - { action: set, variable: fx_label, value: x, upgradeIndex: 3 }
+`),
+    );
+    assert.deepEqual(stripIds(downActions(control)), [
+      {
+        type: "action",
+        id: "<id>",
+        definitionId: "send",
+        connectionId: "FixtureConnectionAAAA",
+        options: {
+          plain: prop(1),
+          computed: { value: "$(custom:fx_counter) + 1", isExpression: true },
+        },
+        headline: "Send it",
+        disabled: true,
+        upgradeIndex: -1,
+      },
+      { ...setVar("fx_label", "x"), upgradeIndex: 3 },
+    ]);
+  });
+
+  it("writes every store type and nested children with internal children objects", async () => {
+    const control = await appliedControl(
+      withEntities(`down:
+  - action: passthrough
+    connection: internal
+    definition: logic_if
+    children:
+      condition:
+        - feedback: passthrough
+          connection: internal
+          definition: check_expression
+          options: { expression: { expr: "1 > 0" } }
+      actions:
+        - action: passthrough
+          connection: internal
+          definition: logic_if
+          children: { condition: [], actions: [], else_actions: [] }
+        - action: passthrough
+          connection: FixtureConnectionAAAA
+          definition: query
+          store: { type: custom, variable: fx_label }
+      else_actions: []
+  - action: passthrough
+    connection: FixtureConnectionAAAA
+    definition: query
+    store: { type: custom, variable: fx_new, create: true }
+  - action: passthrough
+    connection: FixtureConnectionAAAA
+    definition: query
+    store: { type: local, variable: v, location: "1/0/2" }
+  - action: passthrough
+    connection: FixtureConnectionAAAA
+    definition: query
+    store: { type: page, variable: { expr: "'p'" }, page: "1" }
+`),
+    );
+    const query = (storeResult: Json) => ({
+      type: "action",
+      id: "<id>",
+      definitionId: "query",
+      connectionId: "FixtureConnectionAAAA",
+      options: {},
+      storeResult,
+    });
+    assert.deepEqual(stripIds(downActions(control)), [
+      {
+        type: "action",
+        id: "<id>",
+        definitionId: "logic_if",
+        connectionId: "internal",
+        options: {},
+        children: {
+          condition: [
+            {
+              type: "feedback",
+              id: "<id>",
+              definitionId: "check_expression",
+              connectionId: "internal",
+              options: { expression: { value: "1 > 0", isExpression: true } },
+              isInverted: prop(false),
+              styleOverrides: [],
+              children: {},
+            },
+          ],
+          actions: [
+            {
+              type: "action",
+              id: "<id>",
+              definitionId: "logic_if",
+              connectionId: "internal",
+              options: {},
+              children: { condition: [], actions: [], else_actions: [] },
+            },
+            query({
+              type: "custom-variable",
+              variableName: prop("fx_label"),
+              createIfNotExists: false,
+            }),
+          ],
+          else_actions: [],
+        },
+      },
+      query({
+        type: "custom-variable",
+        variableName: prop("fx_new"),
+        createIfNotExists: true,
+      }),
+      query({
+        type: "local-variable",
+        variableName: prop("v"),
+        location: prop("1/0/2"),
+      }),
+      query({
+        type: "page-variable",
+        variableName: { value: "'p'", isExpression: true },
+        page: prop("1"),
+      }),
+    ]);
+  });
+
+  it("writes list styles, an empty style, expression invert and variableName on feedbacks", async () => {
+    const control = await appliedControl(
+      withEntities(`feedbacks:
+  - feedback: passthrough
+    connection: FixtureConnectionAAAA
+    definition: advanced
+    style: []
+    variableName: fb_value
+    headline: Tally
+    disabled: false
+    upgradeIndex: 2
+  - feedback: passthrough
+    connection: FixtureConnectionAAAA
+    definition: tally
+    invert: { expr: "$(custom:fx_counter) > 1" }
+    style:
+      - { element: text0, property: size, value: 24 }
+      - { element: box0, property: color, value: { expr: "0xff0000" } }
+  - { feedback: step, step: 1 }
+`),
+    );
+    assert.deepEqual(stripIds(control["feedbacks"]), [
+      {
+        type: "feedback",
+        id: "<id>",
+        definitionId: "advanced",
+        connectionId: "FixtureConnectionAAAA",
+        options: {},
+        isInverted: prop(false),
+        styleOverrides: [],
+        variableName: "fb_value",
+        headline: "Tally",
+        disabled: false,
+        upgradeIndex: 2,
+      },
+      {
+        type: "feedback",
+        id: "<id>",
+        definitionId: "tally",
+        connectionId: "FixtureConnectionAAAA",
+        options: {},
+        isInverted: { value: "$(custom:fx_counter) > 1", isExpression: true },
+        styleOverrides: [
+          {
+            overrideId: "<id>",
+            elementId: "text0",
+            elementProperty: "size",
+            override: prop(24),
+          },
+          {
+            overrideId: "<id>",
+            elementId: "box0",
+            elementProperty: "color",
+            override: { value: "0xff0000", isExpression: true },
+          },
+        ],
+      },
+      {
+        type: "feedback",
+        id: "<id>",
+        definitionId: "bank_current_step",
+        connectionId: "internal",
+        options: { location: prop("$(this:location)"), step: prop(1) },
+        isInverted: prop(false),
+        styleOverrides: [],
+        children: {},
+      },
+    ]);
+  });
+
+  it("writes entities in hold actions with the same fields", async () => {
+    const control = await appliedControl(
+      withEntities(`hold:
+  - after: 1000
+    actions:
+      - { action: passthrough, connection: internal, definition: wait, headline: pause, options: { time: { expr: "500" } } }
+`),
+    );
+    const step = (control["steps"] as Record<string, Json>)["0"] as Json;
+    const sets = step["action_sets"] as Record<string, Json[]>;
+    assert.deepEqual(stripIds(sets["1000"]), [
+      {
+        type: "action",
+        id: "<id>",
+        definitionId: "wait",
+        connectionId: "internal",
+        options: { time: { value: "500", isExpression: true } },
+        headline: "pause",
+        children: {},
+      },
+    ]);
+  });
+
+  it("re-applying nested children reports no changes in a dry run", async () => {
+    const yaml = withEntities(`down:
+  - action: passthrough
+    connection: internal
+    definition: logic_if
+    children:
+      condition: [ { feedback: expression, expression: "1 > 0" } ]
+      actions: [ { action: increment, variable: fx_counter } ]
+      else_actions: []
+`);
+    const env = setup();
+    const first = await applyTo(env, yaml);
+    assert.equal(first.code, 0, first.stderr.join("\n"));
+    const dry = await applyTo(
+      env,
+      yaml,
+      { processControl: forbiddenProcessControl().control },
+      ["--dry-run"],
+    );
+    assert.equal(dry.code, 0, dry.stderr.join("\n"));
+    assert.deepEqual(dry.stdout.slice(1, -1), ["no changes"]);
   });
 });
 
@@ -1712,9 +1970,163 @@ ${fields}`;
     ],
     // Style and invert.
     [
-      "missing style",
-      feedback("{ feedback: step, step: 1 }"),
-      /: feedbacks\[0\]\.style: is required$/,
+      "style override without property",
+      feedback(
+        "{ feedback: step, step: 1, style: [{ element: text0, value: 1 }] }",
+      ),
+      /: feedbacks\[0\]\.style\[0\]\.property: is required$/,
+    ],
+    [
+      "unknown style override field",
+      feedback(
+        "{ feedback: step, step: 1, style: [{ element: text0, property: size, value: 1, layer: 2 }] }",
+      ),
+      /: feedbacks\[0\]\.style\[0\]\.layer: unknown field$/,
+    ],
+    [
+      "expression style override value not a string",
+      feedback(
+        "{ feedback: step, step: 1, style: [{ element: text0, property: size, value: { expr: 1 } }] }",
+      ),
+      /: feedbacks\[0\]\.style\[0\]\.value\.expr: must be a string/,
+    ],
+    [
+      "style override text naming an unknown variable",
+      feedback(
+        '{ feedback: step, step: 1, style: [{ element: text0, property: text, value: "$(custom:nope)" }] }',
+      ),
+      /: feedbacks\[0\]\.style\[0\]\.value: .*nope/,
+    ],
+    // Entity fields (#23).
+    [
+      "expression invert not a string",
+      feedback("{ feedback: step, step: 1, invert: { expr: true } }"),
+      /: feedbacks\[0\]\.invert\.expr: must be a string/,
+    ],
+    [
+      "invert mapping with another key",
+      feedback("{ feedback: step, step: 1, invert: { expr: x, y: 1 } }"),
+      /: feedbacks\[0\]\.invert: must be true or false, got a mapping$/,
+    ],
+    [
+      "fractional upgradeIndex",
+      feedback("{ feedback: step, step: 1, upgradeIndex: 0.5 }"),
+      /: feedbacks\[0\]\.upgradeIndex: must be an integer, got 0\.5$/,
+    ],
+    [
+      "non-string headline",
+      feedback("{ feedback: step, step: 1, headline: 5 }"),
+      /: feedbacks\[0\]\.headline: must be a string/,
+    ],
+    [
+      "non-boolean disabled",
+      button(
+        "down:\n  - { action: decrement, variable: fx_counter, disabled: 1 }\n",
+      ),
+      /: down\[0\]\.disabled: must be true or false/,
+    ],
+    [
+      "non-string variableName",
+      feedback("{ feedback: step, step: 1, variableName: [] }"),
+      /: feedbacks\[0\]\.variableName: must be a string/,
+    ],
+    [
+      "children on a module feedback",
+      feedback(
+        "{ feedback: passthrough, connection: FixtureConnectionAAAA, definition: d, children: {} }",
+      ),
+      /: feedbacks\[0\]\.children: is only allowed on connection internal, not "FixtureConnectionAAAA"/,
+    ],
+    [
+      "children on a module action",
+      button(
+        "down:\n  - { action: passthrough, connection: c, definition: d, children: { actions: [] } }\n",
+      ),
+      /: down\[0\]\.children: is only allowed on connection internal, not "c"/,
+    ],
+    [
+      "children on a named action",
+      button(
+        "down:\n  - { action: decrement, variable: fx_counter, children: {} }\n",
+      ),
+      /: down\[0\]\.children: unknown field$/,
+    ],
+    [
+      "a nested child naming an unknown variable",
+      button(
+        "down:\n  - action: passthrough\n    connection: internal\n    definition: logic_if\n    children:\n      actions:\n        - action: passthrough\n          connection: internal\n          definition: logic_if\n          children: { else_actions: [{ action: decrement, variable: nope }] }\n",
+      ),
+      /: down\[0\]\.children\.actions\[0\]\.children\.else_actions\[0\]\.variable: .*nope/,
+    ],
+    [
+      "a nested child with a bad option",
+      button(
+        "down:\n  - { action: passthrough, connection: internal, definition: logic_if, children: { actions: [{ action: passthrough, connection: c, definition: d, options: { x: .inf } }] } }\n",
+      ),
+      /: down\[0\]\.children\.actions\[0\]\.options\.x: must be a finite number/,
+    ],
+    [
+      "a child that is neither action nor feedback",
+      button(
+        "down:\n  - { action: passthrough, connection: internal, definition: logic_if, children: { actions: [{ variable: fx_counter }] } }\n",
+      ),
+      /: down\[0\]\.children\.actions\[0\]: must be an action or a feedback entry/,
+    ],
+    [
+      "a child group not a list",
+      button(
+        "down:\n  - { action: passthrough, connection: internal, definition: logic_if, children: { actions: {} } }\n",
+      ),
+      /: down\[0\]\.children\.actions: must be a list/,
+    ],
+    [
+      "an empty child group name",
+      button(
+        'down:\n  - { action: passthrough, connection: internal, definition: logic_if, children: { "": [] } }\n',
+      ),
+      /: down\[0\]\.children\.: group names must not be empty$/,
+    ],
+    [
+      "store on a named action",
+      button(
+        "down:\n  - { action: decrement, variable: fx_counter, store: { type: custom, variable: fx_counter } }\n",
+      ),
+      /: down\[0\]\.store: unknown field$/,
+    ],
+    [
+      "unknown store type",
+      button(
+        "down:\n  - { action: passthrough, connection: c, definition: d, store: { type: trigger, variable: x } }\n",
+      ),
+      /: down\[0\]\.store\.type: unknown store type "trigger" \(expected one of: custom, local, page\)$/,
+    ],
+    [
+      "local store without location",
+      button(
+        "down:\n  - { action: passthrough, connection: c, definition: d, store: { type: local, variable: x } }\n",
+      ),
+      /: down\[0\]\.store\.location: is required$/,
+    ],
+    [
+      "page store with create",
+      button(
+        'down:\n  - { action: passthrough, connection: c, definition: d, store: { type: page, variable: x, page: "1", create: true } }\n',
+      ),
+      /: down\[0\]\.store\.create: unknown field$/,
+    ],
+    [
+      "custom store naming an unknown variable",
+      button(
+        "down:\n  - { action: passthrough, connection: c, definition: d, store: { type: custom, variable: nope } }\n",
+      ),
+      /: down\[0\]\.store\.variable: .*nope/,
+    ],
+    [
+      "custom store with an invalid name",
+      button(
+        'down:\n  - { action: passthrough, connection: c, definition: d, store: { type: custom, variable: "a b" } }\n',
+      ),
+      /: down\[0\]\.store\.variable: /,
     ],
     [
       "empty style",

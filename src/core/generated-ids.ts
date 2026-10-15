@@ -6,9 +6,12 @@ import { isDeepStrictEqual } from "node:util";
  * Inside a control, only the positions the writers fill with `newId()` are
  * masked, and only when they hold a 21-character nanoid:
  *
- *  - `steps.<step>.action_sets.<set>[i].id` (button actions);
- *  - `actions[i].id` and `condition[i].id` (trigger actions and conditions);
- *  - `feedbacks[i].id` and `feedbacks[i].styleOverrides[j].overrideId`;
+ *  - the `id` of each entity (action or feedback) in
+ *    `steps.<step>.action_sets.<set>` (button actions), `actions` and
+ *    `condition` (trigger actions and conditions) and `feedbacks`;
+ *  - each such entity's `styleOverrides[j].overrideId`;
+ *  - the same, at any depth, for the entities in an entity's
+ *    `children.<group>` lists;
  *  - `events[i].id` (trigger events).
  *
  * Nothing else is masked: never anything under an entry's `options`, where a
@@ -46,15 +49,24 @@ function maskEntries(
   return Array.isArray(list) ? list.map(mask) : list;
 }
 
-function maskFeedback(entry: unknown): unknown {
+/**
+ * An action or feedback with its `id`, its style overrides' `overrideId`s
+ * and, recursively, its `children` entities' ids masked.
+ */
+function maskEntity(entry: unknown): unknown {
   const masked = maskKey(entry, "id");
   if (!isObject(masked)) return masked;
-  return {
-    ...masked,
-    styleOverrides: maskEntries(masked["styleOverrides"], (override) =>
-      maskKey(override, "overrideId"),
-    ),
-  };
+  const result: Record<string, unknown> = { ...masked };
+  if ("styleOverrides" in masked)
+    result["styleOverrides"] = maskEntries(
+      masked["styleOverrides"],
+      (override) => maskKey(override, "overrideId"),
+    );
+  if ("children" in masked)
+    result["children"] = mapValues(masked["children"], (group) =>
+      maskEntries(group, maskEntity),
+    );
+  return result;
 }
 
 function mapValues(value: unknown, fn: (child: unknown) => unknown): unknown {
@@ -75,18 +87,16 @@ export function maskGeneratedIds(control: unknown): unknown {
         ? {
             ...step,
             action_sets: mapValues(step["action_sets"], (set) =>
-              maskEntries(set),
+              maskEntries(set, maskEntity),
             ),
           }
         : step,
     );
   }
-  for (const key of ["actions", "condition", "events"]) {
-    if (key in control) masked[key] = maskEntries(control[key]);
+  for (const key of ["actions", "condition", "feedbacks"]) {
+    if (key in control) masked[key] = maskEntries(control[key], maskEntity);
   }
-  if ("feedbacks" in control) {
-    masked["feedbacks"] = maskEntries(control["feedbacks"], maskFeedback);
-  }
+  if ("events" in control) masked["events"] = maskEntries(control["events"]);
   return masked;
 }
 

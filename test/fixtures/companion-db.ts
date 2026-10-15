@@ -219,6 +219,8 @@ function seedRows(version: number | null): Array<[string, string, unknown]> {
             name: prop("fx_counter"),
             value: { isExpression: true, value: "$(this:current) + 1" },
           },
+          // Companion stores `children` on every internal entity (asEntityModel).
+          children: {},
         },
       ]),
     ],

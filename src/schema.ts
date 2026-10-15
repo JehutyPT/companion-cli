@@ -8,7 +8,11 @@ import {
   type SchemaFragment,
 } from "./core/field-schema.ts";
 import type { DescriptionKind } from "./core/writer.ts";
-import { ACTION_KINDS } from "./writers/actions.ts";
+import {
+  ACTION_KINDS,
+  STORE_KIND_SCHEMAS,
+  STORED_STORE_TYPES,
+} from "./writers/actions.ts";
 import {
   buttonFieldSchemas,
   CELL_FIELD_SCHEMAS,
@@ -23,11 +27,13 @@ import {
   FEEDBACK_FIELD_SCHEMAS,
   FEEDBACK_KINDS,
   STYLE_FIELD_SCHEMAS,
+  STYLE_OVERRIDE_FIELD_SCHEMAS,
 } from "./writers/feedbacks.ts";
 import { writers } from "./writers/index.ts";
 import * as page from "./writers/page.ts";
 import {
   COLOR_PATTERN,
+  ENTITY_FIELD_SCHEMAS,
   NUMERIC_NAME,
   RESERVED_NAMES,
   type TaggedKind,
@@ -234,21 +240,98 @@ function defs(): Record<string, unknown> {
       description:
         "A hold action set: actions run once the button has been held `after` milliseconds.",
     }),
+    expression: {
+      description:
+        'A Companion expression instead of a plain value: `{expr: "<expression>"}`, stored as `{value: <expression>, isExpression: true}`.',
+      type: "object",
+      properties: {
+        expr: {
+          description: "The expression text; not checked.",
+          type: "string",
+        },
+      },
+      required: ["expr"],
+      additionalProperties: false,
+    },
+    optionValue: {
+      description:
+        "A plain JSON value, or `{expr: …}` (a mapping with exactly the key `expr`) for an expression. A plain mapping with exactly the key `expr` cannot be written.",
+      if: {
+        type: "object",
+        properties: {
+          expr: {
+            description: "Any value: the expression text when a string.",
+          },
+        },
+        required: ["expr"],
+        maxProperties: 1,
+      },
+      then: { $ref: "#/$defs/expression" },
+      else: { $ref: "#/$defs/jsonValue" },
+    },
+    stringOrExpression: {
+      description: "A string, or `{expr: …}` for an expression.",
+      anyOf: [{ type: "string" }, { $ref: "#/$defs/expression" }],
+    },
     action: taggedSchema(
       "action",
       "An action, tagged with `action`. Only `$(custom:…)` references and named variables are checked against the database; pass-through actions are written literally and not checked.",
       ACTION_KINDS,
+      ENTITY_FIELD_SCHEMAS,
     ),
     feedback: taggedSchema(
       "feedback",
-      "A boolean feedback, tagged with `feedback`, that overrides the button's style while it holds.",
+      "A feedback, tagged with `feedback`, that overrides the button's style while it holds.",
       FEEDBACK_KINDS,
       FEEDBACK_FIELD_SCHEMAS,
     ),
-    style: objectSchema(STYLE_FIELD_SCHEMAS, {
+    children: {
+      description:
+        "Child entries by group name (for example `actions` and `else_actions` of `logic_if`), in order. Each child is an action or a feedback entry; a group may be empty.",
+      type: "object",
+      propertyNames: { minLength: 1 },
+      additionalProperties: {
+        type: "array",
+        items: {
+          anyOf: [{ $ref: "#/$defs/action" }, { $ref: "#/$defs/feedback" }],
+        },
+      },
+    },
+    store: {
+      description:
+        "Where Companion stores an action's result, selected by `type`.",
+      oneOf: Object.entries(STORE_KIND_SCHEMAS).map(([type, fields]) =>
+        objectSchema(
+          {
+            type: requiredField(
+              `Stores into a ${STORED_STORE_TYPES[type as keyof typeof STORED_STORE_TYPES]}.`,
+              { const: type },
+            ),
+            ...fields,
+          },
+          {
+            title: `store: ${type}`,
+            description: `Companion's \`${STORED_STORE_TYPES[type as keyof typeof STORED_STORE_TYPES]}\` result target.`,
+          },
+        ),
+      ),
+    },
+    style: {
+      description:
+        "What a feedback overrides while it holds: a mapping of style shortcuts, or a list of literal overrides in stored order.",
+      anyOf: [
+        { $ref: "#/$defs/styleShortcuts" },
+        { type: "array", items: { $ref: "#/$defs/styleOverride" } },
+      ],
+    },
+    styleShortcuts: objectSchema(STYLE_FIELD_SCHEMAS, {
       description:
         "The style fields a feedback overrides; at least one. The others keep the button's own style.",
       minProperties: 1,
+    }),
+    styleOverride: objectSchema(STYLE_OVERRIDE_FIELD_SCHEMAS, {
+      description:
+        "One literal style override: an element's property and its value.",
     }),
     triggerBody: objectSchema(trigger.FIELD_SCHEMAS, {
       description: "One trigger: every `kind: trigger` field, without `kind`.",
