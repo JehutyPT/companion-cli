@@ -1,0 +1,16 @@
+# LF in the working tree on every platform, so byte-exact tests and
+# `prettier --check` behave the same on Windows, macOS and Linux.
+* text=auto eol=lf
+
+*.sqlite binary
+*.sqlite-wal binary
+*.sqlite-shm binary
+*.db binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.gz binary
+*.tgz binary

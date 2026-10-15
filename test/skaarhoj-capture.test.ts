@@ -1,7 +1,8 @@
 /**
  * The one-off capture of the Python prototype's SKAARHOJ test page (#10).
- * Skipped unless SKAARHOJ_CAPTURE=1; `npm test` never runs Python. The
- * reproduction tests read the committed result, test/fixtures/skaarhoj-page20.json.
+ * Skipped unless SKAARHOJ_CAPTURE=1, and when `python3` is not on the path;
+ * `npm test` never runs Python. The reproduction tests read the committed
+ * result, test/fixtures/skaarhoj-page20.json.
  *
  * Recapture (only if the prototype changes, which it should not):
  *   SKAARHOJ_CAPTURE=1 node --test --no-warnings test/skaarhoj-capture.test.ts
@@ -12,7 +13,7 @@
  * to columns 0–16. The prototype is run, never edited.
  */
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { it } from "node:test";
@@ -27,9 +28,18 @@ import {
 const PROTOTYPE = "reference/python-prototype/fill_page20.py";
 const CAPTURE = new URL("./fixtures/skaarhoj-page20.json", import.meta.url);
 
+/** Why the capture is skipped, or `false` when it runs. */
+function captureSkip(): string | false {
+  if (process.env["SKAARHOJ_CAPTURE"] !== "1")
+    return "opt-in: SKAARHOJ_CAPTURE=1";
+  const python = spawnSync("python3", ["--version"], { encoding: "utf8" });
+  if (python.error || python.status !== 0) return "python3 is not available";
+  return false;
+}
+
 it(
   "captures the prototype's page 20 from a fixture copy",
-  { skip: process.env["SKAARHOJ_CAPTURE"] !== "1" },
+  { skip: captureSkip() },
   () => {
     const env = setup({}, (db) => {
       seedEmptyPages(db, 20);

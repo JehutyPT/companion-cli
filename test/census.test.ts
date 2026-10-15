@@ -550,7 +550,7 @@ describe("census", () => {
     const result = await runCli([
       "census",
       "--db",
-      `${env.dir}/nothing.sqlite`,
+      join(env.dir, "nothing.sqlite"),
       "--json",
     ]);
     assert.equal(result.code, 1);

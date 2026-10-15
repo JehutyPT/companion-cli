@@ -7,6 +7,8 @@
  */
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
 import { readDescriptionFile } from "../src/core/description.ts";
@@ -28,15 +30,14 @@ import { WRITER_TABLES, writerFields } from "./writer-tables.ts";
 
 type Json = Record<string, unknown>;
 
-const EXAMPLES_DIR = new URL("../examples/", import.meta.url);
+const EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
 
-/** Every description file under examples/, by path. */
+/** Every description file under examples/, relative to it. */
 function exampleFiles(): string[] {
   return readdirSync(EXAMPLES_DIR, { recursive: true })
     .map(String)
     .filter((name) => name.endsWith(".yaml"))
-    .sort()
-    .map((name) => new URL(name, EXAMPLES_DIR).pathname);
+    .sort();
 }
 
 const BUTTON = `kind: button
@@ -632,8 +633,9 @@ describe("schema and parser agree", () => {
     assert.ok(exampleFiles().length >= 2);
   });
 
-  for (const file of exampleFiles()) {
-    it(`accepts ${file.slice(file.indexOf("examples/"))}`, () => {
+  for (const name of exampleFiles()) {
+    it(`accepts ${join("examples", name)}`, () => {
+      const file = join(EXAMPLES_DIR, name);
       assert.deepEqual(agreement(readDescriptionFile(file)), {
         schema: true,
         parser: true,

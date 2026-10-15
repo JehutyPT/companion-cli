@@ -39,7 +39,11 @@ export interface FakeTrpc {
   upgrades: IncomingHttpHeaders[];
   /** Every message the client sent, parsed. */
   messages: Record<string, unknown>[];
-  /** Upgrades whose client sent a close frame. */
+  /**
+   * Upgrades since the last `reset` whose client sent a close frame. Late
+   * frames from a socket opened before the reset count neither here nor in
+   * `messages`, so one test cannot leak into the next (seen on Windows).
+   */
   closes: number;
   reset(): void;
   stop(): Promise<void>;
@@ -47,6 +51,8 @@ export interface FakeTrpc {
 
 export async function startFakeTrpc(): Promise<FakeTrpc> {
   const sockets = new Set<Socket>();
+  /** Bumped on every reset; each socket remembers the one it was opened in. */
+  let generation = 0;
   const fake: FakeTrpc = {
     url: "",
     state: emptyState(),
@@ -58,6 +64,7 @@ export async function startFakeTrpc(): Promise<FakeTrpc> {
       fake.upgrades = [];
       fake.messages = [];
       fake.closes = 0;
+      generation++;
     },
     stop: () =>
       new Promise<void>((resolve) => {
@@ -73,6 +80,7 @@ export async function startFakeTrpc(): Promise<FakeTrpc> {
   server.on("upgrade", (req, socket: Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
+    const opened = generation;
     fake.upgrades.push(req.headers);
     const key = String(req.headers["sec-websocket-key"]);
     const accept = createHash("sha1")
@@ -96,7 +104,7 @@ export async function startFakeTrpc(): Promise<FakeTrpc> {
         if (!frame) break;
         buffer = buffer.subarray(frame.length);
         if (frame.opcode === 0x8) {
-          fake.closes++;
+          if (opened === generation) fake.closes++;
           socket.end(encodeFrame(0x8, frame.payload.subarray(0, 2)));
           return;
         }
@@ -108,10 +116,12 @@ export async function startFakeTrpc(): Promise<FakeTrpc> {
             unknown
           >;
         } catch {
-          fake.messages.push({ unparsable: frame.payload.toString("utf8") });
+          if (opened === generation) {
+            fake.messages.push({ unparsable: frame.payload.toString("utf8") });
+          }
           continue;
         }
-        fake.messages.push(message);
+        if (opened === generation) fake.messages.push(message);
         respond(fake.state, message, (reply) =>
           socket.write(encodeFrame(0x1, Buffer.from(JSON.stringify(reply)))),
         );

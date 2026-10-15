@@ -217,9 +217,11 @@ describe("apply waits for REST after starting Companion", () => {
     const elapsed = performance.now() - started;
     assert.equal(jsonDoc(result)["rest"], "timeout");
     // The probe is cut off at the time left; a timer firing a little early
-    // can leave room for one more short probe.
+    // can leave room for one more short probe. Uncut, a probe would wait
+    // 5 s; the bound leaves room for the apply itself on slow CI runners
+    // (Windows takes about 1 s).
     assert.ok(paths.length <= 2, `probed ${paths.length} times`);
-    assert.ok(elapsed < 1000, `took ${elapsed} ms`);
+    assert.ok(elapsed < 3000, `took ${elapsed} ms`);
   });
 
   it("not configured: the note, no request", async () => {

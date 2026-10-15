@@ -547,42 +547,103 @@ describe("live-install mode: platform", () => {
   });
 });
 
+/**
+ * Why a file symlink cannot be created here, or `false` when it can. Windows
+ * refuses file symlinks without Developer Mode or elevation (`EPERM`).
+ */
+function fileSymlinkSkip(): string | false {
+  const dir = tempDir();
+  const target = join(dir, "target");
+  writeFileSync(target, "");
+  try {
+    symlinkSync(target, join(dir, "link"), "file");
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    return "file symlinks need Developer Mode or elevation on Windows (EPERM); see #34";
+  }
+}
+
 describe("--db: the install's database and the running guard", () => {
+  const FILE_SYMLINK_SKIP = fileSymlinkSkip();
+
+  /**
+   * The install's database directly, through a directory link and through
+   * `~`. The directory link is a junction on Windows, which needs no Developer
+   * Mode; the type is ignored elsewhere.
+   */
   function targets(home: string, dbPath: string): string[] {
-    const link = join(tempDir(), "link.sqlite");
-    symlinkSync(dbPath, link);
     const linkDir = join(tempDir(), "linked");
     symlinkSync(
       join(home, "Library", "Application Support", "companion"),
       linkDir,
+      "junction",
     );
     return [
       dbPath,
-      link,
       join(linkDir, "v5.1", "db.sqlite"),
       "~/Library/Application Support/companion/v5.1/db.sqlite",
     ];
   }
 
-  it("refuses the install's database (direct, symlink, symlinked directory, ~) while Companion runs", async () => {
-    const { home, dbPath, file } = fakeHome({ wal: true });
-    for (const target of targets(home, dbPath)) {
-      const before = fileState(dbPath);
-      const fake = fakeProcessControl({ running: true });
-      const result = await runCli(["apply", file, "--db", target], {
-        homedir: home,
-        processControl: fake.control,
-      });
-      assert.equal(result.code, 1, target);
-      assert.equal(result.stderr.length, 1);
-      assert.match(
-        result.stderr[0] ?? "",
-        /^error: refusing to write the Companion install's database .* while Companion is running/,
-      );
-      assert.deepEqual(fake.calls, ["check"], target);
-      assert.deepEqual(fileState(dbPath), before, target);
+  function fileSymlink(dbPath: string): string {
+    const link = join(tempDir(), "link.sqlite");
+    symlinkSync(dbPath, link, "file");
+    return link;
+  }
+
+  async function assertRefusedWhileRunning(
+    { home, dbPath, file }: ReturnType<typeof fakeHome>,
+    target: string,
+  ): Promise<void> {
+    const before = fileState(dbPath);
+    const fake = fakeProcessControl({ running: true });
+    const result = await runCli(["apply", file, "--db", target], {
+      homedir: home,
+      processControl: fake.control,
+    });
+    assert.equal(result.code, 1, target);
+    assert.equal(result.stderr.length, 1);
+    assert.match(
+      result.stderr[0] ?? "",
+      /^error: refusing to write the Companion install's database .* while Companion is running/,
+    );
+    assert.deepEqual(fake.calls, ["check"], target);
+    assert.deepEqual(fileState(dbPath), before, target);
+  }
+
+  async function assertWrittenWhileStopped(
+    { home, dbPath, file }: ReturnType<typeof fakeHome>,
+    target: string,
+  ): Promise<void> {
+    const fake = fakeProcessControl({ running: false });
+    const result = await runCli(["apply", file, "--db", target], {
+      homedir: home,
+      processControl: fake.control,
+      now: () => new Date("2026-10-14T12:34:56.789Z"),
+    });
+    assert.equal(result.code, 0, `${target}: ${result.stderr.join("\n")}`);
+    assert.deepEqual(fake.calls, ["check", "holders"], target);
+    assert.ok(customVariables(dbPath)["live_one"]);
+  }
+
+  it("refuses the install's database (direct, symlinked directory, ~) while Companion runs", async () => {
+    const env = fakeHome({ wal: true });
+    for (const target of targets(env.home, env.dbPath)) {
+      await assertRefusedWhileRunning(env, target);
     }
   });
+
+  it(
+    "refuses a file symlink to the install's database while Companion runs",
+    {
+      skip: FILE_SYMLINK_SKIP,
+    },
+    async () => {
+      const env = fakeHome({ wal: true });
+      await assertRefusedWhileRunning(env, fileSymlink(env.dbPath));
+    },
+  );
 
   it("refuses a hard link to the install's database while Companion runs", async () => {
     const { home, dbPath, file } = fakeHome();
@@ -598,22 +659,26 @@ describe("--db: the install's database and the running guard", () => {
   });
 
   it("writes the install's database with only the running and in-use checks while Companion is stopped", async () => {
-    const { home, dbPath, file } = fakeHome();
-    for (const target of targets(home, dbPath)) {
-      const fake = fakeProcessControl({ running: false });
-      const result = await runCli(["apply", file, "--db", target], {
-        homedir: home,
-        processControl: fake.control,
-        now: () => new Date("2026-10-14T12:34:56.789Z"),
-      });
-      assert.equal(result.code, 0, `${target}: ${result.stderr.join("\n")}`);
-      assert.deepEqual(fake.calls, ["check", "holders"], target);
+    const env = fakeHome();
+    for (const target of targets(env.home, env.dbPath)) {
+      await assertWrittenWhileStopped(env, target);
     }
-    assert.ok(customVariables(dbPath)["live_one"]);
     assert.ok(
-      readdirSync(join(installDir(home), "companion-cli-backups")).length > 0,
+      readdirSync(join(installDir(env.home), "companion-cli-backups")).length >
+        0,
     );
   });
+
+  it(
+    "writes the install's database through a file symlink while Companion is stopped",
+    {
+      skip: FILE_SYMLINK_SKIP,
+    },
+    async () => {
+      const env = fakeHome();
+      await assertWrittenWhileStopped(env, fileSymlink(env.dbPath));
+    },
+  );
 
   it("fails closed when the running check fails", async () => {
     const { home, dbPath, file } = fakeHome();

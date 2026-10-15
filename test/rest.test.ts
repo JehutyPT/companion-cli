@@ -9,7 +9,7 @@ import {
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
-import { type CliRun, runCli, tempDir } from "./helpers.ts";
+import { type CliRun, pathPattern, runCli, tempDir } from "./helpers.ts";
 
 const KEY = "stub-key-7f3c9e1a5b";
 
@@ -603,7 +603,10 @@ describe("configuration", () => {
       recursive: true,
     });
     const result = await rest(["press", "1", "0", "0"], {}, tempDir(), home);
-    assertFailure(result, /cannot read .*companion-cli\/\.env\.local/);
+    assertFailure(
+      result,
+      new RegExp(`cannot read .*${pathPattern("companion-cli", ".env.local")}`),
+    );
   });
 
   it("refuses a non-http URL", async () => {

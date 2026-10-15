@@ -146,9 +146,20 @@ export function fakeProcessControl(options: FakeProcessOptions): {
   return { control, calls, waitedFor, timeouts };
 }
 
-/** `~/Library/Application Support/companion/v5.1` under `home`. */
+/**
+ * `~/Library/Application Support/companion/v5.1` under `home`: the macOS
+ * layout on every host. Windows layouts arrive with #37.
+ */
 export function installDir(home: string): string {
   return join(home, "Library", "Application Support", "companion", "v5.1");
+}
+
+/**
+ * A regular-expression source matching `join(...segments)` literally, so a
+ * path assertion uses the host's separator instead of a literal `/`.
+ */
+export function pathPattern(...segments: string[]): string {
+  return join(...segments).replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&");
 }
 
 /**

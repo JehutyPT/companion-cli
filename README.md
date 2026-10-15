@@ -571,7 +571,9 @@ Applying to the local install (live-install mode) quits and restarts Companion o
 
 ## Development
 
-`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`), `npm run gen:schema` (regenerates `schema/description.schema.json` after a writer's fields or docs change). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
+`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`), `npm run gen:schema` (regenerates `schema/description.schema.json` after a writer's fields or docs change). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install. The test bootstrap (`test/setup.ts`) points `HOME`, `USERPROFILE` and `APPDATA` at a temp directory and removes `LOCALAPPDATA` and `XDG_CONFIG_HOME`, so no test can reach the real profile.
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `npm ci`, `npm run lint`, `npm run format:check` and `npm test` on Windows, macOS and Linux on every push and pull request. The repository uses LF line endings on every platform (`.gitattributes`), so a Windows checkout passes the byte-exact tests and the format check whatever `core.autocrlf` says.
 
 ## Consumers
 

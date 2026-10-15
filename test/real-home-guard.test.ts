@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { run } from "../src/cli.ts";
 import { apply, prepareApply } from "../src/core/apply.ts";
@@ -34,6 +34,13 @@ describe("a missing homedir option in tests", () => {
   it("resolves os.homedir() to the test home", () => {
     assert.equal(homedir(), TEST_HOME);
     for (const real of REAL_HOMES) assert.notEqual(homedir(), real);
+  });
+
+  it("points the Windows profile and app-data variables at the test home", () => {
+    assert.equal(process.env["USERPROFILE"], TEST_HOME);
+    assert.equal(process.env["APPDATA"], TEST_HOME);
+    assert.equal(process.env["LOCALAPPDATA"], undefined);
+    assert.equal(process.env["XDG_CONFIG_HOME"], undefined);
   });
 
   it("makes a live apply without homedir target the test home", async () => {
@@ -85,8 +92,8 @@ describe("a missing homedir option in tests", () => {
     buildFixtureDb(installDir(TEST_HOME));
     const prepared = await prepareApply(request, options);
     assert.equal(prepared.homedir, TEST_HOME);
-    assert.ok(prepared.dbPath.startsWith(TEST_HOME + "/"));
+    assert.ok(prepared.dbPath.startsWith(TEST_HOME + sep));
     const result = await apply(request, options);
-    assert.ok(result.backupDir.startsWith(TEST_HOME + "/"));
+    assert.ok(result.backupDir.startsWith(TEST_HOME + sep));
   });
 });

@@ -23,6 +23,7 @@ import {
   fileState,
   forbiddenProcessControl,
   installDir,
+  pathPattern,
   runCli,
   setup,
   tempDir,
@@ -262,7 +263,9 @@ describe("read path: Companion's process", () => {
       { homedir: home, processControl: control },
       "database_not_found",
       1,
-      /^error: database not found: .*companion\/v5\.1\/db\.sqlite$/,
+      new RegExp(
+        `^error: database not found: .*${pathPattern("companion", "v5.1", "db.sqlite")}$`,
+      ),
     );
     assert.deepEqual(calls, []);
   });

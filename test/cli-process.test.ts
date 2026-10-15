@@ -13,55 +13,98 @@ const BIN = fileURLToPath(
   new URL("../src/bin/companion-cli.ts", import.meta.url),
 );
 
+/** Variables `homeEnv` points at the test home. */
+const HOME_VARIABLES = ["HOME", "USERPROFILE", "APPDATA"] as const;
+
 /**
- * The parent environment without any `COMPANION_*` variable or
- * `XDG_CONFIG_HOME`, so the user config file is looked up under `HOME`.
+ * Variables the child must not inherit from the parent, upper-cased because
+ * Windows variable names are case-insensitive: they name real profile
+ * directories.
  */
-function cleanEnv(): NodeJS.ProcessEnv {
+const DROPPED = new Set<string>([
+  ...HOME_VARIABLES,
+  "LOCALAPPDATA",
+  "XDG_CONFIG_HOME",
+]);
+
+/**
+ * The parent environment without any `COMPANION_*` variable, `XDG_CONFIG_HOME`
+ * or `LOCALAPPDATA`, with `HOME`, `USERPROFILE` and `APPDATA` pointing at
+ * `home`. The child's home directory, Windows profile, app-data directory and
+ * user config file are then all under `home`.
+ */
+function homeEnv(home: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const [name, value] of Object.entries(process.env)) {
-    if (!name.startsWith("COMPANION_") && name !== "XDG_CONFIG_HOME") {
+    const upper = name.toUpperCase();
+    if (!upper.startsWith("COMPANION_") && !DROPPED.has(upper)) {
       env[name] = value;
     }
   }
+  for (const name of HOME_VARIABLES) env[name] = home;
   return env;
 }
 
 /**
- * Runs the executable in `home` with `HOME` set to it, so it never sees the
- * repository's `.env.local` or the user's config file.
+ * Runs the executable in `home` with its home pointing there, so it never
+ * sees the repository's `.env.local`, the user's config file or the real
+ * Companion install.
  */
 function cli(args: string[], home: string) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: "utf8",
     cwd: home,
-    env: { ...cleanEnv(), HOME: home },
+    env: homeEnv(home),
   });
 }
+
+/**
+ * The executable's `--db` in-use guard runs on macOS only today. Windows gets
+ * it with #38; Linux is tracked by #42.
+ */
+const IN_USE_GUARD_SKIP =
+  process.platform === "win32"
+    ? "the --db in-use guard does not run on Windows yet (#38)"
+    : process.platform === "linux"
+      ? "the --db in-use guard does not run on Linux (#42)"
+      : false;
 
 describe("companion-cli executable", () => {
   // The executable uses the real process control, whose command runner
   // refuses inside the test runner (NODE_TEST_CONTEXT is inherited). So a
   // valid apply exercises the in-use guard failing closed instead of running
   // lsof; successful applies are covered in-process with fakes.
-  it("fails closed, byte-identical, when the in-use check cannot run", () => {
-    const dir = tempDir();
-    const dbPath = buildFixtureDb(join(dir, "copy"));
-    const before = fileState(dbPath);
-    const file = writeDescription(
-      dir,
-      "kind: variables\nvariables:\n  - {name: from_bin, default: 1}\n",
-    );
-    const result = cli(["apply", file, "--db", dbPath], dir);
-    assert.equal(result.status, 1, result.stderr);
-    assert.equal(result.stderr.trimEnd().split("\n").length, 1, result.stderr);
-    assert.match(
-      result.stderr,
-      /^error: cannot tell whether the database is in use \(refusing to run lsof inside the test runner/,
-    );
-    assert.deepEqual(fileState(dbPath), before);
-    assert.equal(existsSync(join(dir, "copy", "companion-cli-backups")), false);
-  });
+  it(
+    "fails closed, byte-identical, when the in-use check cannot run",
+    {
+      skip: IN_USE_GUARD_SKIP,
+    },
+    () => {
+      const dir = tempDir();
+      const dbPath = buildFixtureDb(join(dir, "copy"));
+      const before = fileState(dbPath);
+      const file = writeDescription(
+        dir,
+        "kind: variables\nvariables:\n  - {name: from_bin, default: 1}\n",
+      );
+      const result = cli(["apply", file, "--db", dbPath], dir);
+      assert.equal(result.status, 1, result.stderr);
+      assert.equal(
+        result.stderr.trimEnd().split("\n").length,
+        1,
+        result.stderr,
+      );
+      assert.match(
+        result.stderr,
+        /^error: cannot tell whether the database is in use \(refusing to run lsof inside the test runner/,
+      );
+      assert.deepEqual(fileState(dbPath), before);
+      assert.equal(
+        existsSync(join(dir, "copy", "companion-cli-backups")),
+        false,
+      );
+    },
+  );
 
   it("exits non-zero with exactly one stderr line on failure", () => {
     const dir = tempDir();
@@ -85,14 +128,12 @@ describe("companion-cli executable", () => {
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
     const key = "process-test-key-42d1";
-    const env = cleanEnv();
     const dir = tempDir();
     const result = spawnSync(process.execPath, [BIN, "press", "1", "-1", "0"], {
       encoding: "utf8",
       cwd: dir,
       env: {
-        ...env,
-        HOME: dir,
+        ...homeEnv(dir),
         COMPANION_URL: `http://127.0.0.1:${port}`,
         COMPANION_API_KEY: key,
       },

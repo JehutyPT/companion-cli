@@ -2,10 +2,12 @@
  * Test bootstrap, loaded before any test code (`--import` in the `test`
  * script, and imported first by helpers.ts for single-file runs).
  *
- * It points `HOME` at a fresh temp directory so `os.homedir()`, the fallback
- * for a missing `homedir` option, can never resolve to the developer's real
- * home: a dropped option then fails on a missing database instead of writing
- * the real Companion install's database.
+ * It points `HOME`, `USERPROFILE` and `APPDATA` at a fresh temp directory,
+ * and removes `LOCALAPPDATA` and `XDG_CONFIG_HOME`, so `os.homedir()` (the
+ * fallback for a missing `homedir` option) and the Windows app-data directory
+ * can never resolve to the developer's real profile: a dropped option then
+ * fails on a missing database instead of writing the real Companion install's
+ * database.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
@@ -21,6 +23,8 @@ export const TEST_HOME = mkdtempSync(join(tmpdir(), "companion-cli-home-"));
 
 process.env["HOME"] = TEST_HOME;
 process.env["USERPROFILE"] = TEST_HOME;
+process.env["APPDATA"] = TEST_HOME;
+delete process.env["LOCALAPPDATA"];
 delete process.env["XDG_CONFIG_HOME"];
 process.on("exit", () => rmSync(TEST_HOME, { recursive: true, force: true }));
 
