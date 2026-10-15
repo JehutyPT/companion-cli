@@ -56,7 +56,7 @@ import {
  *     - { event: interval, seconds: 5 }    # positive integer
  *     - { event: variable_changed, variable: fx_counter }
  *     - { event: timeofday, time: "08:00:00", days: [mon, fri], enabled: false }
- *   actions:                              # optional action list, default []
+ *   actions:                               # optional action list, default []
  *     - { action: increment, variable: fx_counter }
  *
  * The control is Companion 5.1's stored trigger: `{type: "trigger", options,
@@ -85,23 +85,30 @@ const defineKind = <P>(kind: Omit<EventKind<P>, "fields">): EventKind<P> =>
 const DEFAULT_STARTUP_DELAY_MS = 10000;
 
 /** Day names in a description file, by Companion's day number (Sunday = 0). */
-export const DAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+export const DAY_NAMES: readonly string[] = [
+  "sun",
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+];
 
 /** The times Companion runs a time-of-day event at (`Timer.ts`). */
-export const TIME_OF_DAY_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$";
+const TIME_OF_DAY_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$";
 /** The times Companion runs a specific-date event at: seconds optional. */
-export const SPECIFIC_TIME_PATTERN =
-  "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$";
+const SPECIFIC_TIME_PATTERN = "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$";
 /** A date as the web UI's date input stores it. */
-export const DATE_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$";
+const DATE_PATTERN = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$";
 
-export const SUN_EVENTS = ["sunrise", "sunset"];
+const SUN_EVENTS = ["sunrise", "sunset"];
 
 /** `<label>:<name>`, as Companion names a variable. */
-export const VARIABLE_ID_PATTERN = "^[^:]+:.+$";
+const VARIABLE_ID_PATTERN = "^[^:]+:.+$";
 
 /** Whether `text` is a "YYYY-MM-DD" date that exists in the calendar. */
-export function isCalendarDate(text: string): boolean {
+function isCalendarDate(text: string): boolean {
   if (!new RegExp(DATE_PATTERN).test(text)) return false;
   const [year, month, day] = text.split("-").map(Number) as [
     number,

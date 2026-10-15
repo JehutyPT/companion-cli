@@ -107,11 +107,35 @@ describe("trigger events: stored options", () => {
       await storedEvents(`  - { event: startup, enabled: false }
   - { event: button_press, enabled: true }
   - { event: variable_changed, variable: fx_counter, enabled: false }
+  - { event: interval, seconds: 1, enabled: false }
+  - { event: intervalRandom, enabled: false }
+  - { event: timeofday, time: "08:00:00", days: [sun], enabled: false }
+  - { event: specificDate, date: "2026-12-31", time: "23:00", enabled: false }
+  - { event: sun_event, enabled: false }
+  - { event: client_connect, enabled: false }
+  - { event: button_release, enabled: false }
+  - { event: variable_changed, variableId: "internal:time_hms", enabled: false }
+  - { event: computer_locked, enabled: false }
+  - { event: computer_unlocked, enabled: false }
 `),
       [
         event("startup", { delay: 10000 }, false),
         event("button_press", {}),
         event("variable_changed", { variableId: "custom:fx_counter" }, false),
+        event("interval", { seconds: 1 }, false),
+        event("intervalRandom", { minimum: 3, maximum: 10 }, false),
+        event("timeofday", { time: "08:00:00", days: [0] }, false),
+        event("specificDate", { date: "2026-12-31", time: "23:00" }, false),
+        event(
+          "sun_event",
+          { type: "sunrise", latitude: 0, longitude: 0, offset: 0 },
+          false,
+        ),
+        event("client_connect", { delay: 0 }, false),
+        event("button_release", {}, false),
+        event("variable_changed", { variableId: "internal:time_hms" }, false),
+        event("computer_locked", {}, false),
+        event("computer_unlocked", {}, false),
       ],
     );
   });
