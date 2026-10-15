@@ -1,6 +1,5 @@
-import { homedir as osHomedir } from "node:os";
 import { loadDescription, type WriterRegistry } from "./description.ts";
-import { resolveDatabaseTarget } from "./paths.ts";
+import { installContext, resolveDatabaseTarget } from "./paths.ts";
 import { type ReadOptions, readDatabase } from "./read.ts";
 import { resolvePlan, type WriterRuntime } from "./resolve.ts";
 
@@ -51,11 +50,7 @@ export async function validate(
   let live = false;
   if (!request.noDb) {
     // The platform guard first, as in `prepareApply`.
-    ({ live } = resolveDatabaseTarget(
-      request.dbPath,
-      options.homedir ?? osHomedir(),
-      options.platform ?? process.platform,
-    ));
+    ({ live } = resolveDatabaseTarget(request.dbPath, installContext(options)));
   }
   const { writer, plan: parsed } = loadDescription(
     request.descriptionPath,

@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons), the trigger writer (every event type, notes and conditions), the connection writer (one existing connection's label, enabled flag, config and secrets from the environment) and the surface writer (one stored surface's name, enabled flag and config keys) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections`, `list pages` and `list surfaces`, `find` and `export variables`, `export trigger`, `export triggers`, `export page`, `export connection` and `export surface` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `schema --connection` lists a connection's module actions and feedbacks from the running Companion, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons), the trigger writer (every event type, notes and conditions), the connection writer (one existing connection's label, enabled flag, config and secrets from the environment) and the surface writer (one stored surface's name, enabled flag and config keys) work against the local install (live-install mode on macOS: Companion is quit, written and started again; on Windows the read commands, `validate` and dry runs find the install, writes need `--db` for now) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections`, `list pages` and `list surfaces`, `find` and `export variables`, `export trigger`, `export triggers`, `export page`, `export connection` and `export surface` (description files that apply back unchanged) read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, `schema --connection` lists a connection's module actions and feedbacks from the running Companion, `census` counts what a database uses without printing values, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -38,7 +38,7 @@ Every write is an idempotent "replace this one thing" operation, and every write
 ```sh
 npm install
 npm run build
-node dist/bin/companion-cli.js apply variables.yaml                    # the local install (macOS)
+node dist/bin/companion-cli.js apply variables.yaml                    # the local install (macOS; reads and dry runs on Windows too)
 node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
 node dist/bin/companion-cli.js apply variables.yaml --dry-run                 # report only, write nothing
 node dist/bin/companion-cli.js apply variables.yaml --dry-run --json          # the same report as JSON
@@ -61,7 +61,17 @@ variables:
 
 `apply` validates the whole file, checks on a read-only snapshot that the database is version 17, copies `db.sqlite` and any `-wal` / `-shm` files to `companion-cli-backups/<timestamp>/` next to the database, then creates or replaces the named variables in one transaction and runs `pragma integrity_check`. Any failure rolls back and exits non-zero with a one-line reason on stderr. Backups always sit next to the database being written, including the install's: `~/Library/Application Support/companion/v5.1/companion-cli-backups/<timestamp>/`.
 
-Without `--db`, `apply` targets the install's database, `~/Library/Application Support/companion/v5.1/db.sqlite` (macOS only; other platforms are refused). After the file and the snapshot checks pass, it quits Companion if its server is running (`osascript -e 'quit app "Companion"'`), waits up to 30 seconds for the server process to exit, backs up and writes, then starts Companion again (`open -a Companion`), also after a failed write. If Companion was not running, it is neither quit nor started. If the server does not exit in time, nothing is written and Companion may be partly stopped. If the write succeeds but Companion does not start, the apply fails with a reason saying the change was written and Companion must be started manually.
+Without `--db`, every command targets the local install's database, found by platform:
+
+| Platform | Install's database | Read commands, `validate`, `apply --dry-run` | Live-install `apply` (writes) |
+| --- | --- | --- | --- |
+| macOS | `~/Library/Application Support/companion/v5.1/db.sqlite` | yes | yes |
+| Windows | `%APPDATA%\companion\v5.1\db.sqlite` (`%APPDATA%` falls back to `%USERPROFILE%\AppData\Roaming` when unset) | yes | not yet: refused with `unsupported_platform`; pass `--db` |
+| Linux and others | none | refused with `unsupported_platform`; pass `--db` | refused |
+
+A custom configuration folder (`COMPANION_CONFIG_BASEDIR`) is not followed yet: pass `--db <folder>/v5.1/db.sqlite`. On Windows, `--db ~\copy\db.sqlite` expands `~` like `--db ~/copy/db.sqlite`.
+
+On macOS, `apply` without `--db` targets the install's database. After the file and the snapshot checks pass, it quits Companion if its server is running (`osascript -e 'quit app "Companion"'`), waits up to 30 seconds for the server process to exit, backs up and writes, then starts Companion again (`open -a Companion`), also after a failed write. If Companion was not running, it is neither quit nor started. If the server does not exit in time, nothing is written and Companion may be partly stopped. If the write succeeds but Companion does not start, the apply fails with a reason saying the change was written and Companion must be started manually.
 
 After starting Companion again following a successful write, `apply` waits for Companion's REST API so that the next runtime command does not race its startup. It reads the endpoint as the [runtime commands](#runtime-commands-rest-helper) do and polls `GET /api/v2/openapi.json` every 0.5 s. A 2xx, 401 or 403 counts as ready (the route answers 403 while REST API v2 is disabled, Companion's default); any other status, a refused connection or a probe that does not answer keeps polling. When it answers, apply logs `Companion REST ready after <N>s`. After 30 s, or `--rest-timeout <seconds>` (a number, fractions allowed; 0 skips the wait), it prints `warning: Companion started; REST not ready after <N>s` on stderr and still exits 0, because the write is committed. Without `COMPANION_URL` and `COMPANION_API_KEY`, or with invalid ones, it logs `note: REST not configured; not waiting for Companion's API` (with the reason for an invalid setting) and does not wait. There is no wait with `--db`, in a dry run, when Companion was not running beforehand, or when it did not start again.
 
@@ -310,7 +320,7 @@ Applying a variable replaces its definition, with one exception. Companion keeps
 ### Validate
 
 ```sh
-companion-cli validate page.yaml                        # against the install's database (macOS)
+companion-cli validate page.yaml                        # against the install's database
 companion-cli validate page.yaml --db /path/to/db.sqlite
 companion-cli validate page.yaml --no-db                # the file only, any platform
 companion-cli validate page.yaml --no-db --json
@@ -330,7 +340,7 @@ valid: page 99 "SKAARHOJ TEST" (47 buttons) (structure only; not checked against
 These read the database and print what is stored, one line per item (`list variables` also asks the running Companion for current values; see below):
 
 ```sh
-companion-cli list variables                      # the local install (macOS), with current values
+companion-cli list variables                      # the local install, with current values
 companion-cli list variables --no-current         # database values only, no REST request
 companion-cli list variables 'fx_*' --db /path/to/copy/db.sqlite
 companion-cli list triggers 'Reset*' 'Tick' --json
@@ -347,7 +357,7 @@ fx_label    "idle"   "busy"   yes      Label
 fx_gap      ""       ""       no       A custom variable
 ```
 
-A read command copies the database and its WAL (`-wal`, never `-shm`: SQLite rebuilds the index when it opens the copy) to a temporary directory, retrying briefly if a file is momentarily locked, checks the copy (`pragma integrity_check`, then the version guard), reads it and deletes it. It writes nothing, never stops or starts Companion and works while Companion runs, including on the install's database. Without `--db` it reads the install's database (macOS only).
+A read command copies the database and its WAL (`-wal`, never `-shm`: SQLite rebuilds the index when it opens the copy) to a temporary directory, retrying briefly if a file is momentarily locked, checks the copy (`pragma integrity_check`, then the version guard), reads it and deletes it. It writes nothing, never stops or starts Companion and works while Companion runs, including on the install's database. Without `--db` it reads the install's database (macOS and Windows; see the table under [Usage](#usage)).
 
 - `list variables`: ordered by sort order, then name. `DEFAULT` is the stored value as JSON, so `"0"` and `0` differ; for a persisted variable it is Companion's current value. `CURRENT` is the value the running Companion holds now (see below).
 - `list triggers`: ordered by sort order, then id. `EVENTS` summarises each event (`startup 0ms`, `interval 5s`, `random 3-10s`, `timeofday 08:00:00 mon-fri` (runs of three or more days as a range, others as `sun,sat`), `date 2026-12-31 23:00`, `sun sunset +10m`, `connect 0ms`, `press`, `release`, `var fx_counter`, `locked`, `unlocked`, `condition_true`, `condition_false`, or the bare type for options the writer would not store), with ` (off)` after a disabled one. `ACTIONS` is the action count, with ` +cond` when the trigger has a condition. The id is shown because trigger names are not unique.
@@ -418,7 +428,7 @@ The YAML starts with two comment lines, the [schema](#schema-and-editor-setup) m
 | `usage` | bad command line (exit 2); `hint` is the usage line |
 | `invalid_description` | a description file cannot be read or fails validation |
 | `database_not_found` | the database does not exist |
-| `unsupported_platform` | live-install mode (no `--db`) off macOS |
+| `unsupported_platform` | no `--db` off macOS and Windows, or a live-install write (`apply` without `--db` or `--dry-run`) on Windows |
 | `unsupported_version` | the database is not version 17 (Companion 5.1) |
 | `snapshot_inconsistent` | the copy failed its integrity check, perhaps copied while Companion was writing; retry, or quit Companion and retry |
 | `database_unreadable` | the database cannot be copied, opened or read |

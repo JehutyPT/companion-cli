@@ -11,7 +11,7 @@
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { join, relative, isAbsolute } from "node:path";
+import { join, relative, isAbsolute, win32 } from "node:path";
 import { defaultDatabasePath } from "../src/core/paths.ts";
 
 /** The home directories a test must never resolve to. */
@@ -50,4 +50,27 @@ export function assertNotRealHome(path: string): void {
 if (homedir() !== TEST_HOME) {
   throw new Error(`os.homedir() is ${homedir()}, not the test home`);
 }
-assertNotRealHome(defaultDatabasePath(homedir()));
+assertNotRealHome(
+  defaultDatabasePath({ homedir: homedir(), platform: "darwin", env: {} }),
+);
+
+/**
+ * True when the Windows path `path` is inside `dir`, with Windows path rules
+ * (case-insensitive) on every host.
+ */
+export function isInsideWindows(path: string, dir: string): boolean {
+  const rel = win32.relative(dir, path);
+  return rel === "" || (!rel.startsWith("..") && !win32.isAbsolute(rel));
+}
+
+/** The Windows install's database with the bootstrap's `APPDATA`. */
+export const TEST_WINDOWS_DATABASE = defaultDatabasePath({
+  homedir: homedir(),
+  platform: "win32",
+  env: process.env,
+});
+if (!isInsideWindows(TEST_WINDOWS_DATABASE, TEST_HOME)) {
+  throw new Error(
+    `the Windows install's database ${TEST_WINDOWS_DATABASE} is outside the test home`,
+  );
+}

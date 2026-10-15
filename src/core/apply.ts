@@ -1,4 +1,3 @@
-import { homedir as osHomedir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { backupDatabase, defaultBackupRoot } from "./backup.ts";
 import {
@@ -20,6 +19,9 @@ import {
 } from "./errors.ts";
 import {
   assertDatabaseExists,
+  assertLiveWriteSupported,
+  type InstallContext,
+  installContext,
   isDefaultInstallDatabase,
   resolveDatabaseTarget,
 } from "./paths.ts";
@@ -33,7 +35,10 @@ import {
 /**
  * The shared apply pipeline. Every writer goes through it, in this order:
  *
- *  1. in live-install mode (no `dbPath`), refuse any platform but macOS;
+ *  1. in live-install mode (no `dbPath`), refuse any platform without an
+ *     install location (macOS and Windows have one), and refuse a write on
+ *     Windows, where the tool cannot stop and start Companion yet (a dry run
+ *     goes ahead);
  *  2. read and validate the whole description file (no database access);
  *  3. the writer's `resolve`, once (environment values; in live-install mode
  *     what the running Companion knows, so before step 4 quits it); then on
@@ -149,8 +154,8 @@ export interface PreparedApply {
   dbPath: string;
   /** Live-install mode: no `--db`, so the install's database. */
   live: boolean;
-  platform: NodeJS.Platform;
-  homedir: string;
+  /** What located the install's database (home, platform, environment). */
+  install: InstallContext;
   writer: Writer;
   plan: unknown;
   /** The writer's warnings from `resolve`. */
@@ -168,13 +173,8 @@ export async function prepareApply(
   request: ApplyRequest,
   options: ApplyOptions = {},
 ): Promise<PreparedApply> {
-  const home = options.homedir ?? osHomedir();
-  const platform = options.platform ?? process.platform;
-  const { dbPath, live } = resolveDatabaseTarget(
-    request.dbPath,
-    home,
-    platform,
-  );
+  const install = installContext(options);
+  const { dbPath, live } = resolveDatabaseTarget(request.dbPath, install);
 
   const { writer, plan: parsed } = loadDescription(
     request.descriptionPath,
@@ -206,22 +206,28 @@ export async function prepareApply(
     },
     options.tmpdir,
   );
-  return { dbPath, live, platform, homedir: home, writer, plan, warnings };
+  return {
+    dbPath,
+    live,
+    install,
+    writer,
+    plan,
+    warnings,
+  };
 }
 
 export async function apply(
   request: ApplyRequest,
   options: ApplyOptions = {},
 ): Promise<ApplyResult> {
-  const {
-    dbPath,
-    live,
-    platform,
-    homedir: home,
-    writer,
-    plan,
-    warnings,
-  } = await prepareApply(request, options);
+  // Step 1's write refusal comes before the description is read, as the
+  // platform guard does. #40 removes it.
+  const { platform } = installContext(options);
+  if (request.dbPath === undefined) assertLiveWriteSupported(platform);
+  const { dbPath, live, install, writer, plan, warnings } = await prepareApply(
+    request,
+    options,
+  );
 
   const control = options.processControl ?? defaultProcessControl(platform);
   // Steps 5 and 6, after the in-use guard. On other platforms (`--db` only)
@@ -245,7 +251,7 @@ export async function apply(
   if (!live) {
     if (
       platform === "darwin" &&
-      isDefaultInstallDatabase(dbPath, home) &&
+      isDefaultInstallDatabase(dbPath, install) &&
       (await runningServer(control)).length > 0
     ) {
       throw new CliError(

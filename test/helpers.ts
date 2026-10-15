@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { after } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { run } from "../src/cli.ts";
@@ -148,11 +148,25 @@ export function fakeProcessControl(options: FakeProcessOptions): {
 
 /**
  * `~/Library/Application Support/companion/v5.1` under `home`: the macOS
- * layout on every host. Windows layouts arrive with #37.
+ * layout, with host path rules.
  */
 export function installDir(home: string): string {
   return join(home, "Library", "Application Support", "companion", "v5.1");
 }
+
+/**
+ * `<appData>\companion\v5.1`: the Windows layout, with Windows path rules, so
+ * it is a real directory on a Windows host only.
+ */
+export function windowsInstallDir(appData: string): string {
+  return win32.join(appData, "companion", "v5.1");
+}
+
+/** Skips a test that needs a Windows install's files on disk off Windows. */
+export const WINDOWS_HOST_ONLY =
+  process.platform === "win32"
+    ? false
+    : "Windows install paths use Windows path rules: run by the Windows CI job";
 
 /**
  * A regular-expression source matching `join(...segments)` literally, so a

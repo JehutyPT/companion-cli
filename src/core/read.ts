@@ -3,7 +3,7 @@
  * the census) goes through it with its own reader:
  *
  *  1. resolve the target: `--db` with `~` expanded or, without it, the
- *     install's database (macOS only);
+ *     install's database (macOS and Windows);
  *  2. refuse a missing database;
  *  3. copy the database and its `-wal` if present (never `-shm`) into a new
  *     temporary directory, retrying transient lock errors, and open the copy
@@ -16,7 +16,6 @@
  * It never calls the process-control seam, so it works while Companion runs,
  * including on the install's database.
  */
-import { homedir as osHomedir } from "node:os";
 import type { DatabaseSync } from "node:sqlite";
 import {
   assertSnapshotConsistent,
@@ -24,13 +23,20 @@ import {
   withReadOnlySnapshot,
 } from "./database.ts";
 import { CliError, errorMessage } from "./errors.ts";
-import { assertDatabaseExists, resolveDatabaseTarget } from "./paths.ts";
+import type { Env } from "../rest/endpoint.ts";
+import {
+  assertDatabaseExists,
+  installContext,
+  resolveDatabaseTarget,
+} from "./paths.ts";
 
 export interface ReadOptions {
   /** Home directory used for `~` and the install path. Defaults to the OS home. */
   homedir?: string;
   /** Platform deciding whether live-install mode is supported. Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
+  /** Environment locating the install (`APPDATA` on Windows). Defaults to `process.env`. */
+  env?: Env;
   /** Directory for the temporary copy. Defaults to the OS temp directory. */
   tmpdir?: string;
 }
@@ -49,8 +55,7 @@ export function readDatabase<T>(
 ): ReadResult<T> {
   const { dbPath } = resolveDatabaseTarget(
     requestedPath,
-    options.homedir ?? osHomedir(),
-    options.platform ?? process.platform,
+    installContext(options),
   );
   assertDatabaseExists(dbPath);
   try {

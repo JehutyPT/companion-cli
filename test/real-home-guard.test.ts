@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { join, sep, win32 } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { run } from "../src/cli.ts";
 import { apply, prepareApply } from "../src/core/apply.ts";
@@ -16,7 +16,12 @@ import {
   tempDir,
   writeDescription,
 } from "./helpers.ts";
-import { REAL_HOMES, TEST_HOME } from "./setup.ts";
+import {
+  isInsideWindows,
+  REAL_HOMES,
+  TEST_HOME,
+  TEST_WINDOWS_DATABASE,
+} from "./setup.ts";
 
 const YAML =
   "kind: variables\nvariables:\n  - {name: home_guard, default: 1}\n";
@@ -41,6 +46,18 @@ describe("a missing homedir option in tests", () => {
     assert.equal(process.env["APPDATA"], TEST_HOME);
     assert.equal(process.env["LOCALAPPDATA"], undefined);
     assert.equal(process.env["XDG_CONFIG_HOME"], undefined);
+  });
+
+  it("resolves the Windows install's database inside the test home", () => {
+    // Windows path rules on every host: APPDATA is the test home.
+    assert.equal(
+      TEST_WINDOWS_DATABASE,
+      win32.join(TEST_HOME, "companion", "v5.1", "db.sqlite"),
+    );
+    assert.ok(isInsideWindows(TEST_WINDOWS_DATABASE, TEST_HOME));
+    for (const real of REAL_HOMES) {
+      assert.ok(!isInsideWindows(TEST_WINDOWS_DATABASE, real), real);
+    }
   });
 
   it("makes a live apply without homedir target the test home", async () => {
@@ -91,7 +108,7 @@ describe("a missing homedir option in tests", () => {
     };
     buildFixtureDb(installDir(TEST_HOME));
     const prepared = await prepareApply(request, options);
-    assert.equal(prepared.homedir, TEST_HOME);
+    assert.equal(prepared.install.homedir, TEST_HOME);
     assert.ok(prepared.dbPath.startsWith(TEST_HOME + sep));
     const result = await apply(request, options);
     assert.ok(result.backupDir.startsWith(TEST_HOME + sep));

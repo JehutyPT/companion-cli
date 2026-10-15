@@ -188,7 +188,7 @@ describe("read path: failures", () => {
     );
   });
 
-  it("live-install mode off macOS gives apply's refusal", async () => {
+  it("live-install mode off macOS and Windows gives apply's refusal", async () => {
     const file = writeDescription(tempDir(), "kind: variables\n");
     const applied = await runCli(["apply", file], { platform: "linux" });
     const { control, calls } = forbiddenProcessControl();
@@ -197,7 +197,7 @@ describe("read path: failures", () => {
       { platform: "linux", processControl: control },
       "unsupported_platform",
       1,
-      /^error: unsupported platform "linux": live-install mode only supports macOS; pass --db with a database path$/,
+      /^error: unsupported platform "linux": the local install is found on macOS and Windows only; pass --db with a database path$/,
     );
     assert.deepEqual([`error: ${document.error.message}`], applied.stderr);
     assert.equal(document.error.hint, "pass --db <path>");

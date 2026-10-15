@@ -7,7 +7,10 @@ import type { ConfigFieldsOutcome, Writer } from "./writer.ts";
  * beyond the description: the runtime around the tool.
  */
 export interface WriterRuntime {
-  /** The environment a description's `{env: NAME}` values come from. Defaults to `process.env`. */
+  /**
+   * The environment a description's `{env: NAME}` values come from, and that
+   * locates the install (`APPDATA` on Windows). Defaults to `process.env`.
+   */
   env?: Env;
   /**
    * Asks the running Companion for a connection's config fields. Called only

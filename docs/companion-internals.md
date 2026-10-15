@@ -23,7 +23,7 @@ Verification sources:
 | Restart: `open -a Companion`. The launcher starts the server on its own. | Prototype run; live run |
 | Companion holds pages, controls and custom variables in memory and writes them back; edits made while it runs are ignored or overwritten. | Observed behaviour; basis of ADR 0001 |
 
-Only macOS has been checked, apart from the Windows in-use check. Windows and Linux paths and other process handling are unverified.
+Only macOS has been checked in full. On Windows, the #36 spike observed the default configuration root `%APPDATA%\companion\` (the launcher passes `--config-dir=C:\Users\<user>\AppData\Roaming\companion\` to the server) and the database at `<root>\v5.1\db.sqlite`; the read commands and dry runs use that path without `--db`. Apart from the Windows in-use check above, Windows process handling is unverified, and so is Linux.
 
 ## DB version
 

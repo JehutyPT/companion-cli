@@ -5,8 +5,11 @@ Configuring a local Bitfocus Companion install from description files.
 ## Language
 
 **Companion install**:
-One Companion application and its configuration directory on the local machine (on macOS, `~/Library/Application Support/companion/v5.1/`).
+One Companion application and its configuration directory on the local machine: `<root>/v5.1/`, where the default configuration root is `~/Library/Application Support/companion/` on macOS and `%APPDATA%\companion\` on Windows.
 _Avoid_: Server, instance (Companion uses "instance" for connections)
+
+**Configuration root**:
+The folder Companion's launcher passes to the server as `--config-dir`; the server keeps the 5.1 database at `<root>/v5.1/db.sqlite`. Without `--db` the tool uses the platform's default root (a custom root from `COMPANION_CONFIG_BASEDIR` is not followed yet).
 
 **Companion server process**:
 The `node … Companion.app/Contents/Resources/main.js` process, a child of the Companion launcher, that holds the database open while Companion runs. "Companion is running" means this process exists; the launcher alone does not count.
