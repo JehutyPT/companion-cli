@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run [--json]` reports what an apply would change without writing, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -42,6 +42,7 @@ node dist/bin/companion-cli.js apply variables.yaml                    # the loc
 node dist/bin/companion-cli.js apply variables.yaml --db /path/to/copy/db.sqlite
 node dist/bin/companion-cli.js apply variables.yaml --dry-run                 # report only, write nothing
 node dist/bin/companion-cli.js apply variables.yaml --dry-run --json          # the same report as JSON
+node dist/bin/companion-cli.js apply variables.yaml --json                    # the result, or any failure, as JSON
 ```
 
 `npm link` (after `npm run build`) puts `companion-cli` on your `PATH`, so it runs from any directory. The REST commands then need the user config file; see [Setup](#setup).
@@ -77,7 +78,15 @@ pages: 0 added, 1 replaced, 0 removed
 apply would report: button at page 1, row 0, column 2: replaced bank:<old id> with bank:<new id>
 ```
 
-When nothing would change it prints `no changes`. Generated ids do not count as changes: re-applying an unchanged button, page or trigger reports `no changes` although a real apply stores fresh ids. Only the ids the writers generate are ignored (action, feedback, style-override and event ids, and a replaced button's control id); a changed option, such as another connection id in a pass-through action, is always a change ([ADR 0005](docs/adr/0005-dry-run-diff-ignores-generated-ids.md)). `--dry-run --json` prints one JSON document instead: `{dryRun, database, changed, tables: {<table>: {added, changed, removed}}, summary}`, where each entry has the row's `key` and its stored `before` and/or `after` value. A dry run exits 0 whether or not anything would change, and 1 when `apply` would refuse or fail. `--json` without `--dry-run` is a usage error (exit 2).
+When nothing would change it prints `no changes`. Generated ids do not count as changes: re-applying an unchanged button, page or trigger reports `no changes` although a real apply stores fresh ids. Only the ids the writers generate are ignored (action, feedback, style-override and event ids, and a replaced button's control id); a changed option, such as another connection id in a pass-through action, is always a change ([ADR 0005](docs/adr/0005-dry-run-diff-ignores-generated-ids.md)). `--dry-run --json` prints one JSON document instead: `{dryRun, database, changed, tables: {<table>: {added, changed, removed}}, summary}`, where each entry has the row's `key` and its stored `before` and/or `after` value. A dry run exits 0 whether or not anything would change, and 1 when `apply` would refuse or fail.
+
+`apply --json`, with or without `--dry-run`, makes stdout machine-readable: exactly one JSON document, success or failure. A real apply prints, when it finishes:
+
+```json
+{"applied": true, "kind": "variables", "summary": "<the summary line>", "database": "/path/to/db.sqlite", "live": true, "backup": "/path/to/companion-cli-backups/<timestamp>", "restarted": true, "rest": null}
+```
+
+`live` is false with `--db`. `restarted` is true only when live-install mode quit Companion and started it again. `rest` is reserved and always `null` for now. The progress lines (`quitting Companion`, `backup: …`, `starting Companion`) go to stderr instead of stdout. Any failure, a bad command line included, is one [JSON error document](#read-commands) on stdout with nothing on stderr apart from progress lines already printed, and the exit code is unchanged. Nothing is streamed: the document comes once, at the end.
 
 `button.yaml` replaces the button at one location:
 
@@ -233,7 +242,7 @@ A read command copies the database and its WAL files to a temporary directory, c
 {"error": {"code": "database_not_found", "message": "database not found: /path/db.sqlite", "hint": "pass --db <path>, or check that Companion 5.1 has been run once"}}
 ```
 
-`message` is the stderr line without `error: `. `path` (a description field path) and `hint` (the next step) appear when they apply. `items` (one entry per refused item, when a command refuses several) and `committed` and `backup` (a write committed and then failed) are reserved for later commands. Codes are stable: new ones may be added, none is renamed or removed.
+`message` is the stderr line without `error: `. `path` (a description field path) and `hint` (the next step) appear when they apply. `items` (one entry per refused item, when a command refuses several) is reserved for later commands. `backup` is the backup directory when an `apply` failed after taking one, and `committed: true` says the write was committed before the failure (`restart_failed`): do not retry it. Codes are stable: new ones may be added, none is renamed or removed.
 
 | Code | When |
 | --- | --- |
@@ -246,9 +255,14 @@ A read command copies the database and its WAL files to a temporary directory, c
 | `database_unreadable` | the database cannot be copied, opened or read |
 | `check_failed` | a check against the database refused the description |
 | `not_found` | a named item does not exist |
+| `companion_running` | `apply`: Companion or another process holds the database, Companion could not be quit, or the check failed (fails closed); hint `quit Companion and retry` |
+| `quit_timeout` | `apply`: Companion's server did not exit in time; nothing written |
+| `backup_failed` | `apply`: the backup could not be written; nothing written |
+| `write_failed` | `apply`: the database could not be opened for writing, or the write or its integrity check failed and was rolled back; nothing committed. `backup` is set. If the rollback also failed the hint says to restore from the backup |
+| `restart_failed` | `apply`: the write committed but Companion did not start again; `committed: true` and `backup` are set |
 | `unexpected` | anything else: a bug in the tool |
 
-`apply` and the REST commands keep their plain stderr errors for now.
+`apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code and its hint says to start Companion manually. The REST commands keep their plain stderr errors for now.
 
 ### Runtime commands (REST helper)
 

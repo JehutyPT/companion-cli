@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { CliError } from "../core/errors.ts";
+import { CheckError } from "../core/errors.ts";
 import type { Fields } from "../core/validate.ts";
 import type { Writer } from "../core/writer.ts";
 import {
@@ -63,14 +63,16 @@ function readTarget(db: DatabaseSync, location: Location): Target {
   const { page, row, column } = location;
   const pages = readPageRows(db);
   if (!pages.has(page)) {
-    throw new CliError(
-      `location.page: page ${page} does not exist; this writer does not create pages`,
+    throw new CheckError(
+      "location.page",
+      `page ${page} does not exist; this writer does not create pages`,
     );
   }
   const count = loadedPageCount(pages);
   if (page > count) {
-    throw new CliError(
-      `location.page: page ${page} is not loaded by Companion (pages 1 to ${count} load); this writer does not create pages`,
+    throw new CheckError(
+      "location.page",
+      `page ${page} is not loaded by Companion (pages 1 to ${count} load); this writer does not create pages`,
     );
   }
   const stored = pages.get(page) as StoredPage;
@@ -81,8 +83,9 @@ function readTarget(db: DatabaseSync, location: Location): Target {
     return { page: stored, cells, previous: undefined };
   }
   if (!isButtonControlId(previous)) {
-    throw new CliError(
-      `location: page ${page}, row ${row}, column ${column} holds ${JSON.stringify(previous)}, which is not a button control id; refusing to replace it`,
+    throw new CheckError(
+      "location",
+      `page ${page}, row ${row}, column ${column} holds ${JSON.stringify(previous)}, which is not a button control id; refusing to replace it`,
     );
   }
   return { page: stored, cells, previous };

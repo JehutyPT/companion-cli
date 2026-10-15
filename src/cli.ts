@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { parseArgs } from "node:util";
-import { apply, type ApplyOptions } from "./core/apply.ts";
+import { apply, type ApplyOptions, type ApplyResult } from "./core/apply.ts";
 import { dryRun, dryRunJson, renderDryRun } from "./core/dry-run.ts";
 import {
   CliError,
@@ -121,7 +121,7 @@ function synopsis(spec: RestCommandSpec): string {
 }
 
 const APPLY_SYNOPSIS =
-  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run [--json]]";
+  "apply <description-file> [--db <path-to-db.sqlite>] [--dry-run] [--json]";
 const LIST_KINDS = Object.keys(listCommands);
 const VALIDATE_SYNOPSIS =
   "validate <description-file> [--db <path-to-db.sqlite> | --no-db] [--json]";
@@ -155,8 +155,10 @@ export const HELP = [
   "install's database while Companion is running.",
   "apply --dry-run runs the same checks on a temporary copy of the database and",
   "reports the rows an apply would add, replace and remove. It writes nothing,",
-  "takes no backup and never stops or starts Companion. --json prints that",
-  "report as one JSON document.",
+  "takes no backup and never stops or starts Companion.",
+  "apply --json prints the result, or the dry run's report, as one JSON",
+  "document on stdout, and any failure as one JSON error document on stdout;",
+  "progress lines go to stderr.",
   "validate checks a description file as apply would before writing, and",
   "refuses with the same message. With a database (the install's, or --db)",
   "it also runs apply's checks against a read-only copy of it; --no-db checks",
@@ -249,8 +251,7 @@ async function runRead(
   io: CliIo,
   options: CliOptions,
 ): Promise<number> {
-  const end = argv.indexOf("--");
-  const json = (end === -1 ? argv : argv.slice(0, end)).includes("--json");
+  const json = hasJsonFlag(argv);
   try {
     if (commandWord(argv) === "validate") {
       const parsed = parseValidate(argv);
@@ -393,11 +394,67 @@ function usageFailure(reason: string): CliError {
   return new CliError(`${reason}. ${USAGE}`, { code: "usage", hint: USAGE });
 }
 
+/** Whether `--json` appears in argv before any `--`. */
+function hasJsonFlag(argv: readonly string[]): boolean {
+  const end = argv.indexOf("--");
+  return (end === -1 ? argv : argv.slice(0, end)).includes("--json");
+}
+
+/**
+ * `apply`, with or without `--dry-run`. With `--json` anywhere in argv, the
+ * result is one JSON document on stdout, every failure (usage errors
+ * included) is one JSON error document on stdout and nothing on stderr, and
+ * progress lines go to stderr.
+ */
 async function runApply(
   argv: readonly string[],
   io: CliIo,
   options: CliOptions,
 ): Promise<number> {
+  const json = hasJsonFlag(argv);
+  try {
+    const parsed = parseApply(argv);
+    if (parsed === "help") {
+      io.stdout(HELP);
+      return EXIT_OK;
+    }
+    const { file, db, dryRun: dry } = parsed;
+    const {
+      env: _env,
+      cwd: _cwd,
+      restTimeoutMs: _timeout,
+      ...applyOptions
+    } = options;
+    const request = { descriptionPath: file, dbPath: db, writers };
+    if (dry) {
+      const result = dryRun(request, applyOptions);
+      if (json) io.stdout(dryRunJson(result));
+      else for (const line of renderDryRun(result)) io.stdout(line);
+      return EXIT_OK;
+    }
+    const result = await apply(request, {
+      ...applyOptions,
+      log: applyOptions.log ?? (json ? io.stderr : io.stdout),
+    });
+    io.stdout(json ? applyJson(result) : result.summary);
+    return EXIT_OK;
+  } catch (error) {
+    if (json) io.stdout(errorJson(error));
+    else io.stderr(`error: ${failureMessage(error)}`);
+    return error instanceof CliError && error.code === "usage"
+      ? EXIT_USAGE
+      : EXIT_FAILURE;
+  }
+}
+
+interface ApplyCommandLine {
+  file: string;
+  db: string | undefined;
+  dryRun: boolean;
+}
+
+/** Parses an `apply` command line. Throws a `usage` CliError on a bad one. */
+function parseApply(argv: readonly string[]): ApplyCommandLine | "help" {
   let parsed;
   try {
     parsed = parseArgs({
@@ -412,60 +469,38 @@ async function runApply(
       },
     });
   } catch (error) {
-    return usageError(io, errorMessage(error));
+    throw usageFailure(errorMessage(error));
   }
-
   const { values, positionals } = parsed;
-  if (values.help) {
-    io.stdout(HELP);
-    return EXIT_OK;
-  }
+  if (values.help) return "help";
   const [command, file, ...extra] = positionals;
   if (command !== "apply") {
-    return usageError(
-      io,
+    throw usageFailure(
       command === undefined
         ? "missing command"
         : `unknown command "${command}"`,
     );
   }
   if (file === undefined || extra.length > 0) {
-    return usageError(io, "apply takes exactly one description file");
+    throw usageFailure("apply takes exactly one description file");
   }
-  if (values.db === "") {
-    return usageError(io, "--db needs a path");
-  }
-  if (values.json && !values["dry-run"]) {
-    return usageError(io, "--json is only valid with --dry-run");
-  }
+  if (values.db === "") throw usageFailure("--db needs a path");
+  return { file, db: values.db, dryRun: values["dry-run"] === true };
+}
 
-  const {
-    env: _env,
-    cwd: _cwd,
-    restTimeoutMs: _timeout,
-    ...applyOptions
-  } = options;
-  try {
-    if (values["dry-run"]) {
-      const result = dryRun(
-        { descriptionPath: file, dbPath: values.db, writers },
-        applyOptions,
-      );
-      if (values.json) io.stdout(dryRunJson(result));
-      else for (const line of renderDryRun(result)) io.stdout(line);
-      return EXIT_OK;
-    }
-    const result = await apply(
-      { descriptionPath: file, dbPath: values.db, writers },
-      { ...applyOptions, log: applyOptions.log ?? io.stdout },
-    );
-    io.stdout(result.summary);
-    return EXIT_OK;
-  } catch (error) {
-    const prefix = error instanceof CliError ? "" : "unexpected error: ";
-    io.stderr(`error: ${prefix}${errorMessage(error)}`);
-    return EXIT_FAILURE;
-  }
+/** The `apply --json` document of a real apply. */
+function applyJson(result: ApplyResult): string {
+  return JSON.stringify({
+    applied: true,
+    kind: result.kind,
+    summary: result.summary,
+    database: result.dbPath,
+    live: result.live,
+    backup: result.backupDir,
+    restarted: result.restarted,
+    // Filled by the wait for REST after a restart (#30).
+    rest: null,
+  });
 }
 
 const REST_NAMES: ReadonlySet<string> = new Set(

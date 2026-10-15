@@ -1,7 +1,9 @@
 import { constants, mkdirSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { CliError, errorMessage } from "./errors.ts";
+import { CliError, type CliErrorOptions, errorMessage } from "./errors.ts";
 import { copyDatabaseFiles } from "./database.ts";
+
+const BACKUP_FAILED: CliErrorOptions = { code: "backup_failed" };
 
 /** Default backup root: a `companion-cli-backups` directory next to the database. */
 export function defaultBackupRoot(dbPath: string): string {
@@ -28,6 +30,7 @@ export function backupDatabase(
   } catch (error) {
     throw new CliError(
       `cannot create backup directory ${root}: ${errorMessage(error)}`,
+      BACKUP_FAILED,
     );
   }
   const stem = join(root, timestamp(now));
@@ -40,6 +43,7 @@ export function backupDatabase(
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw new CliError(
           `cannot create backup directory ${dir}: ${errorMessage(error)}`,
+          BACKUP_FAILED,
         );
       }
       dir = `${stem}-${n}`;
@@ -54,6 +58,7 @@ export function backupDatabase(
   } catch (error) {
     throw new CliError(
       `cannot back up ${dbPath} to ${dir}: ${errorMessage(error)}`,
+      BACKUP_FAILED,
     );
   }
   return dir;

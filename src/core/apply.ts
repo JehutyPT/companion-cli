@@ -11,7 +11,12 @@ import {
 export { runIntegrityCheck } from "./database.ts";
 import { loadDescription, type WriterRegistry } from "./description.ts";
 import type { Writer } from "./writer.ts";
-import { CliError, errorMessage, UnsupportedVersionError } from "./errors.ts";
+import {
+  CliError,
+  errorDetails,
+  errorMessage,
+  UnsupportedVersionError,
+} from "./errors.ts";
 import {
   assertDatabaseExists,
   isDefaultInstallDatabase,
@@ -102,7 +107,18 @@ export interface ApplyRequest {
 export interface ApplyResult {
   backupDir: string;
   summary: string;
+  /** The description's kind. */
+  kind: string;
+  /** The database written. */
+  dbPath: string;
+  /** Live-install mode: no `--db`, so the install's database. */
+  live: boolean;
+  /** Live-install mode quit Companion and started it again. */
+  restarted: boolean;
 }
+
+/** The hint for a refusal that quitting Companion resolves. */
+export const QUIT_HINT = "quit Companion and retry";
 
 /** The checked target of an apply or a dry run. */
 export interface PreparedApply {
@@ -166,9 +182,10 @@ export async function apply(
   const control = options.processControl ?? macosProcessControl();
   // Steps 5 and 6, after the in-use guard. On non-macOS (`--db` only) there
   // is no process check at all.
-  const write = async () => {
+  const write = async (): Promise<ApplyResult> => {
     if (platform === "darwin") await assertNotInUse(control, dbPath);
-    return writeStopped(dbPath, writer, plan, options);
+    const written = writeStopped(dbPath, writer, plan, options);
+    return { ...written, kind: writer.kind, dbPath, live, restarted: false };
   };
 
   if (!live) {
@@ -179,6 +196,7 @@ export async function apply(
     ) {
       throw new CliError(
         `refusing to write the Companion install's database (${dbPath}) while Companion is running; quit Companion or omit --db to let the tool stop and restart it`,
+        { code: "companion_running", hint: QUIT_HINT },
       );
     }
     return write();
@@ -202,13 +220,14 @@ export async function apply(
       options,
       new CliError(
         `cannot quit Companion: ${errorMessage(error)}; nothing written`,
-        { cause: error },
+        { code: "companion_running", hint: QUIT_HINT, cause: error },
       ),
     );
   }
   if (!exited) {
     throw new CliError(
       `Companion's server process did not exit within ${timeoutMs / 1000} seconds; nothing written. Companion may be partly stopped: check it and start it if needed`,
+      { code: "quit_timeout", hint: QUIT_HINT },
     );
   }
 
@@ -224,10 +243,16 @@ export async function apply(
   } catch (error) {
     throw new CliError(
       `the change was written (backup kept at ${result.backupDir}) but Companion did not start again; start Companion manually: ${errorMessage(error)}`,
-      { cause: error },
+      {
+        code: "restart_failed",
+        hint: "start Companion manually; the write is committed",
+        committed: true,
+        backup: result.backupDir,
+        cause: error,
+      },
     );
   }
-  return result;
+  return { ...result, restarted: true };
 }
 
 /**
@@ -245,7 +270,11 @@ async function startAfterFailure(
   } catch (startError) {
     throw new CliError(
       `${errorMessage(error)}; Companion was quit and did not start again, start Companion manually: ${errorMessage(startError)}`,
-      { cause: error },
+      {
+        ...errorDetails(error),
+        hint: "start Companion manually; nothing was written",
+        cause: error,
+      },
     );
   }
   throw error;
@@ -258,7 +287,7 @@ async function runningServer(control: ProcessControl): Promise<number[]> {
   } catch (error) {
     throw new CliError(
       `cannot tell whether Companion is running (${errorMessage(error)}); refusing to write`,
-      { cause: error },
+      { code: "companion_running", hint: QUIT_HINT, cause: error },
     );
   }
 }
@@ -277,13 +306,14 @@ async function assertNotInUse(
   } catch (error) {
     throw new CliError(
       `cannot tell whether the database is in use (${errorMessage(error)}); refusing to write ${dbPath}`,
-      { cause: error },
+      { code: "companion_running", hint: QUIT_HINT, cause: error },
     );
   }
   const others = holders.filter((pid) => pid !== process.pid);
   if (others.length > 0) {
     throw new CliError(
       `refusing to write ${dbPath}: the database is open in another process (PID ${others.join(", ")}); close it first`,
+      { code: "companion_running", hint: QUIT_HINT },
     );
   }
 }
@@ -294,13 +324,18 @@ function writeStopped<Plan>(
   writer: Writer<Plan>,
   plan: Plan,
   options: ApplyOptions,
-): ApplyResult {
+): { backupDir: string; summary: string } {
   const backupDir = backupDatabase(
     dbPath,
     options.backupRoot ?? defaultBackupRoot(dbPath),
     (options.now ?? (() => new Date()))(),
   );
   options.log?.(`backup: ${backupDir}`);
+  const unchanged = {
+    code: "write_failed",
+    hint: `the database is unchanged; the backup is at ${backupDir}`,
+    backup: backupDir,
+  } as const;
 
   const hooks = options.hooks ?? {};
   hooks.afterBackup?.(dbPath);
@@ -310,6 +345,7 @@ function writeStopped<Plan>(
   } catch (error) {
     throw new CliError(
       `cannot open database ${dbPath} for writing: ${errorMessage(error)} (backup kept at ${backupDir})`,
+      { ...unchanged, cause: error },
     );
   }
   try {
@@ -324,7 +360,12 @@ function writeStopped<Plan>(
       } catch (rollbackError) {
         throw new CliError(
           `write failed and rollback failed; restore from the backup at ${backupDir}: ${errorMessage(error)}; ${errorMessage(rollbackError)}`,
-          { cause: error },
+          {
+            code: "write_failed",
+            hint: `restore from the backup at ${backupDir}`,
+            backup: backupDir,
+            cause: error,
+          },
         );
       }
     }
@@ -336,12 +377,15 @@ function writeStopped<Plan>(
           : CliError;
       throw new ErrorType(
         `${error.message} (nothing written; backup kept at ${backupDir})`,
-        { cause: error },
+        { ...errorDetails(error), backup: backupDir, cause: error },
       );
     }
     throw new CliError(
       `write failed, rolled back, database unchanged (backup kept at ${backupDir}): ${errorMessage(error)}`,
-      { cause: error instanceof WriteFailure ? error.cause : error },
+      {
+        ...unchanged,
+        cause: error instanceof WriteFailure ? error.cause : error,
+      },
     );
   } finally {
     db.close();

@@ -364,16 +364,19 @@ describe("read commands: command line", () => {
     ]);
   });
 
-  it("apply keeps its own usage errors, never as JSON", async () => {
+  it("apply uses the same usage document under --json", async () => {
     const env = setup();
     const file = writeDescription(env.dir, "kind: variables\n");
-    const result = await runCli(["apply", file, "--db", env.dbPath, "--json"]);
+    const result = await runCli(["apply", file, "extra", "--json"]);
     assert.equal(result.code, 2);
-    assert.deepEqual(result.stdout, []);
-    assert.equal(
-      result.stderr[0],
-      `error: --json is only valid with --dry-run. ${USAGE}`,
-    );
+    assert.deepEqual(result.stderr, []);
+    assert.deepEqual(JSON.parse(result.stdout[0] ?? ""), {
+      error: {
+        code: "usage",
+        message: `apply takes exactly one description file. ${USAGE}`,
+        hint: USAGE,
+      },
+    });
   });
 });
 

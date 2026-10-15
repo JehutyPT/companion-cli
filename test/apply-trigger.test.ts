@@ -19,6 +19,8 @@ import {
   setup,
   stripIds,
   type TableDump,
+  assertJsonTwin,
+  assertRefusalCode,
 } from "./helpers.ts";
 
 /** Seeded trigger ids: `trigger:` and 21 nanoid characters, as Companion makes them. */
@@ -448,6 +450,10 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
+    assertRefusalCode(
+      assertJsonTwin(result, await applyTo(env, yaml, {}, ["--json"])),
+    );
+    assert.deepEqual(fileState(env.dbPath), before);
   }
 
   const trigger = (events: string, extra = "") =>

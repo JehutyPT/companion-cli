@@ -66,7 +66,7 @@ export function dryRun(
       if (error instanceof WriteFailure) {
         throw new CliError(
           `dry run: apply would fail: ${error.message}; nothing written`,
-          { cause: error.cause },
+          { code: "write_failed", cause: error.cause },
         );
       }
       throw error;

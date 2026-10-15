@@ -374,14 +374,15 @@ export function setup(
   return { dir, dbPath, backupRoot: join(dir, "backups"), tmpdir: tempDir() };
 }
 
-/** Applies `yaml` to the fixture with `apply --db`. */
+/** Applies `yaml` to the fixture with `apply --db`, then any `extra` arguments. */
 export function applyTo(
   env: FixtureEnv,
   yaml: string,
   options: CliOptions = {},
+  extra: string[] = [],
 ): Promise<CliRun> {
   return runCli(
-    ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath],
+    ["apply", writeDescription(env.dir, yaml), "--db", env.dbPath, ...extra],
     { backupRoot: env.backupRoot, tmpdir: env.tmpdir, ...options },
   );
 }
@@ -407,4 +408,68 @@ export function corruptIndex(db: DatabaseSync): void {
   db.exec("PRAGMA writable_schema = ON");
   db.exec("DELETE FROM sqlite_master WHERE name = 'fixture_orphan'");
   db.exec("PRAGMA writable_schema = OFF");
+}
+
+/** The `error` object of a JSON error document. */
+export interface ErrorDocument {
+  code: string;
+  message: string;
+  path?: string;
+  hint?: string;
+  items?: unknown;
+  committed?: boolean;
+  backup?: string;
+}
+
+/**
+ * Asserts that `json` is the `--json` twin of the failed run `text`: the same
+ * exit code, exactly one error document on stdout whose `message` is the text
+ * run's `error: ` line without the prefix, no `error: ` line on stderr (only
+ * progress lines), and a code other than `unexpected`. Returns the document.
+ * The two runs may use different directories when `normalise` maps them.
+ */
+export function assertJsonTwin(
+  text: CliRun,
+  json: CliRun,
+  /** Maps the JSON run's message onto the text run's, e.g. another home. */
+  normalise: (message: string) => string = (message) => message,
+): ErrorDocument {
+  const line = text.stderr.find((l) => l.startsWith("error: "));
+  assert.ok(line, `the text run fails with an error line: ${text.stderr}`);
+  assert.notEqual(text.code, 0);
+  assert.equal(json.code, text.code);
+  assert.equal(json.stdout.length, 1, json.stdout.join("\n"));
+  const doc = JSON.parse(json.stdout[0] ?? "") as { error: ErrorDocument };
+  assert.deepEqual(Object.keys(doc), ["error"]);
+  assert.equal(normalise(doc.error.message), line.slice("error: ".length));
+  assert.deepEqual(
+    json.stderr.filter((l) => l.startsWith("error: ")),
+    [],
+    "no error line on stderr",
+  );
+  assert.notEqual(doc.error.code, "unexpected", doc.error.message);
+  return doc.error;
+}
+
+/**
+ * The code a refusal before any write gets: `invalid_description` for the
+ * description file on its own, `check_failed` for the database refusing it.
+ * Also asserts that a `path` is the field the message names.
+ */
+export function assertRefusalCode(doc: ErrorDocument): void {
+  const description =
+    /^(invalid description .*?: |invalid YAML |cannot read description )/;
+  const match = description.exec(doc.message);
+  assert.equal(
+    doc.code,
+    match ? "invalid_description" : "check_failed",
+    doc.message,
+  );
+  if (doc.path !== undefined) {
+    const reason = match ? doc.message.slice(match[0].length) : doc.message;
+    assert.ok(
+      reason.startsWith(`${doc.path}: `),
+      `path ${doc.path} names the field in: ${doc.message}`,
+    );
+  }
 }

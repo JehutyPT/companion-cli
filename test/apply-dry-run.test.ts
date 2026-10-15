@@ -29,6 +29,8 @@ import {
   type TableDump,
   tempDir,
   writeDescription,
+  assertJsonTwin,
+  assertRefusalCode,
 } from "./helpers.ts";
 import type { CliOptions } from "../src/cli.ts";
 
@@ -539,22 +541,35 @@ describe("apply --dry-run: refusals are apply's", () => {
     ],
     ["missing page", BUTTON_YAML("x", "{ page: 7, row: 0, column: 0 }")],
   ];
+  const codes: Record<string, string> = {
+    "unsupported DB version": "unsupported_version",
+  };
   for (const [name, yaml, fixture] of cases) {
-    it(`${name}: same exit code and stderr line, with and without --json`, async () => {
+    it(`${name}: apply's exit code and stderr line; with --json the same error document as apply --json`, async () => {
       const env = setup(fixture);
       const text = await dry(env, yaml);
       const json = await dry(env, yaml, ["--json"]);
       const real = await applyTo(env, yaml, {
         processControl: STOPPED_PROCESS_CONTROL,
       });
+      const realJson = await applyTo(
+        env,
+        yaml,
+        { processControl: STOPPED_PROCESS_CONTROL },
+        ["--json"],
+      );
       assert.equal(real.code, 1);
       assert.equal(real.stderr.length, 1);
       assert.doesNotMatch(real.stderr[0] ?? "", /nothing written; backup kept/);
-      for (const result of [text, json]) {
-        assert.equal(result.code, 1);
-        assert.deepEqual(result.stdout, []);
-        assert.deepEqual(result.stderr, real.stderr);
-      }
+      assert.equal(text.code, 1);
+      assert.deepEqual(text.stdout, []);
+      assert.deepEqual(text.stderr, real.stderr);
+      const doc = assertJsonTwin(text, json);
+      assert.deepEqual(json.stderr, []);
+      assert.deepEqual(realJson.stdout, json.stdout);
+      assert.deepEqual(realJson.stderr, []);
+      if (codes[name]) assert.equal(doc.code, codes[name]);
+      else assertRefusalCode(doc);
     });
   }
 
@@ -566,13 +581,23 @@ describe("apply --dry-run: refusals are apply's", () => {
       ["apply", join(env.dir, "nope.yaml"), "--db", env.dbPath],
     ]) {
       const real = await runCli(argv);
-      const result = await runCli([...argv, "--dry-run", "--json"], {
+      const result = await runCli([...argv, "--dry-run"], {
+        processControl: forbiddenProcessControl().control,
+      });
+      const json = await runCli([...argv, "--dry-run", "--json"], {
         processControl: forbiddenProcessControl().control,
       });
       assert.equal(real.code, 1);
       assert.equal(result.code, 1);
       assert.deepEqual(result.stdout, []);
       assert.deepEqual(result.stderr, real.stderr);
+      const doc = assertJsonTwin(result, json);
+      assert.equal(
+        doc.code,
+        argv[1]?.endsWith("nope.yaml")
+          ? "invalid_description"
+          : "database_not_found",
+      );
     }
   });
 
@@ -587,6 +612,15 @@ describe("apply --dry-run: refusals are apply's", () => {
     assert.equal(result.code, 1);
     assert.deepEqual(result.stderr, real.stderr);
     assert.match(result.stderr[0] ?? "", /unsupported platform "linux"/);
+    for (const extra of [[], ["--dry-run"]]) {
+      const json = await runCli(["apply", file, ...extra, "--json"], {
+        platform: "linux",
+        processControl: forbiddenProcessControl().control,
+      });
+      const doc = assertJsonTwin(result, json);
+      assert.equal(doc.code, "unsupported_platform");
+      assert.equal(doc.hint, "pass --db <path>");
+    }
   });
 
   it("a kind without a registered writer, through the core", () => {
@@ -626,6 +660,7 @@ describe("apply --dry-run: failures on the copy", () => {
       ((db: DatabaseSync) => void) | undefined,
       CliOptions,
       RegExp,
+      string,
     ]
   > = [
     [
@@ -634,6 +669,7 @@ describe("apply --dry-run: failures on the copy", () => {
       corruptIndex,
       {},
       /^error: dry run: the database snapshot is inconsistent \(integrity check: .*never used.*\), perhaps copied while Companion was writing; nothing written\. Retry, or quit Companion and retry$/,
+      "snapshot_inconsistent",
     ],
     [
       "a write failure",
@@ -647,6 +683,7 @@ describe("apply --dry-run: failures on the copy", () => {
         },
       },
       /^error: dry run: apply would fail: disk exploded; nothing written$/,
+      "write_failed",
     ],
     [
       "a failed integrity check after the write",
@@ -654,18 +691,22 @@ describe("apply --dry-run: failures on the copy", () => {
       undefined,
       { hooks: { integrityCheck: () => ["row 3 missing from index"] } },
       /^error: dry run: apply would fail: integrity check failed: row 3 missing from index; nothing written$/,
+      "write_failed",
     ],
   ];
-  for (const [name, fixture, change, options, expected] of failures) {
-    it(`${name}: exit 1, nothing written, copies removed, same line with --json`, async () => {
+  for (const [name, fixture, change, options, expected, code] of failures) {
+    it(`${name}: exit 1, nothing written, copies removed; ${code} with --json`, async () => {
       const env = setup(fixture, change);
-      for (const extra of [[], ["--json"]]) {
-        const result = await dry(env, VARIABLES_YAML, extra, options);
-        assert.equal(result.code, 1);
-        assert.deepEqual(result.stdout, []);
-        assert.equal(result.stderr.length, 1);
-        assert.match(result.stderr[0] ?? "", expected);
-      }
+      const result = await dry(env, VARIABLES_YAML, [], options);
+      assert.equal(result.code, 1);
+      assert.deepEqual(result.stdout, []);
+      assert.equal(result.stderr.length, 1);
+      assert.match(result.stderr[0] ?? "", expected);
+      const json = await dry(env, VARIABLES_YAML, ["--json"], options);
+      const doc = assertJsonTwin(result, json);
+      assert.deepEqual(json.stderr, []);
+      assert.equal(doc.code, code);
+      assert.equal(doc.backup, undefined, "a dry run takes no backup");
     });
   }
 
@@ -718,24 +759,31 @@ describe("apply --dry-run: stored values are compared as parsed JSON", () => {
 });
 
 describe("apply --dry-run: command line", () => {
-  it("--json without --dry-run exits 2 before reading anything", async () => {
+  it("usage errors with --json are one usage document on stdout, exit 2", async () => {
     const dir = tempDir();
-    const result = await runCli(
-      [
-        "apply",
-        join(dir, "missing.yaml"),
-        "--db",
-        join(dir, "x.sqlite"),
-        "--json",
-      ],
-      { processControl: forbiddenProcessControl().control },
-    );
-    assert.equal(result.code, 2);
-    assert.deepEqual(result.stdout, []);
-    assert.equal(
-      result.stderr[0],
-      `error: --json is only valid with --dry-run. ${USAGE}`,
-    );
+    const file = join(dir, "missing.yaml");
+    const cases = [
+      ["apply", "--json"],
+      ["apply", file, "extra", "--dry-run", "--json"],
+      ["apply", file, "--db", "", "--json"],
+      ["apply", file, "--dry-run=yes", "--json"],
+      ["apply", file, "--bogus", "--json"],
+      ["--json", "apply", file, "--db"],
+    ];
+    for (const argv of cases) {
+      const control = forbiddenProcessControl();
+      const text = await runCli(
+        argv.filter((arg) => arg !== "--json"),
+        { processControl: control.control },
+      );
+      const json = await runCli(argv, { processControl: control.control });
+      assert.equal(text.code, 2, argv.join(" "));
+      const doc = assertJsonTwin(text, json);
+      assert.deepEqual(json.stderr, []);
+      assert.equal(doc.code, "usage");
+      assert.equal(doc.hint, USAGE);
+      assert.deepEqual(control.calls, []);
+    }
   });
 
   it("a value given to --dry-run exits 2", async () => {
@@ -752,9 +800,13 @@ describe("apply --dry-run: command line", () => {
   it("usage and help show the flags; help says a dry run writes nothing and never stops or starts Companion", async () => {
     assert.match(
       USAGE,
-      /apply <description-file> \[--db <path-to-db\.sqlite>\] \[--dry-run \[--json\]\]/,
+      /apply <description-file> \[--db <path-to-db\.sqlite>\] \[--dry-run\] \[--json\]/,
     );
-    assert.match(HELP, /\[--dry-run \[--json\]\]/);
+    assert.match(HELP, /\[--dry-run\] \[--json\]/);
+    assert.match(
+      HELP,
+      /apply --json prints the result[\s\S]*JSON error document[\s\S]*progress lines go to stderr/,
+    );
     assert.match(
       HELP,
       /dry-run[\s\S]*writes nothing[\s\S]*never stops or starts Companion/,

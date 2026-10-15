@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { CliError, ValidationError } from "../core/errors.ts";
+import { CheckError, ValidationError } from "../core/errors.ts";
 import {
   expectList,
   expectMapping,
@@ -136,10 +136,11 @@ function readTarget(db: DatabaseSync, page: number): Target {
     for (let number = count + 1; number <= page; number += 1) {
       if (!pages.has(number)) continue;
       const value = pages.get(number);
-      throw new CliError(
+      throw new CheckError(
+        "page",
         isJsonObject(value)
-          ? `page: pages row ${number} exists but Companion does not load it (pages 1 to ${count} load); refusing to create page ${page} around it`
-          : `page: pages row ${number} holds ${JSON.stringify(value)}, which is not a page Companion loads (pages 1 to ${count} load); refusing to write page ${page} over it`,
+          ? `pages row ${number} exists but Companion does not load it (pages 1 to ${count} load); refusing to create page ${page} around it`
+          : `pages row ${number} holds ${JSON.stringify(value)}, which is not a page Companion loads (pages 1 to ${count} load); refusing to write page ${page} over it`,
       );
     }
     const gaps: number[] = [];
@@ -151,21 +152,24 @@ function readTarget(db: DatabaseSync, page: number): Target {
   const stored = pages.get(page) as Fields;
   const controls = stored["controls"] ?? {};
   if (!isJsonObject(controls)) {
-    throw new CliError(
-      `page: pages row ${page} has a controls value that is not a JSON object`,
+    throw new CheckError(
+      "page",
+      `pages row ${page} has a controls value that is not a JSON object`,
     );
   }
   for (const [row, cells] of Object.entries(controls)) {
     if (cells === null) continue;
     if (!isJsonObject(cells)) {
-      throw new CliError(
-        `page: page ${page}, row ${row} holds ${JSON.stringify(cells)}, which is not a map of cells; refusing to delete it`,
+      throw new CheckError(
+        "page",
+        `page ${page}, row ${row} holds ${JSON.stringify(cells)}, which is not a map of cells; refusing to delete it`,
       );
     }
     for (const [column, value] of Object.entries(cells)) {
       if (value === null || isButtonControlId(value)) continue;
-      throw new CliError(
-        `page: page ${page}, row ${row}, column ${column} holds ${JSON.stringify(value)}, which is not a button control id; refusing to delete it`,
+      throw new CheckError(
+        "page",
+        `page ${page}, row ${row}, column ${column} holds ${JSON.stringify(value)}, which is not a button control id; refusing to delete it`,
       );
     }
   }
@@ -175,8 +179,9 @@ function readTarget(db: DatabaseSync, page: number): Target {
     if (number === page) continue;
     const shared = referencedIds(value).find((id) => owned.has(id));
     if (shared !== undefined) {
-      throw new CliError(
-        `page: control ${shared} on page ${page} is also on page ${number}; refusing to delete it`,
+      throw new CheckError(
+        "page",
+        `control ${shared} on page ${page} is also on page ${number}; refusing to delete it`,
       );
     }
   }

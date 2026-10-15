@@ -22,6 +22,8 @@ import {
   setup,
   stripIds,
   type TableDump,
+  assertJsonTwin,
+  assertRefusalCode,
 } from "./helpers.ts";
 
 type Cells = Record<string, Record<string, string>>;
@@ -346,6 +348,10 @@ describe("apply page: refusals leave the database byte-identical", () => {
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
+    assertRefusalCode(
+      assertJsonTwin(result, await applyTo(env, yaml, {}, ["--json"])),
+    );
+    assert.deepEqual(fileState(env.dbPath), before);
   }
 
   const button = (extra = "", location = "{ row: 0, column: 0 }") =>

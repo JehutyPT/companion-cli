@@ -12,6 +12,11 @@ export const ERROR_CODES = [
   "database_unreadable",
   "check_failed",
   "not_found",
+  "companion_running",
+  "quit_timeout",
+  "backup_failed",
+  "write_failed",
+  "restart_failed",
   "unexpected",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -33,7 +38,7 @@ export interface ErrorDetails {
   items?: readonly ErrorItem[];
   /** A write committed and then failed: an agent must not retry blindly. */
   committed?: boolean;
-  /** The backup directory of that committed write. */
+  /** The backup directory, when the failure came after the backup was taken. */
   backup?: string;
 }
 
@@ -77,6 +82,37 @@ export class ValidationError extends CliError {
     });
     this.field = field;
   }
+}
+
+/**
+ * The description is valid on its own but the database refuses it (an unknown
+ * variable, a location outside the grid, a missing page). `field` is the
+ * description field the refusal names, or empty when it names none.
+ */
+export class CheckError extends CliError {
+  override name = "CheckError";
+
+  constructor(field: string, reason: string, options: CliErrorOptions = {}) {
+    super(field ? `${field}: ${reason}` : reason, {
+      code: "check_failed",
+      ...(field ? { path: field } : {}),
+      ...options,
+    });
+  }
+}
+
+/**
+ * The envelope details of `error` that are set, for wrapping it in a new
+ * message without losing them. Empty for anything but a `CliError`.
+ */
+export function errorDetails(error: unknown): ErrorDetails {
+  if (!(error instanceof CliError)) return {};
+  const { code, path, hint, items, committed, backup } = error;
+  return Object.fromEntries(
+    Object.entries({ code, path, hint, items, committed, backup }).filter(
+      ([, value]) => value !== undefined,
+    ),
+  );
 }
 
 export const UNSUPPORTED_VERSION_HINT =

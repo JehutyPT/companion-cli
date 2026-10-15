@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
-import { CliError, ValidationError } from "../core/errors.ts";
+import { CheckError, ValidationError } from "../core/errors.ts";
 import {
   expectBoolean,
   expectList,
@@ -183,8 +183,9 @@ function readTarget(db: DatabaseSync, name: string): Target {
   const triggers = readTriggers(db);
   const named = triggers.filter((trigger) => trigger.options["name"] === name);
   if (named.length > 1) {
-    throw new CliError(
-      `name: ${named.length} triggers with the same name ${JSON.stringify(name)} (${named
+    throw new CheckError(
+      "name",
+      `${named.length} triggers with the same name ${JSON.stringify(name)} (${named
         .map((trigger) => trigger.id)
         .sort()
         .join(", ")}); refusing to choose one`,

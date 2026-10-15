@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { readJsonValue } from "../core/database.ts";
-import { CliError, ValidationError } from "../core/errors.ts";
+import { CheckError, ValidationError } from "../core/errors.ts";
 import {
   expectInteger,
   expectList,
@@ -298,7 +298,8 @@ export function readGridSize(db: DatabaseSync): GridSize {
     )
       return size as unknown as GridSize;
   }
-  throw new CliError(
+  throw new CheckError(
+    "",
     "cannot read the grid size: main.userconfig.gridSize needs integer minRow <= maxRow and minColumn <= maxColumn",
   );
 }
@@ -310,8 +311,9 @@ function checkInRange(
   max: number,
 ): void {
   if (value < min || value > max) {
-    throw new CliError(
-      `${field}: ${value} is outside the grid (${min}..${max})`,
+    throw new CheckError(
+      field,
+      `${value} is outside the grid (${min}..${max})`,
     );
   }
 }

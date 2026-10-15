@@ -26,6 +26,8 @@ import {
   stripIds,
   type TableDump,
   writeDescription,
+  assertJsonTwin,
+  assertRefusalCode,
 } from "./helpers.ts";
 
 /** The control referenced at a location, with its id. */
@@ -850,6 +852,12 @@ describe("apply button: pages Companion does not load", () => {
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false);
+    assertRefusalCode(
+      assertJsonTwin(
+        result,
+        await applyTo(env, yaml(pageNumber), {}, ["--json"]),
+      ),
+    );
   }
 
   it("refuses a page row after a missing page", async () => {
@@ -909,15 +917,22 @@ background: "#000000"
 
   async function refuse(env: ReturnType<typeof setup>, expected: RegExp) {
     const before = fileState(env.dbPath);
-    const result = await runCli(
-      ["apply", writeDescription(env.dir, CELL_YAML), "--db", env.dbPath],
-      { backupRoot: env.backupRoot },
-    );
+    const argv = [
+      "apply",
+      writeDescription(env.dir, CELL_YAML),
+      "--db",
+      env.dbPath,
+    ];
+    const options = { backupRoot: env.backupRoot };
+    const result = await runCli(argv, options);
     assert.equal(result.code, 1, result.stdout.join("\n"));
     assert.equal(result.stderr.length, 1);
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
+    assertRefusalCode(
+      assertJsonTwin(result, await runCli([...argv, "--json"], options)),
+    );
   }
 
   it("reports a cell pointing at a missing control row as replaced", async () => {

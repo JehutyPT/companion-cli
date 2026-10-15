@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
-import { CliError, ValidationError } from "../core/errors.ts";
+import { CheckError, ValidationError } from "../core/errors.ts";
 import {
   expectJsonValue,
   expectMapping,
@@ -187,9 +187,7 @@ export function checkVariablesExist(
   );
   for (const { field, name } of references) {
     if (!known.has(name))
-      throw new CliError(`${field}: unknown custom variable "${name}"`, {
-        code: "check_failed",
-        path: field,
+      throw new CheckError(field, `unknown custom variable "${name}"`, {
         hint: "run companion-cli list variables",
       });
   }
