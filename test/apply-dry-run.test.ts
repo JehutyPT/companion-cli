@@ -707,6 +707,7 @@ describe("apply --dry-run: failures on the copy", () => {
       assert.deepEqual(json.stderr, []);
       assert.equal(doc.code, code);
       assert.equal(doc.backup, undefined, "a dry run takes no backup");
+      if (code === "write_failed") assert.equal(doc.hint, undefined);
     });
   }
 

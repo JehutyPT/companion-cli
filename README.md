@@ -258,11 +258,11 @@ A read command copies the database and its WAL files to a temporary directory, c
 | `companion_running` | `apply`: Companion or another process holds the database, Companion could not be quit, or the check failed (fails closed); hint `quit Companion and retry` |
 | `quit_timeout` | `apply`: Companion's server did not exit in time; nothing written |
 | `backup_failed` | `apply`: the backup could not be written; nothing written |
-| `write_failed` | `apply`: the database could not be opened for writing, or the write or its integrity check failed and was rolled back; nothing committed. `backup` is set. If the rollback also failed the hint says to restore from the backup |
+| `write_failed` | `apply`: the database could not be opened for writing, or the write or its integrity check failed and was rolled back; nothing committed. `backup` is set (a dry run has neither `backup` nor a hint). If the rollback also failed the hint says to restore from the backup |
 | `restart_failed` | `apply`: the write committed but Companion did not start again; `committed: true` and `backup` are set |
 | `unexpected` | anything else: a bug in the tool |
 
-`apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code and its hint says to start Companion manually. The REST commands keep their plain stderr errors for now.
+`apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code, and its hint says to start Companion manually and, for `write_failed`, repeats what the original hint said about the database. The REST commands keep their plain stderr errors for now.
 
 ### Runtime commands (REST helper)
 

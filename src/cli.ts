@@ -284,12 +284,20 @@ async function runRead(
     else for (const line of result.text()) io.stdout(line);
     return EXIT_OK;
   } catch (error) {
-    if (json) io.stdout(errorJson(error));
-    else io.stderr(`error: ${failureMessage(error)}`);
-    return error instanceof CliError && error.code === "usage"
-      ? EXIT_USAGE
-      : EXIT_FAILURE;
+    return failure(io, json, error);
   }
+}
+
+/**
+ * Prints a failure, as one JSON error document on stdout under `--json` or
+ * one `error:` line on stderr, and returns its exit code.
+ */
+function failure(io: CliIo, json: boolean, error: unknown): number {
+  if (json) io.stdout(errorJson(error));
+  else io.stderr(`error: ${failureMessage(error)}`);
+  return error instanceof CliError && error.code === "usage"
+    ? EXIT_USAGE
+    : EXIT_FAILURE;
 }
 
 interface ReadCommandLine {
@@ -439,11 +447,7 @@ async function runApply(
     io.stdout(json ? applyJson(result) : result.summary);
     return EXIT_OK;
   } catch (error) {
-    if (json) io.stdout(errorJson(error));
-    else io.stderr(`error: ${failureMessage(error)}`);
-    return error instanceof CliError && error.code === "usage"
-      ? EXIT_USAGE
-      : EXIT_FAILURE;
+    return failure(io, json, error);
   }
 }
 

@@ -10,7 +10,7 @@ import {
 
 export { runIntegrityCheck } from "./database.ts";
 import { loadDescription, type WriterRegistry } from "./description.ts";
-import type { Writer } from "./writer.ts";
+import type { DescriptionKind, Writer } from "./writer.ts";
 import {
   CliError,
   errorDetails,
@@ -108,7 +108,7 @@ export interface ApplyResult {
   backupDir: string;
   summary: string;
   /** The description's kind. */
-  kind: string;
+  kind: DescriptionKind;
   /** The database written. */
   dbPath: string;
   /** Live-install mode: no `--db`, so the install's database. */
@@ -117,8 +117,11 @@ export interface ApplyResult {
   restarted: boolean;
 }
 
-/** The hint for a refusal that quitting Companion resolves. */
-export const QUIT_HINT = "quit Companion and retry";
+/** A refusal that quitting Companion resolves. */
+const COMPANION_RUNNING = {
+  code: "companion_running",
+  hint: "quit Companion and retry",
+} as const;
 
 /** The checked target of an apply or a dry run. */
 export interface PreparedApply {
@@ -196,7 +199,7 @@ export async function apply(
     ) {
       throw new CliError(
         `refusing to write the Companion install's database (${dbPath}) while Companion is running; quit Companion or omit --db to let the tool stop and restart it`,
-        { code: "companion_running", hint: QUIT_HINT },
+        COMPANION_RUNNING,
       );
     }
     return write();
@@ -220,14 +223,14 @@ export async function apply(
       options,
       new CliError(
         `cannot quit Companion: ${errorMessage(error)}; nothing written`,
-        { code: "companion_running", hint: QUIT_HINT, cause: error },
+        { ...COMPANION_RUNNING, cause: error },
       ),
     );
   }
   if (!exited) {
     throw new CliError(
       `Companion's server process did not exit within ${timeoutMs / 1000} seconds; nothing written. Companion may be partly stopped: check it and start it if needed`,
-      { code: "quit_timeout", hint: QUIT_HINT },
+      { code: "quit_timeout", hint: COMPANION_RUNNING.hint },
     );
   }
 
@@ -270,14 +273,23 @@ async function startAfterFailure(
   } catch (startError) {
     throw new CliError(
       `${errorMessage(error)}; Companion was quit and did not start again, start Companion manually: ${errorMessage(startError)}`,
-      {
-        ...errorDetails(error),
-        hint: "start Companion manually; nothing was written",
-        cause: error,
-      },
+      { ...errorDetails(error), hint: restartHint(error), cause: error },
     );
   }
   throw error;
+}
+
+/**
+ * The hint when Companion did not start after a failure: start it, then what
+ * the failure's own hint says about the database once a backup exists.
+ */
+function restartHint(error: unknown): string {
+  const start = "start Companion manually";
+  return error instanceof CliError &&
+    error.code === "write_failed" &&
+    error.hint !== undefined
+    ? `${start}; ${error.hint}`
+    : `${start}; nothing was written`;
 }
 
 /** The running Companion server process's PIDs. A failing check refuses the apply (fails closed). */
@@ -287,7 +299,7 @@ async function runningServer(control: ProcessControl): Promise<number[]> {
   } catch (error) {
     throw new CliError(
       `cannot tell whether Companion is running (${errorMessage(error)}); refusing to write`,
-      { code: "companion_running", hint: QUIT_HINT, cause: error },
+      { ...COMPANION_RUNNING, cause: error },
     );
   }
 }
@@ -306,14 +318,14 @@ async function assertNotInUse(
   } catch (error) {
     throw new CliError(
       `cannot tell whether the database is in use (${errorMessage(error)}); refusing to write ${dbPath}`,
-      { code: "companion_running", hint: QUIT_HINT, cause: error },
+      { ...COMPANION_RUNNING, cause: error },
     );
   }
   const others = holders.filter((pid) => pid !== process.pid);
   if (others.length > 0) {
     throw new CliError(
       `refusing to write ${dbPath}: the database is open in another process (PID ${others.join(", ")}); close it first`,
-      { code: "companion_running", hint: QUIT_HINT },
+      COMPANION_RUNNING,
     );
   }
 }
@@ -361,9 +373,8 @@ function writeStopped<Plan>(
         throw new CliError(
           `write failed and rollback failed; restore from the backup at ${backupDir}: ${errorMessage(error)}; ${errorMessage(rollbackError)}`,
           {
-            code: "write_failed",
+            ...unchanged,
             hint: `restore from the backup at ${backupDir}`,
-            backup: backupDir,
             cause: error,
           },
         );

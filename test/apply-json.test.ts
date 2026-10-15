@@ -47,6 +47,8 @@ interface Scenario {
   hooks?: ApplyHooks;
   /** A file in the way of the backup root. */
   blockBackup?: boolean;
+  /** `ROLLBACK` throws, as SQLite can when the rollback itself fails. */
+  failRollback?: boolean;
   code: string;
   hint?: (backup: string) => string;
   path?: string;
@@ -181,7 +183,16 @@ const SCENARIOS: Scenario[] = [
     process: { running: true, failStart: true },
     hooks: writeFails,
     code: "write_failed",
-    hint: () => "start Companion manually; nothing was written",
+    hint: (backup) => `start Companion manually; ${unchanged(backup)}`,
+    backup: true,
+  },
+  {
+    name: "the write fails and so does the rollback",
+    process: { running: true },
+    hooks: writeFails,
+    failRollback: true,
+    code: "write_failed",
+    hint: (backup) => `restore from the backup at ${backup}`,
     backup: true,
   },
   {
@@ -200,6 +211,18 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
+/** Makes every `ROLLBACK` throw until the returned function restores it. */
+function failRollbacks(): () => void {
+  const exec = DatabaseSync.prototype.exec;
+  DatabaseSync.prototype.exec = function (this: DatabaseSync, sql: string) {
+    if (sql === "ROLLBACK") throw new Error("rollback exploded");
+    return exec.call(this, sql);
+  };
+  return () => {
+    DatabaseSync.prototype.exec = exec;
+  };
+}
+
 async function runScenario(
   scenario: Scenario,
   json: boolean,
@@ -211,6 +234,7 @@ async function runScenario(
     writeFileSync(extra.backupRoot, "");
   }
   const fake = fakeProcessControl(scenario.process);
+  const restore = scenario.failRollback ? failRollbacks() : () => {};
   const result = await runCli(
     [
       "apply",
@@ -225,7 +249,7 @@ async function runScenario(
       ...(scenario.hooks ? { hooks: scenario.hooks } : {}),
       ...extra,
     },
-  );
+  ).finally(restore);
   return { ...result, home, dbPath };
 }
 

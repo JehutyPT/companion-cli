@@ -27,6 +27,7 @@ import {
   type TableDump,
   writeDescription,
   assertJsonTwin,
+  forbiddenProcessControl,
   assertRefusalCode,
 } from "./helpers.ts";
 
@@ -852,12 +853,15 @@ describe("apply button: pages Companion does not load", () => {
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false);
-    assertRefusalCode(
-      assertJsonTwin(
-        result,
-        await applyTo(env, yaml(pageNumber), {}, ["--json"]),
-      ),
+    const json = await applyTo(env, yaml(pageNumber), {}, ["--json"]);
+    assertRefusalCode(assertJsonTwin(result, json));
+    const dry = await applyTo(
+      env,
+      yaml(pageNumber),
+      { processControl: forbiddenProcessControl().control },
+      ["--dry-run", "--json"],
     );
+    assert.deepEqual(dry, json, "the dry run refuses with the same document");
   }
 
   it("refuses a page row after a missing page", async () => {
@@ -930,9 +934,13 @@ background: "#000000"
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
-    assertRefusalCode(
-      assertJsonTwin(result, await runCli([...argv, "--json"], options)),
-    );
+    const json = await runCli([...argv, "--json"], options);
+    assertRefusalCode(assertJsonTwin(result, json));
+    const dry = await runCli([...argv, "--dry-run", "--json"], {
+      ...options,
+      processControl: forbiddenProcessControl().control,
+    });
+    assert.deepEqual(dry, json, "the dry run refuses with the same document");
   }
 
   it("reports a cell pointing at a missing control row as replaced", async () => {

@@ -20,6 +20,7 @@ import {
   stripIds,
   type TableDump,
   assertJsonTwin,
+  forbiddenProcessControl,
   assertRefusalCode,
 } from "./helpers.ts";
 
@@ -450,9 +451,15 @@ describe("apply trigger: refusals leave the database byte-identical", () => {
     assert.match(result.stderr[0] ?? "", expected);
     assert.deepEqual(fileState(env.dbPath), before);
     assert.equal(existsSync(env.backupRoot), false, "no backup for a refusal");
-    assertRefusalCode(
-      assertJsonTwin(result, await applyTo(env, yaml, {}, ["--json"])),
+    const json = await applyTo(env, yaml, {}, ["--json"]);
+    assertRefusalCode(assertJsonTwin(result, json));
+    const dry = await applyTo(
+      env,
+      yaml,
+      { processControl: forbiddenProcessControl().control },
+      ["--dry-run", "--json"],
     );
+    assert.deepEqual(dry, json, "the dry run refuses with the same document");
     assert.deepEqual(fileState(env.dbPath), before);
   }
 

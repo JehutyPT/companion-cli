@@ -149,8 +149,7 @@ export function failureMessage(error: unknown): string {
  * not a `CliError` is a bug and gets the code `unexpected`.
  */
 export function errorJson(error: unknown): string {
-  const { code, path, hint, items, committed, backup } =
-    error instanceof CliError ? error : ({} as Partial<CliError>);
+  const { code, path, hint, items, committed, backup } = errorDetails(error);
   return JSON.stringify({
     error: {
       code: code ?? "unexpected",
