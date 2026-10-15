@@ -1,0 +1,976 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/JehutyPT/companion-cli/schema/description.schema.json",
+  "title": "companion-cli description file",
+  "description": "A file that `companion-cli apply` writes into Companion 5.1's database. `kind` selects what it describes. Only `$(custom:…)` references are checked against the database.",
+  "oneOf": [
+    {
+      "type": "object",
+      "title": "kind: variables",
+      "description": "Creates or replaces custom variables. Variables the file does not name are untouched.",
+      "examples": [
+        {
+          "kind": "variables",
+          "variables": [
+            {
+              "name": "sk_presses",
+              "default": 0,
+              "description": "Presses",
+              "persist": false
+            },
+            {
+              "name": "fx_label",
+              "default": "off"
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "variables"
+        },
+        "variables": {
+          "description": "The custom variables to create or replace. At least one; names must be distinct.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/variable"
+          },
+          "minItems": 1,
+          "$comment": "Not expressible here: names must be distinct."
+        }
+      },
+      "required": [
+        "kind",
+        "variables"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: button",
+      "description": "Replaces the button at one location of an existing page with a `button-layered` control.",
+      "examples": [
+        {
+          "kind": "button",
+          "location": {
+            "page": 1,
+            "row": 0,
+            "column": 2
+          },
+          "text": "Count\n$(custom:fx_counter)\n",
+          "background": "#000080",
+          "down": [
+            {
+              "action": "increment",
+              "variable": "fx_counter"
+            }
+          ],
+          "feedbacks": [
+            {
+              "feedback": "expression",
+              "expression": "$(custom:fx_counter) > 10",
+              "style": {
+                "background": "#FF0000",
+                "text": "MANY"
+              }
+            }
+          ]
+        },
+        {
+          "kind": "button",
+          "location": {
+            "page": 1,
+            "row": 1,
+            "column": 0
+          },
+          "text": "FX",
+          "background": "#202020",
+          "steps": [
+            {
+              "down": [
+                {
+                  "action": "set",
+                  "variable": "fx_label",
+                  "value": "on"
+                }
+              ]
+            },
+            {
+              "down": [
+                {
+                  "action": "set",
+                  "variable": "fx_label",
+                  "value": "off"
+                }
+              ]
+            }
+          ],
+          "feedbacks": [
+            {
+              "feedback": "step",
+              "step": 2,
+              "style": {
+                "background": "#00FF00"
+              }
+            },
+            {
+              "feedback": "passthrough",
+              "connection": "FixtureConnectionAAAA",
+              "definition": "some_feedback_id",
+              "options": {
+                "input": 1
+              },
+              "style": {
+                "text": "LIVE"
+              },
+              "invert": true
+            }
+          ]
+        }
+      ],
+      "dependentSchemas": {
+        "steps": {
+          "$comment": "With `steps`, the top-level action lists are refused.",
+          "properties": {
+            "down": false,
+            "up": false,
+            "rotate_left": false,
+            "rotate_right": false
+          }
+        }
+      },
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "button"
+        },
+        "location": {
+          "description": "Where the button goes.",
+          "$ref": "#/$defs/location"
+        },
+        "text": {
+          "description": "The button text; may be empty.",
+          "$ref": "#/$defs/text"
+        },
+        "background": {
+          "description": "The background color.",
+          "$ref": "#/$defs/color"
+        },
+        "textColor": {
+          "description": "The text color. Without it, black on a bright background and white otherwise.",
+          "$ref": "#/$defs/color"
+        },
+        "down": {
+          "description": "Actions run when the button is pressed. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "up": {
+          "description": "Actions run when the button is released. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_left": {
+          "description": "Actions run when an encoder turns left. Any rotate key, even an empty list, turns on the button's rotary actions. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_right": {
+          "description": "Actions run when an encoder turns right. Any rotate key, even an empty list, turns on the button's rotary actions. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "steps": {
+          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          },
+          "minItems": 1
+        },
+        "feedbacks": {
+          "description": "Boolean feedbacks that override the button's style while they hold.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feedback"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "kind",
+        "location",
+        "text",
+        "background"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: page",
+      "description": "Replaces one page's name and all of its buttons, creating the page when it does not exist. Every button the page held is deleted, navigation buttons included.",
+      "examples": [
+        {
+          "kind": "page",
+          "page": 20,
+          "name": "SKAARHOJ TEST",
+          "buttons": [
+            {
+              "location": {
+                "row": 0,
+                "column": 0
+              },
+              "text": "S1",
+              "background": "#FF0000",
+              "down": [
+                {
+                  "action": "increment",
+                  "variable": "sk_presses"
+                }
+              ]
+            },
+            {
+              "location": {
+                "row": 0,
+                "column": 1
+              },
+              "text": "$(custom:sk_presses)",
+              "background": "#000080"
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "page"
+        },
+        "page": {
+          "description": "The page number, at least 1. A page beyond the last page plus one also creates the empty pages in between.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "name": {
+          "description": "The page's name.",
+          "type": "string",
+          "minLength": 1
+        },
+        "buttons": {
+          "description": "Every button on the page; an empty list clears it. Each location must be distinct.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pageButton"
+          },
+          "$comment": "Not expressible here: locations must be distinct."
+        }
+      },
+      "required": [
+        "kind",
+        "page",
+        "name",
+        "buttons"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "title": "kind: trigger",
+      "description": "Creates or replaces one trigger, identified by its name. Its condition is always empty and its notes are reset.",
+      "examples": [
+        {
+          "kind": "trigger",
+          "name": "Reset counter",
+          "enabled": true,
+          "events": [
+            {
+              "event": "startup",
+              "delay": 0
+            },
+            {
+              "event": "interval",
+              "seconds": 5
+            },
+            {
+              "event": "variable_changed",
+              "variable": "fx_counter"
+            }
+          ],
+          "actions": [
+            {
+              "action": "set",
+              "variable": "fx_counter",
+              "value": 0
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "kind": {
+          "description": "The description kind.",
+          "const": "trigger"
+        },
+        "name": {
+          "description": "The trigger's name, which identifies it: a trigger with this name is replaced under its id, keeping its order and collection; otherwise one is created.",
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "description": "Whether the trigger runs.",
+          "type": "boolean",
+          "default": true
+        },
+        "events": {
+          "description": "What starts the trigger. At least one.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          },
+          "minItems": 1
+        },
+        "actions": {
+          "description": "The actions the trigger runs, in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "events"
+      ],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "variableName": {
+      "description": "A custom variable name: letters A-Z/a-z, digits and _ (Companion's rule for `$(custom:<name>)`), not a name Companion reserves, and not one that looks like a number.",
+      "type": "string",
+      "pattern": "^\\w+$",
+      "not": {
+        "anyOf": [
+          {
+            "enum": [
+              "__proto__",
+              "constructor",
+              "prototype",
+              "__defineGetter__",
+              "__defineSetter__",
+              "__lookupGetter__",
+              "__lookupSetter__"
+            ]
+          },
+          {
+            "pattern": "^\\d+(?:[eE]\\d+)?$"
+          }
+        ]
+      }
+    },
+    "color": {
+      "description": "A color \"#RRGGBB\". Quote it in YAML: an unquoted # starts a comment.",
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "text": {
+      "description": "Button text. Line breaks are kept, except that one trailing line break (a `|` block's) is dropped. `$(custom:…)` references in it are checked against the database; other variables are not.",
+      "type": "string"
+    },
+    "jsonValue": {
+      "description": "Any JSON value: null, a boolean, a finite number, a string, or a list or mapping of JSON values.",
+      "type": [
+        "null",
+        "boolean",
+        "number",
+        "string",
+        "array",
+        "object"
+      ],
+      "items": {
+        "$ref": "#/$defs/jsonValue"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "variable": {
+      "type": "object",
+      "description": "One custom variable.",
+      "properties": {
+        "name": {
+          "description": "The variable's name, used as `$(custom:<name>)`.",
+          "$ref": "#/$defs/variableName"
+        },
+        "default": {
+          "description": "The default value. With `persist: true` on a variable already persisted, the stored current value is kept instead.",
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "description": {
+          "description": "Shown in Companion's variable list.",
+          "type": "string",
+          "default": "A custom variable"
+        },
+        "persist": {
+          "description": "Whether Companion keeps the current value across restarts.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "default"
+      ],
+      "additionalProperties": false
+    },
+    "location": {
+      "type": "object",
+      "description": "A button's page, row and column.",
+      "properties": {
+        "page": {
+          "description": "The page number, at least 1. The page must exist; only a page file creates pages.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "row": {
+          "description": "The row; may be negative. Checked against the grid size in the database.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "column": {
+          "description": "The column; may be negative. Checked against the grid size in the database.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "page",
+        "row",
+        "column"
+      ],
+      "additionalProperties": false
+    },
+    "cell": {
+      "type": "object",
+      "description": "A button's row and column on the page.",
+      "properties": {
+        "row": {
+          "description": "The row; may be negative. Checked against the grid size in the database.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "column": {
+          "description": "The column; may be negative. Checked against the grid size in the database.",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "row",
+        "column"
+      ],
+      "additionalProperties": false
+    },
+    "pageButton": {
+      "type": "object",
+      "description": "A button on the page: every `kind: button` field, with a location of row and column only.",
+      "dependentSchemas": {
+        "steps": {
+          "$comment": "With `steps`, the top-level action lists are refused.",
+          "properties": {
+            "down": false,
+            "up": false,
+            "rotate_left": false,
+            "rotate_right": false
+          }
+        }
+      },
+      "properties": {
+        "location": {
+          "description": "Where the button goes on the page.",
+          "$ref": "#/$defs/cell"
+        },
+        "text": {
+          "description": "The button text; may be empty.",
+          "$ref": "#/$defs/text"
+        },
+        "background": {
+          "description": "The background color.",
+          "$ref": "#/$defs/color"
+        },
+        "textColor": {
+          "description": "The text color. Without it, black on a bright background and white otherwise.",
+          "$ref": "#/$defs/color"
+        },
+        "down": {
+          "description": "Actions run when the button is pressed. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "up": {
+          "description": "Actions run when the button is released. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_left": {
+          "description": "Actions run when an encoder turns left. Any rotate key, even an empty list, turns on the button's rotary actions. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_right": {
+          "description": "Actions run when an encoder turns right. Any rotate key, even an empty list, turns on the button's rotary actions. Cannot be combined with steps.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "steps": {
+          "description": "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          },
+          "minItems": 1
+        },
+        "feedbacks": {
+          "description": "Boolean feedbacks that override the button's style while they hold.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feedback"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "location",
+        "text",
+        "background"
+      ],
+      "additionalProperties": false
+    },
+    "step": {
+      "type": "object",
+      "description": "One step of a button: its own action lists.",
+      "properties": {
+        "down": {
+          "description": "Actions run when the button is pressed.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "up": {
+          "description": "Actions run when the button is released.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_left": {
+          "description": "Actions run when an encoder turns left. Any rotate key, even an empty list, turns on the button's rotary actions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        },
+        "rotate_right": {
+          "description": "Actions run when an encoder turns right. Any rotate key, even an empty list, turns on the button's rotary actions.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/action"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "action": {
+      "description": "An action, tagged with `action`. Only `$(custom:…)` references and named variables are checked against the database; pass-through actions are written literally and not checked.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "action: set",
+          "description": "Sets a custom variable to a fixed value. Written as Companion's internal `custom_variable_set_value` action (connection `internal`).",
+          "properties": {
+            "action": {
+              "description": "Selects the set action.",
+              "const": "set"
+            },
+            "variable": {
+              "description": "The custom variable to set, by name (without `custom:`). It must exist in the database.",
+              "$ref": "#/$defs/variableName"
+            },
+            "value": {
+              "description": "The value, stored as text (numbers and booleans become strings). `$(custom:…)` references in it are checked against the database.",
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "variable",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "action: expression",
+          "description": "Sets a custom variable to the result of a Companion expression. Written as Companion's internal `custom_variable_set_value` action (connection `internal`).",
+          "properties": {
+            "action": {
+              "description": "Selects the expression action.",
+              "const": "expression"
+            },
+            "variable": {
+              "description": "The custom variable to set, by name (without `custom:`). It must exist in the database.",
+              "$ref": "#/$defs/variableName"
+            },
+            "expression": {
+              "description": "A Companion expression, for example `$(custom:fx_counter) * 2`. `$(custom:…)` references in it are checked against the database.",
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "action",
+            "variable",
+            "expression"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "action: increment",
+          "description": "Adds to a custom variable (the expression `$(this:current) + by`). Written as Companion's internal `custom_variable_set_value` action (connection `internal`).",
+          "properties": {
+            "action": {
+              "description": "Selects the increment action.",
+              "const": "increment"
+            },
+            "variable": {
+              "description": "The custom variable to set, by name (without `custom:`). It must exist in the database.",
+              "$ref": "#/$defs/variableName"
+            },
+            "by": {
+              "description": "How much to increment by.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 1
+            }
+          },
+          "required": [
+            "action",
+            "variable"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "action: decrement",
+          "description": "Subtracts from a custom variable (the expression `$(this:current) - by`). Written as Companion's internal `custom_variable_set_value` action (connection `internal`).",
+          "properties": {
+            "action": {
+              "description": "Selects the decrement action.",
+              "const": "decrement"
+            },
+            "variable": {
+              "description": "The custom variable to set, by name (without `custom:`). It must exist in the database.",
+              "$ref": "#/$defs/variableName"
+            },
+            "by": {
+              "description": "How much to decrement by.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 1
+            }
+          },
+          "required": [
+            "action",
+            "variable"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "action: passthrough",
+          "description": "Any connection's action, written literally: connection, definition and options are not checked against the database.",
+          "properties": {
+            "action": {
+              "description": "Selects the passthrough action.",
+              "const": "passthrough"
+            },
+            "connection": {
+              "description": "The connection id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "definition": {
+              "description": "The connection's definition id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "description": "The definition's options, each stored as a plain (non-expression) value; not checked.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "default": {}
+            }
+          },
+          "required": [
+            "action",
+            "connection",
+            "definition"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "feedback": {
+      "description": "A boolean feedback, tagged with `feedback`, that overrides the button's style while it holds.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "feedback: step",
+          "description": "Holds while the button is on the given step. Written as Companion's internal `bank_current_step` feedback, with `$(this:location)` as the button.",
+          "properties": {
+            "feedback": {
+              "description": "Selects the step feedback.",
+              "const": "step"
+            },
+            "step": {
+              "description": "The step, 1-based. It must not exceed the button's number of steps.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "$comment": "Not expressible here: the step must be at most the number of the button's steps (1 without `steps`)."
+            },
+            "style": {
+              "description": "The style fields to override while the feedback holds.",
+              "$ref": "#/$defs/style"
+            },
+            "invert": {
+              "description": "Holds while the condition is false instead.",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "feedback",
+            "step",
+            "style"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "feedback: expression",
+          "description": "Holds while a Companion boolean expression is true. Written as Companion's internal `check_expression` feedback.",
+          "properties": {
+            "feedback": {
+              "description": "Selects the expression feedback.",
+              "const": "expression"
+            },
+            "expression": {
+              "description": "A Companion expression, for example `$(custom:fx_label) == 'on'`. `$(custom:…)` references in it are checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "style": {
+              "description": "The style fields to override while the feedback holds.",
+              "$ref": "#/$defs/style"
+            },
+            "invert": {
+              "description": "Holds while the condition is false instead.",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "feedback",
+            "expression",
+            "style"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "feedback: passthrough",
+          "description": "Any connection's boolean feedback, written literally: connection, definition and options are not checked against the database.",
+          "properties": {
+            "feedback": {
+              "description": "Selects the passthrough feedback.",
+              "const": "passthrough"
+            },
+            "connection": {
+              "description": "The connection id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "definition": {
+              "description": "The connection's definition id, written literally and not checked against the database.",
+              "type": "string",
+              "minLength": 1
+            },
+            "options": {
+              "description": "The definition's options, each stored as a plain (non-expression) value; not checked.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/jsonValue"
+              },
+              "default": {}
+            },
+            "style": {
+              "description": "The style fields to override while the feedback holds.",
+              "$ref": "#/$defs/style"
+            },
+            "invert": {
+              "description": "Holds while the condition is false instead.",
+              "type": "boolean",
+              "default": false
+            }
+          },
+          "required": [
+            "feedback",
+            "connection",
+            "definition",
+            "style"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "style": {
+      "type": "object",
+      "description": "The style fields a feedback overrides; at least one. The others keep the button's own style.",
+      "minProperties": 1,
+      "properties": {
+        "background": {
+          "description": "The background color.",
+          "$ref": "#/$defs/color"
+        },
+        "textColor": {
+          "description": "The text color.",
+          "$ref": "#/$defs/color"
+        },
+        "text": {
+          "description": "The button text.",
+          "$ref": "#/$defs/text"
+        }
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "description": "What starts a trigger, tagged with `event`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "title": "event: startup",
+          "description": "Runs when Companion starts.",
+          "properties": {
+            "event": {
+              "description": "Selects the startup event.",
+              "const": "startup"
+            },
+            "delay": {
+              "description": "Milliseconds to wait after startup.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "default": 10000
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: interval",
+          "description": "Runs every so many seconds.",
+          "properties": {
+            "event": {
+              "description": "Selects the interval event.",
+              "const": "interval"
+            },
+            "seconds": {
+              "description": "The interval in seconds.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "event",
+            "seconds"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "title": "event: variable_changed",
+          "description": "Runs when a custom variable's value changes.",
+          "properties": {
+            "event": {
+              "description": "Selects the variable_changed event.",
+              "const": "variable_changed"
+            },
+            "variable": {
+              "description": "The custom variable, by name (without `custom:`). It must exist in the database.",
+              "$ref": "#/$defs/variableName"
+            }
+          },
+          "required": [
+            "event",
+            "variable"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

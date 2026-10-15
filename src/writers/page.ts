@@ -1,6 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  type FieldSchema,
+  integer,
+  list,
+  NON_EMPTY_STRING,
+  ref,
+  requiredField,
+} from "../core/field-schema.ts";
+import {
   expectList,
   expectMapping,
   expectNonEmptyString,
@@ -60,7 +68,42 @@ export interface PagePlan {
   buttons: Array<ButtonDescription<Cell>>;
 }
 
-export const FIELDS = ["page", "name", "buttons"];
+export const FIELDS = ["page", "name", "buttons"] as const;
+
+export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
+  page: requiredField(
+    "The page number, at least 1. A page beyond the last page plus one also creates the empty pages in between.",
+    integer(1),
+  ),
+  name: requiredField("The page's name.", NON_EMPTY_STRING),
+  buttons: requiredField(
+    "Every button on the page; an empty list clears it. Each location must be distinct.",
+    list(ref("pageButton"), {
+      $comment: "Not expressible here: locations must be distinct.",
+    }),
+  ),
+};
+
+/** What a page file does: the kind's `description` in the schema. */
+export const DOC =
+  "Replaces one page's name and all of its buttons, creating the page when it does not exist. Every button the page held is deleted, navigation buttons included.";
+
+/** YAML examples of a page file, as the schema shows them. */
+export const EXAMPLES = [
+  `kind: page
+page: 20
+name: SKAARHOJ TEST
+buttons:
+  - location: { row: 0, column: 0 }
+    text: S1
+    background: "#FF0000"
+    down:
+      - { action: increment, variable: sk_presses }
+  - location: { row: 0, column: 1 }
+    text: "$(custom:sk_presses)"
+    background: "#000080"
+`,
+];
 
 /** Companion's name for a page it creates without one. */
 const DEFAULT_PAGE_NAME = "PAGE";

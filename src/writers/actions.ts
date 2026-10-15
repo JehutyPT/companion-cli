@@ -1,5 +1,14 @@
 import { ValidationError } from "../core/errors.ts";
 import {
+  field,
+  type FieldSchema,
+  integer,
+  NON_EMPTY_STRING,
+  ref,
+  requiredField,
+  SCALAR,
+} from "../core/field-schema.ts";
+import {
   describeType,
   expectList,
   expectMapping,
@@ -14,11 +23,12 @@ import {
   buildPassthrough,
   customReferences,
   type Option,
-  PASSTHROUGH_FIELDS,
+  PASSTHROUGH_FIELD_SCHEMAS,
   parsePassthrough,
   parseVariableName,
   prop,
   type TaggedKind,
+  taggedKind,
   type TaggedSpec,
   taggedKinds,
   type VariableReference,
@@ -44,20 +54,25 @@ import {
 /** One kind of action. Adding an action means adding one entry to ACTION_KINDS. */
 type ActionKind<P> = TaggedKind<P>;
 
-const defineKind = <P>(kind: ActionKind<P>): ActionKind<P> => kind;
+const VARIABLE_FIELD = requiredField(
+  "The custom variable to set, by name (without `custom:`). It must exist in the database.",
+  ref("variableName"),
+);
 
 /**
  * An internal `custom_variable_set_value` action on `variable`. `extra`
  * describes the fields that make up its `value` option.
  */
 function variableAction<Extra>(extra: {
-  fields: readonly string[];
+  doc: string;
+  fieldSchemas: Record<string, FieldSchema>;
   parse(fields: Fields, path: string): Extra;
   references(payload: Extra, path: string): VariableReference[];
   value(payload: Extra): Option;
 }): ActionKind<{ variable: string } & Extra> {
-  return {
-    fields: ["variable", ...extra.fields],
+  return taggedKind({
+    doc: `${extra.doc} Written as Companion's internal \`custom_variable_set_value\` action (connection \`internal\`).`,
+    fieldSchemas: { variable: VARIABLE_FIELD, ...extra.fieldSchemas },
     parse: (fields, path) => ({
       variable: parseVariableName(
         requireField(fields, "variable", path),
@@ -74,7 +89,7 @@ function variableAction<Extra>(extra: {
       connectionId: "internal",
       options: { name: prop(payload.variable), value: extra.value(payload) },
     }),
-  };
+  });
 }
 
 /** Companion's `value` option is a text input, so numbers and booleans become strings. */
@@ -88,17 +103,28 @@ function parseSetValue(value: unknown, field: string): string {
   );
 }
 
+const DEFAULT_BY = 1;
+
 function parseBy(fields: Fields, path: string): { by: number } {
   return {
     by: Object.hasOwn(fields, "by")
       ? expectPositiveInteger(fields["by"], fieldPath(path, "by"))
-      : 1,
+      : DEFAULT_BY,
   };
 }
 
+const byField = (verb: string) =>
+  field(`How much to ${verb} by.`, { ...integer(1), default: DEFAULT_BY });
+
 export const ACTION_KINDS = {
   set: variableAction({
-    fields: ["value"],
+    doc: "Sets a custom variable to a fixed value.",
+    fieldSchemas: {
+      value: requiredField(
+        "The value, stored as text (numbers and booleans become strings). `$(custom:…)` references in it are checked against the database.",
+        SCALAR,
+      ),
+    },
     parse: (fields, path) => ({
       value: parseSetValue(
         requireField(fields, "value", path),
@@ -110,7 +136,13 @@ export const ACTION_KINDS = {
     value: ({ value }) => prop(value),
   }),
   expression: variableAction({
-    fields: ["expression"],
+    doc: "Sets a custom variable to the result of a Companion expression.",
+    fieldSchemas: {
+      expression: requiredField(
+        "A Companion expression, for example `$(custom:fx_counter) * 2`. `$(custom:…)` references in it are checked against the database.",
+        NON_EMPTY_STRING,
+      ),
+    },
     parse: (fields, path) => ({
       expression: expectNonEmptyString(
         requireField(fields, "expression", path),
@@ -122,20 +154,22 @@ export const ACTION_KINDS = {
     value: ({ expression }) => prop(expression, true),
   }),
   increment: variableAction({
-    fields: ["by"],
+    doc: "Adds to a custom variable (the expression `$(this:current) + by`).",
+    fieldSchemas: { by: byField("increment") },
     parse: parseBy,
     references: () => [],
     value: ({ by }) => prop(`$(this:current) + ${by}`, true),
   }),
   decrement: variableAction({
-    fields: ["by"],
+    doc: "Subtracts from a custom variable (the expression `$(this:current) - by`).",
+    fieldSchemas: { by: byField("decrement") },
     parse: parseBy,
     references: () => [],
     value: ({ by }) => prop(`$(this:current) - ${by}`, true),
   }),
-  /** Any connection's action, written literally. Not checked against the database. */
-  passthrough: defineKind({
-    fields: PASSTHROUGH_FIELDS,
+  passthrough: taggedKind({
+    doc: "Any connection's action, written literally: connection, definition and options are not checked against the database.",
+    fieldSchemas: PASSTHROUGH_FIELD_SCHEMAS,
     parse: parsePassthrough,
     references: () => [],
     build: buildPassthrough,

@@ -21,7 +21,8 @@
     "lint": "eslint . && tsc -p tsconfig.json",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "gen:support-matrix": "node --no-warnings scripts/gen-support-matrix.ts"
+    "gen:support-matrix": "node --no-warnings scripts/gen-support-matrix.ts",
+    "gen:schema": "node --no-warnings scripts/gen-schema.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1"
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
+    "ajv": "^8.20.0",
     "eslint": "^10.12.0",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",

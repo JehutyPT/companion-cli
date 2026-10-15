@@ -2,6 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  field,
+  type FieldSchema,
+  NON_EMPTY_STRING,
+  requiredField,
+} from "../core/field-schema.ts";
+import {
   expectJsonValue,
   expectMapping,
   expectNonEmptyString,
@@ -34,8 +40,8 @@ export function prop<T>(
  * non-empty and only ASCII letters, digits and `_`), and it is not one of these
  * reserved object keys.
  */
-const VALID_NAME = /^\w+$/;
-const RESERVED_NAMES = new Set([
+export const VALID_NAME = /^\w+$/;
+export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   "__proto__",
   "constructor",
   "prototype",
@@ -50,7 +56,7 @@ const RESERVED_NAMES = new Set([
  * gives NUMERIC affinity, so a name such as `007` or `1e5` is stored as the
  * number 7 or 100000. Those names pass Companion's rule but cannot round-trip.
  */
-const NUMERIC_NAME = /^\d+(?:[eE]\d+)?$/;
+export const NUMERIC_NAME = /^\d+(?:[eE]\d+)?$/;
 
 /** Validates a custom variable name, for definitions and references alike. */
 export function parseVariableName(value: unknown, field: string): string {
@@ -76,7 +82,9 @@ export function parseVariableName(value: unknown, field: string): string {
   return name;
 }
 
-const COLOR = /^#([0-9a-f]{6})$/i;
+/** A `#RRGGBB` color, as a JSON Schema pattern. */
+export const COLOR_PATTERN = "^#[0-9A-Fa-f]{6}$";
+const COLOR = new RegExp(COLOR_PATTERN);
 
 /** A quoted `#RRGGBB` color, stored as the integer `0xRRGGBB`. */
 export function parseColor(value: unknown, field: string): number {
@@ -87,14 +95,13 @@ export function parseColor(value: unknown, field: string): number {
     );
   }
   const text = expectString(value, field);
-  const match = COLOR.exec(text);
-  if (!match) {
+  if (!COLOR.test(text)) {
     throw new ValidationError(
       field,
       `must be a color "#RRGGBB", got "${text}"`,
     );
   }
-  return parseInt(match[1] ?? "", 16);
+  return parseInt(text.slice(1), 16);
 }
 
 /**
@@ -114,7 +121,26 @@ export function parseText(value: unknown, field: string): string {
  * literally. Connection ids, definition ids and option values are not checked
  * against the database, and option values are stored as plain values.
  */
-export const PASSTHROUGH_FIELDS = ["connection", "definition", "options"];
+export const PASSTHROUGH_FIELD_SCHEMAS: Record<string, FieldSchema> = {
+  connection: requiredField(
+    "The connection id, written literally and not checked against the database.",
+    NON_EMPTY_STRING,
+  ),
+  definition: requiredField(
+    "The connection's definition id, written literally and not checked against the database.",
+    NON_EMPTY_STRING,
+  ),
+  options: field(
+    "The definition's options, each stored as a plain (non-expression) value; not checked.",
+    {
+      type: "object",
+      additionalProperties: { $ref: "#/$defs/jsonValue" },
+      default: {},
+    },
+  ),
+};
+
+export const PASSTHROUGH_FIELDS = Object.keys(PASSTHROUGH_FIELD_SCHEMAS);
 
 export interface Passthrough {
   connection: string;
@@ -210,13 +236,24 @@ export interface EntityBody {
  * `B` what it builds.
  */
 export interface TaggedKind<P, C = undefined, B = EntityBody> {
+  /** What the kind does: the kind's `description` in the schema. */
+  readonly doc: string;
   /** Fields the entry accepts besides the tag (and the table's common fields). */
   readonly fields: readonly string[];
+  /** Each of `fields`, documented, in the same order. */
+  readonly fieldSchemas: Readonly<Record<string, FieldSchema>>;
   /** Validates the kind's fields (unknown fields are already rejected). */
   parse(fields: Fields, path: string, context: C): P;
   /** Custom variables the kind's fields use, in field order; checked against the database. */
   references(payload: P, path: string): VariableReference[];
   build(payload: P): B;
+}
+
+/** A tagged kind whose `fields` are the keys of its `fieldSchemas`. */
+export function taggedKind<P, C = undefined, B = EntityBody>(
+  kind: Omit<TaggedKind<P, C, B>, "fields">,
+): TaggedKind<P, C, B> {
+  return { ...kind, fields: Object.keys(kind.fieldSchemas) };
 }
 
 /** A parsed tagged entry: its kind name and that kind's payload. */

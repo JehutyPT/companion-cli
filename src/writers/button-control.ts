@@ -2,6 +2,14 @@ import type { DatabaseSync } from "node:sqlite";
 import { readJsonValue } from "../core/database.ts";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  field,
+  type FieldSchema,
+  integer,
+  list,
+  ref,
+  requiredField,
+} from "../core/field-schema.ts";
+import {
   expectInteger,
   expectList,
   expectMapping,
@@ -100,6 +108,81 @@ export const TOP_LEVEL_FIELDS = [
   "steps",
   "feedbacks",
 ] as const;
+
+const ACTION_SET_DOCS: Record<ActionSetName, string> = {
+  down: "Actions run when the button is pressed.",
+  up: "Actions run when the button is released.",
+  rotate_left:
+    "Actions run when an encoder turns left. Any rotate key, even an empty list, turns on the button's rotary actions.",
+  rotate_right:
+    "Actions run when an encoder turns right. Any rotate key, even an empty list, turns on the button's rotary actions.",
+};
+
+/** A page's cell: `{ row, column }`. */
+export const CELL_FIELD_SCHEMAS: Record<keyof Cell, FieldSchema> = {
+  row: requiredField(
+    "The row; may be negative. Checked against the grid size in the database.",
+    integer(),
+  ),
+  column: requiredField(
+    "The column; may be negative. Checked against the grid size in the database.",
+    integer(),
+  ),
+};
+
+/** A full location: `{ page, row, column }`. */
+export const LOCATION_FIELD_SCHEMAS: Record<keyof Location, FieldSchema> = {
+  page: requiredField(
+    "The page number, at least 1. The page must exist; only a page file creates pages.",
+    integer(1),
+  ),
+  ...CELL_FIELD_SCHEMAS,
+};
+
+/** One step's action lists: the fields of a `steps` entry. */
+export const ACTION_SET_SCHEMAS: Record<ActionSetName, FieldSchema> =
+  Object.fromEntries(
+    ACTION_SETS.map((set) => [
+      set,
+      field(ACTION_SET_DOCS[set], { ...list(ref("action")), default: [] }),
+    ]),
+  ) as Record<ActionSetName, FieldSchema>;
+
+/**
+ * The button fields, documented. `location` is the caller's: a full location
+ * for `kind: button`, a cell for a page's buttons.
+ */
+export function buttonFieldSchemas(
+  location: FieldSchema,
+): Record<(typeof TOP_LEVEL_FIELDS)[number], FieldSchema> {
+  const EXCLUDED_BY_STEPS = "Cannot be combined with steps.";
+  return {
+    location,
+    text: requiredField("The button text; may be empty.", ref("text")),
+    background: requiredField("The background color.", ref("color")),
+    textColor: field(
+      "The text color. Without it, black on a bright background and white otherwise.",
+      ref("color"),
+    ),
+    ...(Object.fromEntries(
+      ACTION_SETS.map((set) => [
+        set,
+        {
+          ...ACTION_SET_SCHEMAS[set],
+          doc: `${ACTION_SET_SCHEMAS[set].doc} ${EXCLUDED_BY_STEPS}`,
+        },
+      ]),
+    ) as Record<ActionSetName, FieldSchema>),
+    steps: field(
+      "The button's steps, replacing the top-level action lists: at least one, each with its own action lists. Cannot be combined with down, up, rotate_left or rotate_right.",
+      list(ref("step"), { minItems: 1 }),
+    ),
+    feedbacks: field(
+      "Boolean feedbacks that override the button's style while they hold.",
+      { ...list(ref("feedback")), default: [] },
+    ),
+  };
+}
 
 /** `relative` (a path inside a button, possibly empty) under `prefix`. */
 function under(prefix: string, relative: string): string {

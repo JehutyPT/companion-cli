@@ -2,6 +2,16 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
 import { CheckError, ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
+  field,
+  type FieldSchema,
+  integer,
+  list,
+  NON_EMPTY_STRING,
+  ref,
+  requiredField,
+} from "../core/field-schema.ts";
+import {
   expectBoolean,
   expectList,
   expectMapping,
@@ -27,6 +37,7 @@ import {
   nextSortOrder,
   parseVariableName,
   type TaggedKind,
+  taggedKind,
   type TaggedSpec,
   taggedKinds,
 } from "./shared.ts";
@@ -61,14 +72,21 @@ interface EventBody {
 
 type EventKind<P> = TaggedKind<P, undefined, EventBody>;
 
-const defineKind = <P>(kind: EventKind<P>): EventKind<P> => kind;
+const defineKind = <P>(kind: Omit<EventKind<P>, "fields">): EventKind<P> =>
+  taggedKind(kind);
 
 /** Companion's own default for a new startup event (`VK.startup`). */
 const DEFAULT_STARTUP_DELAY_MS = 10000;
 
 export const EVENT_KINDS = {
   startup: defineKind({
-    fields: ["delay"],
+    doc: "Runs when Companion starts.",
+    fieldSchemas: {
+      delay: field("Milliseconds to wait after startup.", {
+        ...integer(0),
+        default: DEFAULT_STARTUP_DELAY_MS,
+      }),
+    },
     parse: (fields, path) => ({
       delay: Object.hasOwn(fields, "delay")
         ? expectNonNegativeInteger(fields["delay"], fieldPath(path, "delay"))
@@ -78,7 +96,10 @@ export const EVENT_KINDS = {
     build: ({ delay }) => ({ type: "startup", options: { delay } }),
   }),
   interval: defineKind({
-    fields: ["seconds"],
+    doc: "Runs every so many seconds.",
+    fieldSchemas: {
+      seconds: requiredField("The interval in seconds.", integer(1)),
+    },
     parse: (fields, path) => ({
       seconds: expectPositiveInteger(
         requireField(fields, "seconds", path),
@@ -89,7 +110,13 @@ export const EVENT_KINDS = {
     build: ({ seconds }) => ({ type: "interval", options: { seconds } }),
   }),
   variable_changed: defineKind({
-    fields: ["variable"],
+    doc: "Runs when a custom variable's value changes.",
+    fieldSchemas: {
+      variable: requiredField(
+        "The custom variable, by name (without `custom:`). It must exist in the database.",
+        ref("variableName"),
+      ),
+    },
     parse: (fields, path) => ({
       variable: parseVariableName(
         requireField(fields, "variable", path),
@@ -117,7 +144,41 @@ export interface TriggerPlan {
   actions: ActionSpec[];
 }
 
-export const FIELDS = ["name", "enabled", "events", "actions"];
+export const FIELDS = ["name", "enabled", "events", "actions"] as const;
+
+export const FIELD_SCHEMAS: Record<(typeof FIELDS)[number], FieldSchema> = {
+  name: requiredField(
+    "The trigger's name, which identifies it: a trigger with this name is replaced under its id, keeping its order and collection; otherwise one is created.",
+    NON_EMPTY_STRING,
+  ),
+  enabled: field("Whether the trigger runs.", { ...BOOLEAN, default: true }),
+  events: requiredField(
+    "What starts the trigger. At least one.",
+    list(ref("event"), { minItems: 1 }),
+  ),
+  actions: field("The actions the trigger runs, in order.", {
+    ...list(ref("action")),
+    default: [],
+  }),
+};
+
+/** What a trigger file does: the kind's `description` in the schema. */
+export const DOC =
+  "Creates or replaces one trigger, identified by its name. Its condition is always empty and its notes are reset.";
+
+/** YAML examples of a trigger file, as the schema shows them. */
+export const EXAMPLES = [
+  `kind: trigger
+name: Reset counter
+enabled: true
+events:
+  - { event: startup, delay: 0 }
+  - { event: interval, seconds: 5 }
+  - { event: variable_changed, variable: fx_counter }
+actions:
+  - { action: set, variable: fx_counter, value: 0 }
+`,
+];
 
 function parseTrigger(fields: Fields): TriggerPlan {
   rejectUnknownFields(fields, FIELDS, "");

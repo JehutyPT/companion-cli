@@ -2,7 +2,7 @@
 
 A small, deterministic CLI for configuring a local [Bitfocus Companion](https://bitfocus.io/companion) 5.1 install from description files: buttons, pages, triggers and custom variables. It exists so agents and humans can build test and preset pages cheaply and repeatably, instead of reverse-engineering Companion's internal JSON each time.
 
-**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
+**Status:** early. The `apply` command, the variable writer, the button writer (single location: encoders, steps and feedbacks), the page writer (a page's name and all of its buttons) and the trigger writer (startup, interval and variable-change events) work against the local install (live-install mode, macOS: Companion is quit, written and started again) or a database copy (`--db`), `apply --dry-run` reports what an apply would change without writing, `apply --json` prints the result or any failure as one JSON document, `validate` checks a description file without writing, `list variables`, `list triggers`, `list connections` and `list pages` read a snapshot copy of the database without stopping Companion, `schema` prints the JSON Schema of description files for editors, and the REST helper's runtime commands work against a running local Companion. Live-install mode is covered by tests with a fake process control and was run against a real local Companion 5.1 on macOS on 2026-10-14 (the SKAARHOJ test page; see [docs/companion-internals.md](docs/companion-internals.md#live-acceptance-run-2026-10-14)); triggers, `check_expression` and pass-through feedbacks and gap-page creation have not yet been checked live. The Python prototype (`reference/python-prototype/`) remains the reference for shapes the CLI does not cover.
 
 ## Why
 
@@ -264,6 +264,27 @@ A read command copies the database and its WAL files to a temporary directory, c
 
 `apply` and the read commands use this envelope. When Companion was quit and starting it again after a failure also fails, the error keeps the original code, and its hint says to start Companion manually and, for `write_failed`, repeats what the original hint said about the database. The REST commands keep their plain stderr errors for now.
 
+### Schema and editor setup
+
+`companion-cli schema` prints the JSON Schema (draft 2020-12) of description files: every kind, field, default and tagged entry, with a description of each. It reads no database or file, and `--json` gives the same output. The schema is generated from the writers' own tables, and a test checks that it accepts exactly the files `apply` accepts, apart from three cross-field rules it cannot express and states in `$comment`s: a `step` feedback must name one of the button's steps, variable names in a file must be distinct, and page locations must be distinct. The schema checks structure only: `apply` and `validate --db` also check `$(custom:…)` references, locations and pages against the database, and pass-through actions and feedbacks are written literally without checks.
+
+The committed copy is [`schema/description.schema.json`](schema/description.schema.json) (`npm run gen:schema` regenerates it). For the YAML language server (VS Code's Red Hat YAML extension and others), start a description file with:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/JehutyPT/companion-cli/main/schema/description.schema.json
+kind: button
+```
+
+or map files to it in VS Code's `settings.json`, by URL or by a path to a checkout:
+
+```json
+{
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/JehutyPT/companion-cli/main/schema/description.schema.json": ["**/companion/*.yaml"]
+  }
+}
+```
+
 ### Runtime commands (REST helper)
 
 These talk to a running local Companion and never touch the database:
@@ -355,7 +376,7 @@ Applying to the local install (live-install mode) quits and restarts Companion o
 
 ## Development
 
-`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
+`npm run build`, `npm test` (Node's test runner on the `.ts` sources), `npm run lint` (ESLint and `tsc`), `npm run format` / `npm run format:check` (Prettier), `npm run gen:support-matrix` (regenerates `docs/support-matrix.md` from `src/support-matrix.ts`), `npm run gen:schema` (regenerates `schema/description.schema.json` after a writer's fields or docs change). Tests build synthetic fixture databases in temp directories (`test/fixtures/companion-db.ts`); never point them at a real install.
 
 ## Consumers
 

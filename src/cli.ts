@@ -31,6 +31,7 @@ import {
   loadEndpoint,
   redact,
 } from "./rest/endpoint.ts";
+import { descriptionSchema } from "./schema.ts";
 import { writers } from "./writers/index.ts";
 
 /**
@@ -134,10 +135,12 @@ const LIST_SYNOPSIS = [
   `list ${LIST_KINDS.join("|")} [<pattern>...] [--db <path-to-db.sqlite>] [--json]`,
   ...LIST_FLAGS.map((flag) => `[--${flag}]`),
 ].join(" ");
+const SCHEMA_SYNOPSIS = "schema [--json]";
 const SYNOPSES = [
   APPLY_SYNOPSIS,
   VALIDATE_SYNOPSIS,
   LIST_SYNOPSIS,
+  SCHEMA_SYNOPSIS,
   ...REST_TABLE.map(synopsis),
 ];
 
@@ -175,6 +178,8 @@ export const HELP = [
   "current value (CURRENT, currentValue), one request at a time. If it cannot,",
   "it still succeeds from the database and adds a note saying why. --no-current",
   "skips this, and so does --db: another database's values are not Companion's.",
+  "schema prints the JSON Schema (draft 2020-12) of description files, for",
+  "editors and validators. It reads no database; --json gives the same output.",
   "The other commands talk to a running local Companion. They read",
   "COMPANION_URL and COMPANION_API_KEY from .env.local in the working",
   "directory or, if there is none, from ~/.config/companion-cli/.env.local",
@@ -228,8 +233,12 @@ export async function run(
   return runApply(argv, io, options);
 }
 
-/** Commands that only read the database, with JSON errors under `--json`. */
-const READ_COMMANDS: ReadonlySet<string> = new Set(["list", "validate"]);
+/** Read-only commands (no database writes), with JSON errors under `--json`. */
+const READ_COMMANDS: ReadonlySet<string> = new Set([
+  "list",
+  "validate",
+  "schema",
+]);
 
 /** The first word that is neither an option nor the value of `--db`. */
 function commandWord(argv: readonly string[]): string | undefined {
@@ -253,6 +262,11 @@ async function runRead(
 ): Promise<number> {
   const json = hasJsonFlag(argv);
   try {
+    if (commandWord(argv) === "schema") {
+      if (parseSchema(argv) === "help") io.stdout(HELP);
+      else io.stdout(JSON.stringify(descriptionSchema(), null, 2));
+      return EXIT_OK;
+    }
     if (commandWord(argv) === "validate") {
       const parsed = parseValidate(argv);
       if (parsed === "help") {
@@ -395,6 +409,34 @@ function parseValidate(argv: readonly string[]): ValidateCommandLine | "help" {
     dbPath: values.db,
     noDb: values["no-db"] ?? false,
   };
+}
+
+/**
+ * Checks a `schema` command line. The schema is JSON either way, so `--json`
+ * changes nothing; `--db` belongs to `--connection` (#22).
+ */
+function parseSchema(argv: readonly string[]): "help" | "schema" {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: [...argv],
+      allowPositionals: true,
+      strict: true,
+      options: {
+        db: { type: "string" },
+        json: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+    });
+  } catch (error) {
+    throw usageFailure(errorMessage(error));
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return "help";
+  if (positionals.length > 1) throw usageFailure("schema takes no arguments");
+  if (values.db !== undefined)
+    throw usageFailure("--db is only valid with --connection");
+  return "schema";
 }
 
 /** A usage error as a CliError, for commands that may print it as JSON. */

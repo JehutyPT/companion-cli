@@ -1,5 +1,14 @@
 import { ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
+  field,
+  type FieldSchema,
+  integer,
+  NON_EMPTY_STRING,
+  ref,
+  requiredField,
+} from "../core/field-schema.ts";
+import {
   describeType,
   expectBoolean,
   expectList,
@@ -14,12 +23,13 @@ import { newId } from "./ids.ts";
 import {
   buildPassthrough,
   customReferences,
-  PASSTHROUGH_FIELDS,
+  PASSTHROUGH_FIELD_SCHEMAS,
   parseColor,
   parsePassthrough,
   parseText,
   prop,
   type TaggedKind,
+  taggedKind,
   type TaggedSpec,
   taggedKinds,
   type VariableReference,
@@ -53,7 +63,9 @@ export interface FeedbackContext {
 /** One kind of feedback. Adding a feedback means adding one entry to FEEDBACK_KINDS. */
 type FeedbackKind<P> = TaggedKind<P, FeedbackContext>;
 
-const defineKind = <P>(kind: FeedbackKind<P>): FeedbackKind<P> => kind;
+const defineKind = <P>(
+  kind: Omit<FeedbackKind<P>, "fields">,
+): FeedbackKind<P> => taggedKind(kind);
 
 function parseStepNumber(
   value: unknown,
@@ -81,7 +93,17 @@ export const FEEDBACK_KINDS = {
    * (1-based). Companion fills in `$(this:location)` as the button itself.
    */
   step: defineKind({
-    fields: ["step"],
+    doc: "Holds while the button is on the given step. Written as Companion's internal `bank_current_step` feedback, with `$(this:location)` as the button.",
+    fieldSchemas: {
+      step: requiredField(
+        "The step, 1-based. It must not exceed the button's number of steps.",
+        {
+          ...integer(1),
+          $comment:
+            "Not expressible here: the step must be at most the number of the button's steps (1 without `steps`).",
+        },
+      ),
+    },
     parse: (fields, path, { stepCount }) => ({
       step: parseStepNumber(
         requireField(fields, "step", path),
@@ -98,7 +120,13 @@ export const FEEDBACK_KINDS = {
   }),
   /** Internal `check_expression`: holds while the expression is true. */
   expression: defineKind({
-    fields: ["expression"],
+    doc: "Holds while a Companion boolean expression is true. Written as Companion's internal `check_expression` feedback.",
+    fieldSchemas: {
+      expression: requiredField(
+        "A Companion expression, for example `$(custom:fx_label) == 'on'`. `$(custom:…)` references in it are checked against the database.",
+        NON_EMPTY_STRING,
+      ),
+    },
     parse: (fields, path) => ({
       expression: expectNonEmptyString(
         requireField(fields, "expression", path),
@@ -115,7 +143,8 @@ export const FEEDBACK_KINDS = {
   }),
   /** Any connection's feedback, written literally. Not checked against the database. */
   passthrough: defineKind({
-    fields: PASSTHROUGH_FIELDS,
+    doc: "Any connection's boolean feedback, written literally: connection, definition and options are not checked against the database.",
+    fieldSchemas: PASSTHROUGH_FIELD_SCHEMAS,
     parse: parsePassthrough,
     references: () => [],
     build: buildPassthrough,
@@ -126,6 +155,20 @@ const FEEDBACKS = taggedKinds<FeedbackContext>("feedback")(FEEDBACK_KINDS);
 
 /** Fields every feedback entry accepts besides its kind's own. */
 export const FEEDBACK_FIELDS = ["style", "invert"] as const;
+
+export const FEEDBACK_FIELD_SCHEMAS: Record<
+  (typeof FEEDBACK_FIELDS)[number],
+  FieldSchema
+> = {
+  style: requiredField(
+    "The style fields to override while the feedback holds.",
+    ref("style"),
+  ),
+  invert: field("Holds while the condition is false instead.", {
+    ...BOOLEAN,
+    default: false,
+  }),
+};
 
 /**
  * The style fields a feedback may override, in stored order: the layer and
@@ -138,6 +181,12 @@ export const STYLE_FIELDS = {
 } as const;
 type StyleField = keyof typeof STYLE_FIELDS;
 const STYLE_FIELD_NAMES = Object.keys(STYLE_FIELDS) as StyleField[];
+
+export const STYLE_FIELD_SCHEMAS: Record<StyleField, FieldSchema> = {
+  background: field("The background color.", ref("color")),
+  textColor: field("The text color.", ref("color")),
+  text: field("The button text.", ref("text")),
+};
 
 /** Given style fields, as stored (colors as integers, text with literal backslash-n). */
 export type StyleOverrides = Partial<Record<StyleField, number | string>>;

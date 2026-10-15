@@ -126,3 +126,39 @@ export const buttonWriter: Writer<ButtonPlan> = {
     `button at page ${page}, row ${row}, column ${column}`,
   write: writeButton,
 };
+/** What a button file does: the kind's `description` in the schema. */
+export const DOC =
+  "Replaces the button at one location of an existing page with a `button-layered` control.";
+
+/** YAML examples of a button file, as the schema shows them. */
+export const EXAMPLES = [
+  `kind: button
+location: { page: 1, row: 0, column: 2 }
+text: |
+  Count
+  $(custom:fx_counter)
+background: "#000080"
+down:
+  - { action: increment, variable: fx_counter }
+feedbacks:
+  - feedback: expression
+    expression: "$(custom:fx_counter) > 10"
+    style: { background: "#FF0000", text: "MANY" }
+`,
+  `kind: button
+location: { page: 1, row: 1, column: 0 }
+text: FX
+background: "#202020"
+steps:
+  - down: [{ action: set, variable: fx_label, value: "on" }]
+  - down: [{ action: set, variable: fx_label, value: "off" }]
+feedbacks:
+  - { feedback: step, step: 2, style: { background: "#00FF00" } }
+  - feedback: passthrough
+    connection: FixtureConnectionAAAA
+    definition: some_feedback_id
+    options: { input: 1 }
+    style: { text: LIVE }
+    invert: true
+`,
+];

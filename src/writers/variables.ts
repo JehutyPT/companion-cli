@@ -2,6 +2,16 @@ import type { DatabaseSync } from "node:sqlite";
 import { parseStoredJson } from "../core/database.ts";
 import { ValidationError } from "../core/errors.ts";
 import {
+  BOOLEAN,
+  field,
+  type FieldSchema,
+  list,
+  ref,
+  requiredField,
+  SCALAR,
+  STRING,
+} from "../core/field-schema.ts";
+import {
   describeType,
   expectBoolean,
   expectList,
@@ -56,6 +66,58 @@ export const VARIABLE_FIELDS = [
   "description",
   "persist",
 ] as const;
+
+export const TOP_LEVEL_FIELD_SCHEMAS: Record<
+  (typeof TOP_LEVEL_FIELDS)[number],
+  FieldSchema
+> = {
+  variables: requiredField(
+    "The custom variables to create or replace. At least one; names must be distinct.",
+    list(ref("variable"), {
+      minItems: 1,
+      $comment: "Not expressible here: names must be distinct.",
+    }),
+  ),
+};
+
+export const VARIABLE_FIELD_SCHEMAS: Record<
+  (typeof VARIABLE_FIELDS)[number],
+  FieldSchema
+> = {
+  name: requiredField(
+    "The variable's name, used as `$(custom:<name>)`.",
+    ref("variableName"),
+  ),
+  default: requiredField(
+    "The default value. With `persist: true` on a variable already persisted, the stored current value is kept instead.",
+    SCALAR,
+  ),
+  description: field("Shown in Companion's variable list.", {
+    ...STRING,
+    default: DEFAULT_DESCRIPTION,
+  }),
+  persist: field("Whether Companion keeps the current value across restarts.", {
+    ...BOOLEAN,
+    default: false,
+  }),
+};
+
+/** What a variables file does: the kind's `description` in the schema. */
+export const DOC =
+  "Creates or replaces custom variables. Variables the file does not name are untouched.";
+
+/** YAML examples of a variables file, as the schema shows them. */
+export const EXAMPLES = [
+  `kind: variables
+variables:
+  - name: sk_presses
+    default: 0
+    description: Presses
+    persist: false
+  - name: fx_label
+    default: "off"
+`,
+];
 
 function parseDefault(value: unknown, field: string): VariableValue {
   if (typeof value === "string" || typeof value === "boolean") return value;
